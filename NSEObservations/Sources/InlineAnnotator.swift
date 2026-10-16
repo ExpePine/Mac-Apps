@@ -119,7 +119,8 @@ struct ShotWorkspace: View {
                 RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor, lineWidth: 3)
             }
         }
-        .frame(height: 620)
+        .aspectRatio(canvasAspect, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: 820)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(alignment: .bottomLeading) {
             Text(editingLabel != nil ? "Type, then press Return or click elsewhere"
@@ -131,6 +132,12 @@ struct ShotWorkspace: View {
                 .padding(10)
                 .allowsHitTesting(false)
         }
+    }
+
+    /// Width / height of the current screenshot (plus the canvas padding), so the chart fills the canvas.
+    private var canvasAspect: CGFloat {
+        guard let s = shot, let size = store.image(s.imageFile)?.size, size.width > 0, size.height > 0 else { return 16 / 9 }
+        return (size.width + 20) / (size.height + 20)
     }
 
     // MARK: Details
