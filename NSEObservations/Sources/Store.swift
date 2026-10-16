@@ -329,6 +329,44 @@ final class Store: ObservableObject {
         save()
     }
 
+    // MARK: News tags
+
+    var newsTagDefs: [NewsTag] { data.newsTagDefs ?? NewsTag.defaults }
+
+    /// Tags on a summary, in the order of your tag list.
+    func tags(for n: NewsItem) -> [NewsTag] {
+        let keys = Set(n.tags ?? [])
+        return newsTagDefs.filter { keys.contains($0.id) }
+    }
+
+    func usageCount(ofTag id: String) -> Int {
+        data.news.reduce(0) { $0 + (($1.tags ?? []).contains(id) ? 1 : 0) }
+    }
+
+    /// A fresh tag with the first colour not yet used.
+    func makeTag(title: String) -> NewsTag {
+        let used = Set(newsTagDefs.map(\.colorName))
+        let color = NewsTag.paletteNames.first { !used.contains($0) } ?? "gray"
+        return NewsTag(id: "tag-\(UUID().uuidString)", title: title, colorName: color, icon: "tag.fill")
+    }
+
+    /// Saves your tag list; tags you removed are also taken off every summary.
+    func saveTagDefs(_ defs: [NewsTag]) {
+        let keep = Set(defs.map(\.id))
+        for i in data.news.indices {
+            if let t = data.news[i].tags {
+                let filtered = t.filter { keep.contains($0) }
+                data.news[i].tags = filtered.isEmpty ? nil : filtered
+            }
+        }
+        data.newsTagDefs = defs
+        save()
+    }
+
+    func addTagDef(_ tag: NewsTag) {
+        saveTagDefs(newsTagDefs + [tag])
+    }
+
     // MARK: Pine scripts
 
     func script(_ id: UUID) -> PineScript? { data.scripts.first { $0.id == id } }

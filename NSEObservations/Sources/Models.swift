@@ -118,42 +118,49 @@ struct NewsItem: Identifiable, Codable, Hashable {
     var source: String = ""
     var text: String = ""
     var createdAt: Date = Date()
-    /// NewsTag raw values.
+    /// Keys of the NewsTag definitions applied to this summary.
     var tags: [String]? = nil
-
-    var newsTags: [NewsTag] { (tags ?? []).compactMap(NewsTag.init(rawValue:)) }
 }
 
-enum NewsTag: String, Codable, CaseIterable, Identifiable {
-    case multibagger, shortRise, patternBreakerGainer, patternBreakerLoser
-    var id: String { rawValue }
+/// A news tag you define (name, colour, icon). The four starter tags are ordinary editable tags.
+struct NewsTag: Identifiable, Codable, Hashable {
+    var id: String
+    var title: String
+    var colorName: String
+    var icon: String
 
-    var title: String {
-        switch self {
-        case .multibagger: return "Multibagger"
-        case .shortRise: return "Short rise"
-        case .patternBreakerGainer: return "Pattern breaker – Gainer"
-        case .patternBreakerLoser: return "Pattern breaker – Loser"
+    var color: Color { Self.color(named: colorName) }
+    var systemImage: String { icon }
+
+    static let paletteNames = ["purple", "teal", "green", "red", "orange", "blue", "pink", "yellow", "indigo", "mint", "brown", "gray"]
+
+    static func color(named name: String) -> Color {
+        switch name {
+        case "purple": return .purple
+        case "teal": return .teal
+        case "green": return .green
+        case "red": return .red
+        case "orange": return .orange
+        case "blue": return .blue
+        case "pink": return .pink
+        case "yellow": return .yellow
+        case "indigo": return .indigo
+        case "mint": return .mint
+        case "brown": return .brown
+        default: return .gray
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .multibagger: return "star.fill"
-        case .shortRise: return "arrow.up.forward"
-        case .patternBreakerGainer: return "chart.line.uptrend.xyaxis"
-        case .patternBreakerLoser: return "chart.line.downtrend.xyaxis"
-        }
-    }
+    static let icons = ["tag.fill", "star.fill", "arrow.up.forward", "arrow.down.forward",
+                        "chart.line.uptrend.xyaxis", "chart.line.downtrend.xyaxis", "bolt.fill", "flame.fill",
+                        "flag.fill", "eye.fill", "exclamationmark.triangle.fill", "sparkles"]
 
-    var color: Color {
-        switch self {
-        case .multibagger: return .purple
-        case .shortRise: return .teal
-        case .patternBreakerGainer: return .green
-        case .patternBreakerLoser: return .red
-        }
-    }
+    static let defaults: [NewsTag] = [
+        NewsTag(id: "multibagger", title: "Multibagger", colorName: "purple", icon: "star.fill"),
+        NewsTag(id: "shortRise", title: "Short rise", colorName: "teal", icon: "arrow.up.forward"),
+        NewsTag(id: "patternBreakerGainer", title: "Pattern breaker – Gainer", colorName: "green", icon: "chart.line.uptrend.xyaxis"),
+        NewsTag(id: "patternBreakerLoser", title: "Pattern breaker – Loser", colorName: "red", icon: "chart.line.downtrend.xyaxis")
+    ]
 }
 
 // MARK: - Pine Script library
@@ -243,6 +250,8 @@ struct AppData: Codable {
     var chat: [ChatMessage] = []
     var news: [NewsItem] = []
     var scripts: [PineScript] = []
+    /// nil until you edit tags; then your own list.
+    var newsTagDefs: [NewsTag]? = nil
 }
 
 extension AppData {
@@ -257,6 +266,7 @@ extension AppData {
         chat = try c.decodeIfPresent([ChatMessage].self, forKey: .chat) ?? []
         news = try c.decodeIfPresent([NewsItem].self, forKey: .news) ?? []
         scripts = try c.decodeIfPresent([PineScript].self, forKey: .scripts) ?? []
+        newsTagDefs = try c.decodeIfPresent([NewsTag].self, forKey: .newsTagDefs)
     }
 }
 

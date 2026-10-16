@@ -76,7 +76,7 @@ enum AIContext {
         let news = store.news(for: nil).filter { $0.symbolID == s.id }.sorted { $0.date < $1.date }
         if !news.isEmpty {
             out += "News summaries the trader saved (oldest first):\n"
-            for n in news { out += newsLine(n) }
+            for n in news { out += newsLine(n, store: store) }
         }
         let obs = store.observations(for: s.id).sorted { $0.date < $1.date }
         out += "Observations (oldest first):\n"
@@ -117,10 +117,11 @@ enum AIContext {
         return (text, included, max(0, total - included))
     }
 
-    static func newsLine(_ n: NewsItem) -> String {
+    static func newsLine(_ n: NewsItem, store: Store) -> String {
         let body = n.text.replacingOccurrences(of: "\n", with: " ")
         let clipped = body.count > 700 ? String(body.prefix(700)) + "…" : body
-        let tags = n.newsTags.isEmpty ? "" : " {tags: \(n.newsTags.map(\.title).joined(separator: ", "))}"
+        let tagList = store.tags(for: n)
+        let tags = tagList.isEmpty ? "" : " {tags: \(tagList.map(\.title).joined(separator: ", "))}"
         return "- [\(Fmt.isoDay.string(from: n.date))]\(n.source.isEmpty ? "" : " (\(n.source))")\(tags) \(n.title): \(clipped)\n"
     }
 
@@ -131,7 +132,7 @@ enum AIContext {
         if !market.isEmpty {
             out += "## Market / general news summaries (newest first)\n"
             for n in market {
-                let line = newsLine(n)
+                let line = newsLine(n, store: store)
                 if out.count + line.count > budget { break }
                 out += line
             }

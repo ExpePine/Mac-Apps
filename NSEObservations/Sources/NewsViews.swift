@@ -14,7 +14,10 @@ struct NewsEditor: View {
     @State private var stockQuery = ""
     @State private var chosenTicker: String?
     @State private var chosenName = ""
-    @State private var tags: Set<NewsTag> = []
+    @State private var tags: Set<String> = []
+    @State private var newTagTitle = ""
+    @State private var addingTag = false
+    @State private var managingTags = false
     @State private var date = Date()
     @State private var title = ""
     @State private var source = ""
@@ -79,12 +82,18 @@ struct NewsEditor: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Tags").font(.callout).foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    ForEach(NewsTag.allCases) { tag in
-                        let on = tags.contains(tag)
+                HStack {
+                    Text("Tags").font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Edit Tags…") { managingTags = true }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+                FlowLayout(spacing: 8) {
+                    ForEach(store.newsTagDefs) { tag in
+                        let on = tags.contains(tag.id)
                         Button {
-                            if on { tags.remove(tag) } else { tags.insert(tag) }
+                            if on { tags.remove(tag.id) } else { tags.insert(tag.id) }
                         } label: {
                             Label(tag.title, systemImage: tag.systemImage)
                                 .font(.callout.weight(on ? .semibold : .regular))
@@ -95,7 +104,26 @@ struct NewsEditor: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if addingTag {
+                        TextField("New tag", text: $newTagTitle)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 160)
+                            .onSubmit { createTag() }
+                    } else {
+                        Button { addingTag = true } label: {
+                            Label("New Tag", systemImage: "plus")
+                                .font(.callout)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .overlay(Capsule().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+            }
+            .sheet(isPresented: $managingTags) {
+                TagManagerSheet().environmentObject(store)
             }
 
             Form {
@@ -147,9 +175,24 @@ struct NewsEditor: View {
             }
             if let e = existing {
                 date = e.date; title = e.title; source = e.source; text = e.text
-                tags = Set(e.newsTags)
+                tags = Set(e.tags ?? [])
             }
         }
+    }
+
+    private func createTag() {
+        let t = newTagTitle.trimmingCharacters(in: .whitespaces)
+        if !t.isEmpty {
+            if let existing = store.newsTagDefs.first(where: { $0.title.caseInsensitiveCompare(t) == .orderedSame }) {
+                tags.insert(existing.id)
+            } else {
+                let tag = store.makeTag(title: t)
+                store.addTagDef(tag)
+                tags.insert(tag.id)
+            }
+        }
+        newTagTitle = ""
+        addingTag = false
     }
 
     private func pick(_ item: ListedSymbol) {
@@ -176,7 +219,8 @@ struct NewsEditor: View {
         n.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         n.source = source.trimmingCharacters(in: .whitespacesAndNewlines)
         n.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        n.tags = tags.isEmpty ? nil : NewsTag.allCases.filter { tags.contains($0) }.map(\.rawValue)
+        let ordered = store.newsTagDefs.map(\.id).filter { tags.contains($0) }
+        n.tags = ordered.isEmpty ? nil : ordered
         if n.title.isEmpty {
             // Use the first line of the summary as a headline.
             n.title = String(n.text.split(separator: "\n").first?.prefix(90) ?? "News")
@@ -254,7 +298,8 @@ struct NewsCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                if !item.newsTags.isEmpty { NewsTagChips(tags: item.newsTags) }
+                let itemTags = store.tags(for: item)
+                if !itemTags.isEmpty { NewsTagChips(tags: itemTags) }
 
                 Text(item.text)
                     .textSelection(.enabled)
@@ -287,7 +332,8 @@ struct NewsListView: View {
     private enum Filter: Hashable { case all, market, symbol(UUID) }
     @State private var filter: Filter = .all
     /// nil = all tags.
-    @State private var tagFilter: NewsTag?
+    @State private var tagFilter: String?
+    @State private var managingTags = false
     @State private var editing: NewsItem?
     @State private var adding = false
     @State private var series: [String: QuoteSeries] = [:]
@@ -300,7 +346,7 @@ struct NewsListView: View {
             case .symbol(let id): return $0.symbolID == id
             }
         }
-        .filter { tagFilter == nil || $0.newsTags.contains(tagFilter!) }
+        .filter { n in tagFilter.map { (n.tags ?? []).contains($0) } ?? true }
     }
 
     private var hasMarketNews: Bool { store.data.news.contains { $0.symbolID == nil } }
@@ -310,12 +356,12 @@ struct NewsListView: View {
         let tag: NewsTag
         let count: Int
         let avg: Double?
-        var id: String { tag.rawValue }
+        var id: String { tag.id }
     }
 
     private var tagStats: [TagStat] {
-        NewsTag.allCases.map { tag in
-            let tagged = store.data.news.filter { $0.newsTags.contains(tag) }
+        store.newsTagDefs.map { tag in
+            let tagged = store.data.news.filter { ($0.tags ?? []).contains(tag.id) }
             let moves = tagged.compactMap { outcome(for: $0)?.sinceThen }
             return TagStat(tag: tag, count: tagged.count, avg: moves.isEmpty ? nil : moves.reduce(0, +) / Double(moves.count))
         }
@@ -345,11 +391,11 @@ struct NewsListView: View {
                     Text("Stock news summaries you collect from AI tools and sites, tagged and dated — and how each stock moved since.")
                         .foregroundStyle(.secondary)
                 }
-                if !store.data.news.isEmpty {
-                    HStack(spacing: 10) {
+                if !store.data.news.isEmpty && !store.newsTagDefs.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 10)], spacing: 10) {
                         ForEach(tagStats) { st in
                             Button {
-                                tagFilter = tagFilter == st.tag ? nil : st.tag
+                                tagFilter = tagFilter == st.tag.id ? nil : st.tag.id
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Label(st.tag.title, systemImage: st.tag.systemImage)
@@ -365,13 +411,13 @@ struct NewsListView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(tagFilter == st.tag ? st.tag.color.opacity(0.14) : Color(nsColor: .controlBackgroundColor),
+                                .background(tagFilter == st.tag.id ? st.tag.color.opacity(0.14) : Color(nsColor: .controlBackgroundColor),
                                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(tagFilter == st.tag ? st.tag.color : Color.primary.opacity(0.06)))
+                                    .stroke(tagFilter == st.tag.id ? st.tag.color : Color.primary.opacity(0.06)))
                             }
                             .buttonStyle(.plain)
-                            .help(tagFilter == st.tag ? "Show all tags" : "Show only \(st.tag.title)")
+                            .help(tagFilter == st.tag.id ? "Show all tags" : "Show only \(st.tag.title)")
                         }
                     }
                 }
@@ -387,12 +433,13 @@ struct NewsListView: View {
                     }
                     .frame(width: 240)
                     Picker("Tag", selection: $tagFilter) {
-                        Text("All tags").tag(NewsTag?.none)
+                        Text("All tags").tag(String?.none)
                         Divider()
-                        ForEach(NewsTag.allCases) { t in Text(t.title).tag(Optional(t)) }
+                        ForEach(store.newsTagDefs) { t in Text(t.title).tag(Optional(t.id)) }
                     }
                     .frame(width: 260)
                     Spacer()
+                    Button("Manage Tags…") { managingTags = true }
                     Button { adding = true } label: { Label("Add News Summary", systemImage: "plus") }
                 }
 
@@ -430,6 +477,9 @@ struct NewsListView: View {
         .sheet(item: $editing) { n in
             NewsEditor(existing: n).environmentObject(store).environmentObject(directory)
         }
+        .sheet(isPresented: $managingTags) {
+            TagManagerSheet().environmentObject(store)
+        }
         .task {
             let syms = store.symbols.filter { s in store.data.news.contains { $0.symbolID == s.id } }
             series = await loadSeries(for: syms, store: store)
@@ -439,5 +489,141 @@ struct NewsListView: View {
     private func outcome(for n: NewsItem) -> ObservationOutcome? {
         guard let id = n.symbolID, let s = store.symbol(id), let c = series[s.yahooSymbol]?.candles else { return nil }
         return ObservationOutcome.compute(for: n.date, candles: c)
+    }
+}
+
+
+// MARK: - Tag manager
+
+struct TagManagerSheet: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    @State private var defs: [NewsTag] = []
+    @State private var pendingDelete: NewsTag?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("News Tags").font(.title2.weight(.semibold))
+            Text("Rename, recolour, pick an icon, drag to reorder, or delete. Changes apply when you click Save.")
+                .font(.callout).foregroundStyle(.secondary)
+
+            List {
+                ForEach($defs) { $tag in
+                    HStack(spacing: 10) {
+                        Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                        Menu {
+                            ForEach(NewsTag.icons, id: \.self) { icon in
+                                Button { tag.icon = icon } label: { Label(icon, systemImage: icon) }
+                            }
+                        } label: {
+                            Image(systemName: tag.icon).foregroundStyle(tag.color)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Icon")
+
+                        TextField("Tag name", text: $tag.title)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 160)
+
+                        HStack(spacing: 4) {
+                            ForEach(NewsTag.paletteNames, id: \.self) { name in
+                                Circle()
+                                    .fill(NewsTag.color(named: name))
+                                    .frame(width: 14, height: 14)
+                                    .overlay(Circle().stroke(Color.primary.opacity(tag.colorName == name ? 0.9 : 0), lineWidth: 2).padding(-3))
+                                    .onTapGesture { tag.colorName = name }
+                                    .help(name.capitalized)
+                            }
+                        }
+
+                        Text("\(store.usageCount(ofTag: tag.id))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, alignment: .trailing)
+                            .help("Summaries with this tag")
+
+                        Button(role: .destructive) {
+                            if store.usageCount(ofTag: tag.id) > 0 { pendingDelete = tag } else { defs.removeAll { $0.id == tag.id } }
+                        } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.vertical, 3)
+                }
+                .onMove { from, to in defs.move(fromOffsets: from, toOffset: to) }
+            }
+            .listStyle(.inset)
+            .frame(minHeight: 260)
+
+            HStack {
+                Button {
+                    var t = store.makeTag(title: "New tag")
+                    let used = Set(defs.map(\.colorName))
+                    t.colorName = NewsTag.paletteNames.first { !used.contains($0) } ?? "gray"
+                    defs.append(t)
+                } label: { Label("Add Tag", systemImage: "plus") }
+                Button("Restore Starter Tags") {
+                    for d in NewsTag.defaults where !defs.contains(where: { $0.id == d.id }) { defs.append(d) }
+                }
+                .help("Adds back any of the four starter tags you deleted")
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    let cleaned = defs.map { d -> NewsTag in
+                        var c = d
+                        c.title = d.title.trimmingCharacters(in: .whitespaces)
+                        if c.title.isEmpty { c.title = "Untitled" }
+                        return c
+                    }
+                    store.saveTagDefs(cleaned)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 680, height: 480)
+        .onAppear { defs = store.newsTagDefs }
+        .confirmationDialog("Delete “\(pendingDelete?.title ?? "")”?",
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { t in
+            Button("Delete Tag", role: .destructive) { defs.removeAll { $0.id == t.id } }
+        } message: { t in
+            Text("It will be removed from \(store.usageCount(ofTag: t.id)) news summar\(store.usageCount(ofTag: t.id) == 1 ? "y" : "ies") when you save. The summaries themselves are kept.")
+        }
+    }
+}
+
+/// Wraps its children onto new lines when they don't fit.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0, width: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x > 0 && x + s.width > maxW {
+                x = 0; y += rowH + spacing; rowH = 0
+            }
+            x += s.width + spacing
+            rowH = max(rowH, s.height)
+            width = max(width, x - spacing)
+        }
+        return CGSize(width: width, height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowH: CGFloat = 0
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + s.width > bounds.maxX {
+                x = bounds.minX; y += rowH + spacing; rowH = 0
+            }
+            v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+            x += s.width + spacing
+            rowH = max(rowH, s.height)
+        }
     }
 }

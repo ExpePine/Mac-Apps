@@ -462,6 +462,7 @@ struct TimelineView: View {
 }
 
 private struct TimelineRow: View {
+    @EnvironmentObject private var store: Store
     let entry: TimelineEntry
     let horizon: OutcomeHorizon
     let showDay: Bool
@@ -579,7 +580,7 @@ private struct TimelineRow: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.indigo.opacity(0.12), in: Capsule())
-            NewsTagChips(tags: n.newsTags)
+            NewsTagChips(tags: store.tags(for: n))
         case .script(_, let v):
             Label("Pine v\(v.number)", systemImage: "chevron.left.forwardslash.chevron.right")
                 .font(.caption2.weight(.semibold))
