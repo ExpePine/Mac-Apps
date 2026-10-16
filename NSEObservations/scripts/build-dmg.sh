@@ -32,18 +32,25 @@ xcodebuild \
     done
     exit 1
   }
-grep -E "warning:" build.log | sort -u | head -40 || true
+# Surface compiler warnings from our own sources as annotations (visible in the Actions summary)
+grep -E "/Sources/.*warning:" build.log | sort -u | head -30 | while IFS= read -r line; do
+  echo "::warning::${line##*/Sources/}"
+done || true
 tail -n 5 build.log
 
 APP="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 [ -d "$APP" ] || { echo "Build failed: $APP not found"; exit 1; }
 
 echo "==> Architectures"
-lipo -archs "$APP/Contents/MacOS/$APP_NAME"
+ARCHS_FOUND="$(lipo -archs "$APP/Contents/MacOS/$APP_NAME")"
+echo "$ARCHS_FOUND"
+MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" 2>/dev/null || echo '?')"
+ICON="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Contents/Info.plist" 2>/dev/null || echo 'none')"
 
 echo "==> Checking signature"
 codesign --verify --verbose "$APP"
-codesign -d --entitlements - "$APP" 2>/dev/null || true
+ENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -oE 'com\.apple\.security\.[a-z.-]+' | tr '\n' ' ' || true)"
+echo "::notice title=App bundle::archs: ${ARCHS_FOUND} | min macOS: ${MIN_OS} | icon: ${ICON} | entitlements: ${ENTS}"
 
 echo "==> Creating DMG"
 STAGE="$(mktemp -d)"
