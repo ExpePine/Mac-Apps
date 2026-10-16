@@ -274,7 +274,7 @@ struct TimelineView: View {
                 ForEach(TimelineGrouping.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            .frame(width: 210)
+            .fixedSize()
 
             Picker("Judge", selection: $horizon) {
                 ForEach(OutcomeHorizon.allCases) { Text($0.rawValue).tag($0) }

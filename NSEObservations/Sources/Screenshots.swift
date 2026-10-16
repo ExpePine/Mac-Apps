@@ -55,6 +55,7 @@ enum DemoData {
         var featured: UUID
     }
 
+    @MainActor
     static func make() -> DemoSet {
         let cal = Calendar.ist
         func daysAgo(_ n: Int, _ hour: Int, _ minute: Int) -> Date {
@@ -207,17 +208,46 @@ enum ScreenshotRunner {
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         window.contentView = host
         window.setFrame(NSRect(origin: NSPoint(x: 40, y: 40), size: size), display: true)
-        window.orderFrontRegardless()
-        try? await Task.sleep(nanoseconds: 2_500_000_000)   // let .task loaders and layout finish
+        window.title = "NSE Observations"
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        try? await Task.sleep(nanoseconds: 3_000_000_000)   // let .task loaders and layout finish
         host.layoutSubtreeIfNeeded()
         host.display()
-        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+
+        let url = dir.appendingPathComponent("\(name).png")
+        // Preferred: the composited on-screen window (draws sidebar materials and vibrancy correctly).
+        if let image = windowImage(window.windowNumber) {
+            let rep = NSBitmapImageRep(cgImage: image)
+            if let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: url)
+                print("SHOT \(name) window-composite \(image.width)x\(image.height)")
+            }
+        } else if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+            // Fallback: draw the view hierarchy offscreen.
             host.cacheDisplay(in: host.bounds, to: rep)
             if let png = rep.representation(using: .png, properties: [:]) {
-                try? png.write(to: dir.appendingPathComponent("\(name).png"))
+                try? png.write(to: url)
+                print("SHOT \(name) cacheDisplay")
             }
         }
         window.orderOut(nil)
         window.close()
+    }
+
+    /// CGWindowListCreateImage is hidden from the newest SDKs, so look it up at runtime.
+    /// Capturing the app's own window doesn't need Screen Recording permission.
+    private static func windowImage(_ windowNumber: Int) -> CGImage? {
+        typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW),
+              let sym = dlsym(handle, "CGWindowListCreateImage") else { return nil }
+        let fn = unsafeBitCast(sym, to: Fn.self)
+        let optionIncludingWindow: UInt32 = 1 << 3
+        let boundsIgnoreFraming: UInt32 = 1 << 0
+        let bestResolution: UInt32 = 1 << 3
+        guard let image = fn(.null, optionIncludingWindow, UInt32(windowNumber),
+                             boundsIgnoreFraming | bestResolution)?.takeRetainedValue(),
+              image.width > 50, image.height > 50 else { return nil }
+        return image
     }
 }

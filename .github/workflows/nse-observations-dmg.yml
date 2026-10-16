@@ -63,7 +63,7 @@ jobs:
           PID=$!
           for i in $(seq 1 120); do kill -0 $PID 2>/dev/null || break; sleep 1; done
           kill $PID 2>/dev/null || true
-          grep SCREENSHOTS_DIR shots.log || true
+          grep -E "SCREENSHOTS_DIR|SHOT " shots.log | while read -r l; do echo "::notice title=Capture::$l"; done || true
           SRC="$HOME/Library/Containers/com.raj.NSEObservations/Data/Library/Application Support/NSEObservations/screens"
           ls -la "$SRC" || true
           mkdir -p docs/screenshots
