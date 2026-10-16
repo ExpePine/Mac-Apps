@@ -39,4 +39,14 @@ jobs:
           gh release create "$TAG" dist/ActivityLogger.dmg \
             --title "Activity Logger (build ${{ github.run_number }})" \
             --notes "Download ActivityLogger.dmg below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch." \
-            --latest
+            --latest=false
+
+      - name: Update stable "activity-logger-latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete activity-logger-latest --yes --cleanup-tag || true
+          gh release create activity-logger-latest dist/ActivityLogger.dmg \
+            --title "Activity Logger (latest)" \
+            --notes "Always the newest Activity Logger build (currently build ${{ github.run_number }})." \
+            --latest=false
