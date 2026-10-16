@@ -113,6 +113,7 @@ struct Plan: Identifiable, Codable, Equatable {
     var blockers: [Blocker] = []
     var outcomeNote: String?      // why it worked / why it couldn't be completed
     var details: String?          // the user's own description of the goal
+    var dump: [DumpNote]?         // timed brain-dump notes
     var clarifications: [Clarification]? = nil
     var brief: GoalBrief?
     var framing: ProblemFraming?
@@ -149,6 +150,39 @@ struct Clarification: Identifiable, Codable, Equatable {
     var answer = ""
     var answered = false
     var round = 1
+}
+
+/// One answer from the timed brain-dump.
+struct DumpNote: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var prompt: String
+    var text = ""
+}
+
+enum BrainDump {
+    /// (prompt, hint)
+    static let prompts: [(String, String)] = [
+        ("What is it?", "Describe the task in your own words, as if to a colleague."),
+        ("Why now?", "Why does it matter, and what triggered it?"),
+        ("What does done look like?", "How will you know it's finished? What will you have in hand?"),
+        ("What already exists?", "Data, code, tools, notes, people you can use."),
+        ("What's hard about it?", "Your problems with this task — what feels confusing, heavy, risky or boring."),
+        ("What have you tried?", "Where you got stuck before, and why you think it happened."),
+        ("Constraints", "Time, money, tools, deadlines, dependencies on others."),
+        ("Anything else?", "Whatever else is on your mind about it."),
+    ]
+
+    static func hint(for prompt: String) -> String {
+        prompts.first { $0.0 == prompt }?.1 ?? ""
+    }
+
+    static func fresh() -> [DumpNote] { prompts.map { DumpNote(prompt: $0.0) } }
+
+    static func compile(_ notes: [DumpNote]) -> String {
+        notes.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "\($0.prompt)\n\($0.text.trimmingCharacters(in: .whitespacesAndNewlines))" }
+            .joined(separator: "\n\n")
+    }
 }
 
 /// The agreed description of the goal, written from the interview.
@@ -326,7 +360,9 @@ extension CoachService {
         \(goalsContext())
 
         Goal title: "\(goal)"
-        My description: \(details.isEmpty ? "(none yet)" : details)
+        My description and brain-dump notes (main source — never ask what these already answer; \
+        dig into the problems and difficulties I mention):
+        \(details.isEmpty ? "(none yet)" : details)
 
         Answers so far:
         \(answered.isEmpty ? "(none)" : Self.qaText(answered))

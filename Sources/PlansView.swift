@@ -221,6 +221,8 @@ struct PlanDraftView: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var framing: ProblemFraming?
+    @State private var dump: [DumpNote] = []
+    @State private var freeText = false
     @State private var budget = 0          // minutes available today (0 = not set)
 
     private var picked: [DraftStep] { drafts.filter { $0.included && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty } }
@@ -228,6 +230,13 @@ struct PlanDraftView: View {
     private var pending: [Clarification] { qa.filter { !$0.answered } }
     private var answered: [Clarification] { qa.filter { $0.answered } }
     private var goalText: String { goal.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Brain-dump notes + free description, as the coach sees them.
+    private var fullDetails: String {
+        [BrainDump.compile(dump), details.trimmingCharacters(in: .whitespacesAndNewlines)]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
 
     var body: some View {
         ScrollView {
@@ -252,6 +261,7 @@ struct PlanDraftView: View {
         .onChange(of: goal) { _ in persist() }
         .onChange(of: details) { _ in persist() }
         .onChange(of: budget) { _ in persist() }
+        .onChange(of: dump) { _ in persist() }
     }
 
     // MARK: Title + guide
@@ -318,7 +328,27 @@ struct PlanDraftView: View {
 
     // MARK: Stage 1 — describe
 
-    private var describeStage: some View {
+    @ViewBuilder private var describeStage: some View {
+        if !freeText {
+            BrainDumpView(notes: $dump, localeID: app.settings.speechLocaleID, busy: loading,
+                          onDone: { Task { await startInterview() } },
+                          onFreeText: { freeText = true })
+            HStack {
+                if !drafts.isEmpty {
+                    Button("Back to steps") { stage = .steps }.buttonStyle(.borderless)
+                }
+                Button("Skip questions — go straight to steps") { Task { await skipToSteps() } }
+                    .buttonStyle(.borderless)
+                    .disabled(goalText.isEmpty || loading)
+                Spacer()
+                if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
+            }
+        } else {
+            freeTextCard
+        }
+    }
+
+    private var freeTextCard: some View {
         Card(title: "Tell the coach about this goal", symbol: "text.bubble") {
             Text("A few sentences is enough: what it is, why it matters, what \"done\" looks like, and what already exists.")
                 .foregroundStyle(.secondary)
@@ -329,6 +359,7 @@ struct PlanDraftView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(4...10)
             HStack {
+                Button("Use the timed brain-dump") { freeText = false }.buttonStyle(.borderless)
                 if !drafts.isEmpty {
                     Button("Back to steps") { stage = .steps }.buttonStyle(.borderless)
                 }
@@ -337,7 +368,7 @@ struct PlanDraftView: View {
                     .disabled(goalText.isEmpty || loading)
                 Spacer()
                 if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
-                Button { Task { await askQuestions() } } label: {
+                Button { Task { await startInterview() } } label: {
                     Label("Ask me questions", systemImage: "questionmark.bubble")
                 }
                 .buttonStyle(.borderedProminent)
@@ -362,6 +393,10 @@ struct PlanDraftView: View {
                 }
             }
             Card(title: round == 1 ? "A few questions first" : "Just a couple more", symbol: "questionmark.bubble") {
+                if pending.isEmpty {
+                    Text("That's everything for now — next, the heart of the problem.")
+                        .foregroundStyle(.secondary)
+                }
                 ForEach($qa) { $q in
                     if !q.answered { QuestionCard(item: $q) }
                 }
@@ -683,6 +718,8 @@ struct PlanDraftView: View {
         if let b = plan.brief { brief = b; hasBrief = true }
         framing = plan.framing
         budget = plan.budgetMinutes ?? 0
+        dump = plan.dump ?? []
+        freeText = dump.isEmpty && !details.isEmpty
         drafts = plan.steps.map {
             DraftStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
                       included: $0.status != .skipped, area: $0.area, minutesLow: $0.minutesLow,
@@ -706,6 +743,7 @@ struct PlanDraftView: View {
             plan.clarifications = qa.isEmpty ? nil : qa
             plan.brief = hasBrief ? brief : nil
             plan.framing = framing
+            plan.dump = dump.isEmpty ? nil : dump
             plan.budgetMinutes = budget > 0 ? budget : nil
             plan.steps = drafts.map {
                 PlanStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
@@ -718,6 +756,21 @@ struct PlanDraftView: View {
     private func busy(_ text: String) { loading = true; loadingText = text; error = nil }
 
     // MARK: Interview actions
+
+    /// New description → fresh interview, framing and brief.
+    private func startInterview() async {
+        guard !goalText.isEmpty else {
+            error = "Give the plan a goal title first."
+            return
+        }
+        qa = []
+        framing = nil
+        hasBrief = false
+        brief = GoalBrief()
+        round = 1
+        persist()
+        await askQuestions()
+    }
 
     private func askQuestions() async {
         busy("Thinking of questions…")
@@ -733,7 +786,7 @@ struct PlanDraftView: View {
 
     private func fetchQuestions() async {
         do {
-            let result = try await app.coach.clarifyingQuestions(goal: goalText, details: details,
+            let result = try await app.coach.clarifyingQuestions(goal: goalText, details: fullDetails,
                                                                  answered: answered, round: round, plans: plans)
             if result.ready || result.questions.isEmpty {
                 loading = false
@@ -741,7 +794,14 @@ struct PlanDraftView: View {
                 return
             }
             qa.removeAll { !$0.answered }
-            qa += result.questions
+            let asked = Set(qa.map { $0.question.lowercased().filter(\.isLetter) })
+            let fresh = result.questions.filter { !asked.contains($0.question.lowercased().filter(\.isLetter)) }
+            if fresh.isEmpty {
+                loading = false
+                await makeFraming()
+                return
+            }
+            qa += fresh
             stage = .questions
             persist()
         } catch {
@@ -751,6 +811,10 @@ struct PlanDraftView: View {
     }
 
     private func submitAnswers() async {
+        if pending.isEmpty {
+            await makeFraming()
+            return
+        }
         for i in qa.indices where !qa[i].answered {
             qa[i].answer = qa[i].answer.trimmingCharacters(in: .whitespacesAndNewlines)
             qa[i].answered = true
@@ -769,7 +833,7 @@ struct PlanDraftView: View {
     private func makeFraming() async {
         busy("Looking for the heart of the problem…")
         do {
-            framing = try await app.coach.frameProblem(goal: goalText, details: details, answered: answered,
+            framing = try await app.coach.frameProblem(goal: goalText, details: fullDetails, answered: answered,
                                                        previous: framing, plans: plans)
             stage = .framing
             persist()
@@ -782,7 +846,7 @@ struct PlanDraftView: View {
     private func makeBrief() async {
         busy("Writing the goal brief…")
         do {
-            brief = try await app.coach.writeBrief(goal: goalText, details: details, answered: answered, framing: framing)
+            brief = try await app.coach.writeBrief(goal: goalText, details: fullDetails, answered: answered, framing: framing)
             hasBrief = true
             stage = .brief
             persist()
@@ -813,7 +877,7 @@ struct PlanDraftView: View {
             let mine = drafts.filter { $0.source == .user }
             let steps = try await app.coach.suggestPlanSteps(goal: goalText, brief: hasBrief ? brief : nil,
                                                              framing: framing,
-                                                             details: details, answered: answered,
+                                                             details: fullDetails, answered: answered,
                                                              existing: mine.map(\.text), plans: plans)
             // Replace previous AI suggestions, keep the user's own steps after them.
             drafts = steps.map {
