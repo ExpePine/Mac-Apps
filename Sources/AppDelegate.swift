@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let goals: GoalsStore
     let stuckStore: StuckStore
     let coach: CoachService
+    let archive: ReportArchive
     let nav = Navigator()
 
     /// The check-in that is waiting for an answer (if any).
@@ -38,7 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         goals = GoalsStore(directory: store.directory)
         stuckStore = StuckStore(directory: store.directory)
         coach = CoachService(settings: settings, store: store, goals: goals, usage: usage, stuck: stuckStore)
-        reports = ReportService(settings: settings, store: store, usage: usage, goals: goals)
+        archive = ReportArchive(baseDirectory: store.directory, store: store, usage: usage, goals: goals)
+        reports = ReportService(settings: settings, store: store, usage: usage, goals: goals, archive: archive)
         super.init()
 
         scheduler.onPrompt = { [weak self] start, end in

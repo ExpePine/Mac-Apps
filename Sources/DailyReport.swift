@@ -197,6 +197,7 @@ final class ReportService: ObservableObject {
     private let store: EntryStore
     private let usage: UsageStore
     private let goals: GoalsStore
+    let archive: ReportArchive
     private let defaults = UserDefaults.standard
     private var loop: Task<Void, Never>?
     private var nextRetry: Date?
@@ -206,11 +207,12 @@ final class ReportService: ObservableObject {
         static let lastStatus = "reportLastStatus"
     }
 
-    init(settings: SettingsStore, store: EntryStore, usage: UsageStore, goals: GoalsStore) {
+    init(settings: SettingsStore, store: EntryStore, usage: UsageStore, goals: GoalsStore, archive: ReportArchive) {
         self.settings = settings
         self.store = store
         self.usage = usage
         self.goals = goals
+        self.archive = archive
         lastStatus = UserDefaults.standard.string(forKey: Keys.lastStatus) ?? "No summary sent yet."
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -224,6 +226,7 @@ final class ReportService: ObservableObject {
     /// Sends once per day at/after the chosen time. If the Mac was asleep at
     /// that time, it sends as soon as it wakes. Failures retry every 15 min.
     private func tick() async {
+        await archiveYesterdayIfNeeded()
         guard settings.reportEnabled, !isSending else { return }
         let cal = Calendar.current
         let now = Date()
@@ -241,6 +244,38 @@ final class ReportService: ObservableObject {
         } else {
             nextRetry = now.addingTimeInterval(15 * 60)
             notifyFailure()
+        }
+    }
+
+    /// Builds the recap for one day (the same data the email and the Reports view use).
+    func buildRecap(for day: Date, includeUsage: Bool = true) async -> DailyRecap {
+        let dayText = day.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        let entries = store.entries(on: day).sorted { $0.periodStart < $1.periodStart }
+        let dayUsage = includeUsage ? usage.usage(for: day) : nil
+        let hasUsage = (dayUsage?.activeSeconds ?? 0) >= 60
+        return await RecapBuilder.build(dayText: dayText, entries: entries,
+                                        usage: hasUsage ? dayUsage : nil,
+                                        goals: goals.goals(on: day),
+                                        apiKey: Keychain.get(Keychain.groqAPIKey),
+                                        model: settings.groqModel)
+    }
+
+    /// Builds and stores a day's report (Reports view "Generate").
+    func generateReport(for day: Date) async {
+        archive.save(await buildRecap(for: day), for: day)
+    }
+
+    /// Once a day, store yesterday's report even if the email is turned off.
+    private func archiveYesterdayIfNeeded() async {
+        let cal = Calendar.current
+        let now = Date()
+        guard cal.component(.hour, from: now) >= 5 else { return }
+        let key = Self.dayKey(now)
+        guard defaults.string(forKey: "reportArchivedDay") != key else { return }
+        let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now)) ?? now
+        defaults.set(key, forKey: "reportArchivedDay")
+        if !archive.hasRecord(yesterday) && archive.hasActivity(yesterday) {
+            await generateReport(for: yesterday)
         }
     }
 
@@ -275,11 +310,8 @@ final class ReportService: ObservableObject {
             return true
         }
 
-        let recap = await RecapBuilder.build(dayText: dayText, entries: entries,
-                                             usage: hasUsage ? dayUsage : nil,
-                                             goals: goals.goals(on: day),
-                                             apiKey: Keychain.get(Keychain.groqAPIKey),
-                                             model: settings.groqModel)
+        let recap = await buildRecap(for: day, includeUsage: settings.includeUsageInEmail)
+        archive.save(recap, for: day)
         let body = RecapRenderer.text(recap)
         let html = RecapRenderer.html(recap)
         let shortDay = day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))

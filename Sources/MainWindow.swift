@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, Hashable, CaseIterable, Identifiable {
-    case today, goals, insights, stuck, history, settings
+    case today, goals, insights, stuck, reports, history, settings
     var id: String { rawValue }
 
     var title: String {
@@ -11,6 +11,7 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
         case .goals: return "Goals"
         case .insights: return "Insights"
         case .stuck: return "Stuck"
+        case .reports: return "Reports"
         case .history: return "History"
         case .settings: return "Settings"
         }
@@ -22,6 +23,7 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
         case .goals: return "target"
         case .insights: return "chart.line.uptrend.xyaxis"
         case .stuck: return "lifepreserver"
+        case .reports: return "doc.richtext"
         case .history: return "clock.arrow.circlepath"
         case .settings: return "gearshape"
         }
@@ -46,7 +48,7 @@ struct MainWindowView: View {
                     }
                 }
                 Section("Records") {
-                    ForEach([MainSection.history, .settings]) { s in
+                    ForEach([MainSection.reports, .history, .settings]) { s in
                         Label(s.title, systemImage: s.icon).tag(s)
                     }
                 }
@@ -70,6 +72,8 @@ struct MainWindowView: View {
             InsightsView(coach: app.coach, store: app.store)
         case .stuck:
             StuckView(coach: app.coach, stuckStore: app.stuckStore)
+        case .reports:
+            ReportsView(reports: app.reports, archive: app.archive)
         case .history:
             HistoryView(store: app.store, settings: app.settings)
         case .settings:

@@ -2,8 +2,8 @@ import Foundation
 
 /// Builds the daily recap: Groq only labels entries (category, short title,
 /// success); all minutes, ordering and layout are computed here.
-struct DailyRecap {
-    struct Block {
+struct DailyRecap: Codable {
+    struct Block: Codable {
         var start: Date
         var end: Date
         var category: String
@@ -13,7 +13,7 @@ struct DailyRecap {
 
     var dayText: String
     var headline: String
-    var categories: [(name: String, minutes: Int)] = []
+    var categories: [CategoryMinutes] = []
     var timeline: [Block] = []
     var solved: [String] = []
     var next: [String] = []
@@ -24,7 +24,27 @@ struct DailyRecap {
     var goals: [Goal] = []
     var onPlanPercent: Int?     // share of checked check-ins that served a goal
 
-    var successCount: Int { timeline.filter { $0.success == true }.count }
+    // Period reports (week / month / year)
+    var kind = "Daily"                   // "Daily", "Weekly", "Monthly", "Yearly"
+    var days: [DaySummary] = []          // day-by-day (or month-by-month) rows
+    var successTotal: Int?               // set for period reports
+    var missingDays = 0                  // days with check-ins but no stored report
+
+    var successCount: Int { successTotal ?? timeline.filter { $0.success == true }.count }
+}
+
+struct CategoryMinutes: Codable {
+    var name: String
+    var minutes: Int
+}
+
+struct DaySummary: Codable {
+    var label: String                    // "Mon 12 Oct" or "October"
+    var headline: String
+    var activeSeconds: Double
+    var answered: Int
+    var successes: Int
+    var topCategory: String?
 }
 
 enum RecapBuilder {
@@ -96,7 +116,7 @@ enum RecapBuilder {
             guard let l = labels[e.id] else { continue }
             minutes[l.category, default: 0] += e.periodEnd.timeIntervalSince(e.periodStart) / 60
         }
-        recap.categories = minutes.sorted { $0.value > $1.value }.map { (name: $0.key, minutes: Int($0.value.rounded())) }
+        recap.categories = minutes.sorted { $0.value > $1.value }.map { CategoryMinutes(name: $0.key, minutes: Int($0.value.rounded())) }
 
         recap.solved = useful.compactMap { e -> String? in
             guard let l = labels[e.id], l.success == true else { return nil }
@@ -224,7 +244,7 @@ enum RecapRenderer {
         <tr><td align="center" style="padding:24px 12px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:12px;font-family:\(font);color:#1F2937;">
         <tr><td style="padding:24px 24px 8px 24px;">
-          <div style="font-size:13px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;">Daily recap · \(esc(r.dayText))</div>
+          <div style="font-size:13px;color:#6B7280;text-transform:uppercase;letter-spacing:.06em;">\(esc(r.kind)) recap · \(esc(r.dayText))</div>
           <div style="font-size:20px;font-weight:600;margin-top:6px;line-height:1.35;">\(esc(r.headline))</div>
         </td></tr>
         """
@@ -291,6 +311,29 @@ enum RecapRenderer {
             h += "</td></tr>"
         }
 
+        // Day by day (period reports)
+        if !r.days.isEmpty {
+            h += section(r.kind == "Yearly" ? "Month by month" : "Day by day")
+            h += "<tr><td style=\"padding:0 24px 8px 24px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">"
+            let maxActive = max(1, r.days.map(\.activeSeconds).max() ?? 1)
+            for d in r.days {
+                let pct = max(1, Int((d.activeSeconds / maxActive * 100).rounded()))
+                let color = d.topCategory.flatMap { colorFor[$0] } ?? "#9CA3AF"
+                let stars = d.successes > 0 ? " · ✅ \(d.successes)" : ""
+                h += """
+                <tr>
+                <td style="padding:6px 8px 6px 0;font-size:12px;color:#6B7280;white-space:nowrap;vertical-align:top;width:90px;">\(esc(d.label))</td>
+                <td style="padding:6px 0;vertical-align:top;">
+                  <div style="font-size:13px;">\(esc(d.headline))</div>
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:4px;"><tr>
+                  <td width="\(pct)%" style="background:\(color);height:6px;border-radius:3px;font-size:0;line-height:0;">&nbsp;</td><td style="font-size:0;line-height:0;">&nbsp;</td></tr></table>
+                  <div style="font-size:11px;color:#6B7280;margin-top:2px;">\(durationText(d.activeSeconds)) active · \(d.answered) check-ins\(stars)\(d.topCategory.map { " · " + esc($0) } ?? "")</div>
+                </td></tr>
+                """
+            }
+            h += "</table></td></tr>"
+        }
+
         // Timeline
         if !r.timeline.isEmpty {
             h += section("Timeline")
@@ -335,7 +378,10 @@ enum RecapRenderer {
             h += "</td></tr>"
         }
 
-        let note = r.aiNote.map { "<br>\(esc($0))" } ?? ""
+        var note = r.aiNote.map { "<br>\(esc($0))" } ?? ""
+        if r.missingDays > 0 {
+            note += "<br>\(r.missingDays) day\(r.missingDays == 1 ? "" : "s") in this period had no stored report — generate them in Activity Logger → Reports."
+        }
         h += """
         <tr><td style="padding:16px 24px 24px 24px;font-size:11px;color:#9CA3AF;">Full log: Activity Logger → History\(note)</td></tr>
         </table></td></tr></table></body></html>
@@ -352,7 +398,7 @@ enum RecapRenderer {
     // MARK: Plain-text fallback
 
     static func text(_ r: DailyRecap) -> String {
-        var t = ["Daily recap - \(r.dayText)", r.headline, ""]
+        var t = ["\(r.kind) recap - \(r.dayText)", r.headline, ""]
         let active = r.usage.map { durationText($0.activeSeconds) } ?? "-"
         t.append("Active: \(active)   Check-ins: \(r.answered)   Successes: \(r.successCount)")
         if !r.goals.isEmpty {
@@ -363,6 +409,11 @@ enum RecapRenderer {
             t += ["", "WHERE YOUR TIME WENT"] + r.categories.map { "  \(mins($0.minutes))  \($0.name)" }
         }
         t += ["", "PROBLEMS SOLVED"] + (r.solved.isEmpty ? ["  none marked"] : r.solved.map { "  ✓ \($0)" })
+        if !r.days.isEmpty {
+            t += ["", r.kind == "Yearly" ? "MONTH BY MONTH" : "DAY BY DAY"] + r.days.map {
+                "  \($0.label)  \(durationText($0.activeSeconds))  \($0.headline)"
+            }
+        }
         if !r.timeline.isEmpty {
             t += ["", "TIMELINE"] + r.timeline.map {
                 "  \(time($0.start))-\(time($0.end))  \($0.titles.prefix(2).joined(separator: " · "))\($0.success == true ? "  ✓" : "")"
