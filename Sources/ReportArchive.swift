@@ -1,14 +1,14 @@
 import Foundation
 
 enum ReportKind: String, CaseIterable, Identifiable {
-    case day = "Day", week = "Week", month = "Month", year = "Year"
+    case calendar = "Calendar", day = "Day", week = "Week", month = "Month", year = "Year"
     var id: String { rawValue }
 
     var calendarComponent: Calendar.Component {
         switch self {
         case .day: return .day
         case .week: return .weekOfYear
-        case .month: return .month
+        case .month, .calendar: return .month
         case .year: return .year
         }
     }
@@ -17,7 +17,7 @@ enum ReportKind: String, CaseIterable, Identifiable {
         switch self {
         case .day: return "Daily"
         case .week: return "Weekly"
-        case .month: return "Monthly"
+        case .month, .calendar: return "Monthly"
         case .year: return "Yearly"
         }
     }
@@ -102,7 +102,7 @@ final class ReportArchive: ObservableObject {
         switch kind {
         case .day: return start.formatted(.dateTime.weekday(.wide).day().month(.wide).year())
         case .week: return "\(start.formatted(.dateTime.day().month(.abbreviated))) – \(last.formatted(.dateTime.day().month(.abbreviated).year()))"
-        case .month: return start.formatted(.dateTime.month(.wide).year())
+        case .month, .calendar: return start.formatted(.dateTime.month(.wide).year())
         case .year: return start.formatted(.dateTime.year())
         }
     }
@@ -110,10 +110,42 @@ final class ReportArchive: ObservableObject {
     /// Past days in the period that have activity but no stored report.
     func missingDays(_ kind: ReportKind, containing date: Date) -> [Date] {
         let today = Calendar.current.startOfDay(for: Date())
-        return days(in: interval(kind, containing: date)).filter { $0 < today && !hasRecord($0) && hasActivity($0) }
+        return days(in: interval(kind, containing: date)).filter { day in
+            guard day < today, hasActivity(day) else { return false }
+            guard let rec = load(day) else { return true }
+            // The calendar also needs the 3-word summary (older reports don't have it).
+            return kind == .calendar && rec.tagline == nil
+        }
     }
 
     // MARK: Aggregation
+
+    // MARK: Calendar
+
+    struct CalendarDay {
+        let date: Date
+        let tagline: String?
+        let topCategory: String?
+        let activeSeconds: Double
+        let checkIns: Int
+        let successes: Int
+        let hasRecord: Bool
+    }
+
+    func calendarDay(_ day: Date) -> CalendarDay {
+        let rec = load(day)
+        let entries = store.entries(on: day).filter { $0.status != .missed && $0.status != .skipped }
+        return CalendarDay(
+            date: day,
+            tagline: rec?.tagline ?? rec.map { RecapBuilder.threeWords($0.headline) },
+            topCategory: rec?.categories.first?.name,
+            activeSeconds: usage.usage(for: day).activeSeconds,
+            checkIns: entries.count,
+            successes: rec?.successCount
+                ?? entries.filter { RecapBuilder.keywordSuccess(CoachService.text(of: $0)) == true }.count,
+            hasRecord: rec != nil
+        )
+    }
 
     func aggregate(_ kind: ReportKind, containing date: Date) -> DailyRecap {
         let range = interval(kind, containing: date)

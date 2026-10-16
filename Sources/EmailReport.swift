@@ -13,6 +13,7 @@ struct DailyRecap: Codable {
 
     var dayText: String
     var headline: String
+    var tagline: String?        // exactly 3 words, shown in the calendar
     var categories: [CategoryMinutes] = []
     var timeline: [Block] = []
     var solved: [String] = []
@@ -72,13 +73,14 @@ enum RecapBuilder {
 
         var labels: [UUID: Label] = [:]
         var headline = ""
+        var tagline = ""
         var next: [String] = []
 
         if !useful.isEmpty && !apiKey.isEmpty {
             do {
                 let raw = try await Groq.complete(apiKey: apiKey, model: model, system: systemPrompt,
                                                   user: userPrompt(useful), jsonMode: true)
-                (labels, headline, next) = parse(raw, entries: useful)
+                (labels, headline, next, tagline) = parse(raw, entries: useful)
             } catch {
                 recap.aiNote = "AI labels unavailable: \(error.localizedDescription)"
             }
@@ -130,6 +132,10 @@ enum RecapBuilder {
                 : "Mostly " + recap.categories.prefix(2).map { $0.name }.joined(separator: " and ") + "."
         }
         recap.headline = headline
+        if tagline.isEmpty, let top = recap.categories.first?.name {
+            tagline = top   // no AI: fall back to the main category
+        }
+        recap.tagline = tagline.isEmpty ? nil : tagline
         return recap
     }
 
@@ -150,6 +156,7 @@ enum RecapBuilder {
 
         Return JSON exactly like:
         {"headline": "max 12 words: what the day was mainly about",
+         "tagline": "exactly 3 words naming what I did most, e.g. MV2 picker data",
          "items": [{"id": "e1", "category": "2-3 words", "title": "max 7 words, start with a verb",
                     "success": true, "solved": "max 10 words: problem -> result"}],
          "next": ["max 8 words"]}
@@ -163,11 +170,11 @@ enum RecapBuilder {
         """
     }
 
-    private static func parse(_ raw: String, entries: [Entry]) -> ([UUID: Label], String, [String]) {
+    private static func parse(_ raw: String, entries: [Entry]) -> ([UUID: Label], String, [String], String) {
         guard let start = raw.firstIndex(of: "{"), let end = raw.lastIndex(of: "}"),
               let data = String(raw[start...end]).data(using: .utf8),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        else { return ([:], "", []) }
+        else { return ([:], "", [], "") }
 
         var labels: [UUID: Label] = [:]
         for item in json["items"] as? [[String: Any]] ?? [] {
@@ -182,10 +189,21 @@ enum RecapBuilder {
         }
         let headline = clean(json["headline"] as? String, max: 100) ?? ""
         let next = (json["next"] as? [String] ?? []).compactMap { clean($0, max: 70) }
-        return (labels, headline, next)
+        let tagline = threeWords(json["tagline"] as? String)
+        return (labels, headline, next, tagline)
     }
 
     // MARK: Helpers
+
+    /// Keeps at most three words, without trailing punctuation.
+    static func threeWords(_ s: String?) -> String {
+        guard let s else { return "" }
+        let words = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".!\"'"))
+            .split(whereSeparator: \.isWhitespace)
+            .prefix(3)
+        return words.joined(separator: " ")
+    }
 
     private static func text(of e: Entry) -> String {
         let t = e.text.trimmingCharacters(in: .whitespacesAndNewlines)

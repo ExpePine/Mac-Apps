@@ -8,7 +8,7 @@ struct ReportsView: View {
     let reports: ReportService
     @ObservedObject var archive: ReportArchive
 
-    @State private var kind: ReportKind = .day
+    @State private var kind: ReportKind = .calendar
     @State private var anchor = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
     @State private var generating = false
     @State private var progress = ""
@@ -34,7 +34,14 @@ struct ReportsView: View {
             toolbar
             Divider()
             if kind != .day && !missing.isEmpty { missingBanner }
-            content
+            if kind == .calendar {
+                CalendarGrid(archive: archive, month: anchor) { day in
+                    anchor = day
+                    kind = .day
+                }
+            } else {
+                content
+            }
         }
     }
 
@@ -47,7 +54,7 @@ struct ReportsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 260)
+            .frame(width: 340)
 
             HStack(spacing: 4) {
                 Button { step(-1) } label: { Image(systemName: "chevron.left") }
@@ -87,7 +94,9 @@ struct ReportsView: View {
     private var missingBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "info.circle").foregroundStyle(Color.accentColor)
-            Text("\(missing.count) day\(missing.count == 1 ? "" : "s") in this period \(missing.count == 1 ? "has" : "have") no stored report, so categories and successes are incomplete.")
+            Text(kind == .calendar
+                 ? "\(missing.count) day\(missing.count == 1 ? "" : "s") this month \(missing.count == 1 ? "has" : "have") no 3-word summary yet."
+                 : "\(missing.count) day\(missing.count == 1 ? "" : "s") in this period \(missing.count == 1 ? "has" : "have") no stored report, so categories and successes are incomplete.")
                 .font(.callout)
             Spacer()
             if generating {
@@ -163,7 +172,7 @@ struct ReportsView: View {
         switch kind {
         case .day: f.dateFormat = "yyyy-MM-dd"
         case .week: f.dateFormat = "yyyy-'W'ww"
-        case .month: f.dateFormat = "yyyy-MM"
+        case .month, .calendar: f.dateFormat = "yyyy-MM"
         case .year: f.dateFormat = "yyyy"
         }
         return f.string(from: interval.start)
@@ -205,5 +214,149 @@ struct ReportWebView: NSViewRepresentable {
         guard context.coordinator.lastHTML != html else { return }
         context.coordinator.lastHTML = html
         view.loadHTMLString(html, baseURL: nil)
+    }
+}
+
+
+// MARK: - Calendar
+
+struct CalendarGrid: View {
+    @ObservedObject var archive: ReportArchive
+    let month: Date
+    let onSelect: (Date) -> Void
+
+    private let palette: [Color] = [
+        Color(red: 0.31, green: 0.42, blue: 0.93), Color(red: 0.08, green: 0.64, blue: 0.55),
+        Color(red: 0.91, green: 0.51, blue: 0.23), Color(red: 0.76, green: 0.28, blue: 0.61),
+        Color(red: 0.54, green: 0.36, blue: 0.96), Color(red: 0.85, green: 0.64, blue: 0.11),
+        Color(red: 0.23, green: 0.62, blue: 0.85), Color(red: 0.48, green: 0.53, blue: 0.60),
+    ]
+
+    /// Same category always gets the same colour.
+    private func color(for category: String?) -> Color {
+        guard let category else { return .secondary }
+        let sum = category.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
+        return palette[sum % palette.count]
+    }
+
+    private var cal: Calendar { Calendar.current }
+
+    /// Leading blanks + every day of the month.
+    private var cells: [Date?] {
+        _ = archive.version
+        let range = archive.interval(.month, containing: month)
+        let first = range.start
+        let weekday = cal.component(.weekday, from: first)
+        let leading = (weekday - cal.firstWeekday + 7) % 7
+        var result: [Date?] = Array(repeating: nil, count: leading)
+        var d = first
+        while d < range.end {
+            result.append(d)
+            guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
+            d = next
+        }
+        while result.count % 7 != 0 { result.append(nil) }
+        return result
+    }
+
+    private var weekdayNames: [String] {
+        let names = cal.shortWeekdaySymbols
+        let start = cal.firstWeekday - 1
+        return Array(names[start...] + names[..<start])
+    }
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
+        ScrollView {
+            VStack(spacing: 8) {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(weekdayNames, id: \.self) { name in
+                        Text(name.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(Array(cells.enumerated()), id: \.offset) { _, date in
+                        if let date {
+                            DayCell(info: archive.calendarDay(date),
+                                    tint: color(for: archive.calendarDay(date).topCategory),
+                                    isToday: cal.isDateInToday(date),
+                                    isFuture: date > Date())
+                                .onTapGesture { onSelect(date) }
+                        } else {
+                            Color.clear.frame(height: 96)
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
+private struct DayCell: View {
+    let info: ReportArchive.CalendarDay
+    let tint: Color
+    let isToday: Bool
+    let isFuture: Bool
+
+    private var hasActivity: Bool { info.checkIns > 0 || info.activeSeconds >= 60 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("\(Calendar.current.component(.day, from: info.date))")
+                    .font(.callout.weight(isToday ? .bold : .medium))
+                    .foregroundStyle(isToday ? Color.white : (isFuture ? Color.secondary : Color.primary))
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(isToday ? Color.accentColor : Color.clear))
+                Spacer()
+                if info.successes > 0 {
+                    Text("✅\(info.successes > 1 ? " \(info.successes)" : "")").font(.caption2)
+                }
+            }
+
+            if let tagline = info.tagline, !tagline.isEmpty {
+                Text(tagline)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if hasActivity && !isFuture {
+                Text(isToday ? "In progress" : "Not summarized")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            if info.activeSeconds >= 60 {
+                HStack(spacing: 4) {
+                    Capsule()
+                        .fill(tint.opacity(0.8))
+                        .frame(width: max(4, min(1, info.activeSeconds / 28_800) * 60), height: 4)
+                    Text(durationText(info.activeSeconds))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, minHeight: 96, maxHeight: 96, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(info.tagline != nil ? tint.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(isToday ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.06))
+        )
+        .opacity(isFuture ? 0.45 : 1)
+        .contentShape(Rectangle())
+        .help(info.tagline.map { "\($0) · click for the full report" } ?? "Click for the full report")
     }
 }
