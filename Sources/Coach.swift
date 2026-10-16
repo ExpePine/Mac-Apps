@@ -48,6 +48,10 @@ struct BreakdownStep: Identifiable {
     let text: String
     let minutes: Int?
     var why: String? = nil
+    var area: String? = nil
+    var minutesLow: Int? = nil
+    var minutesHigh: Int? = nil
+    var crux = false
 }
 
 enum CoachError: LocalizedError {

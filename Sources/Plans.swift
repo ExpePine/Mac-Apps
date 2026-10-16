@@ -15,6 +15,64 @@ struct PlanStep: Identifiable, Codable, Equatable {
     var startedAt: Date?
     var finishedAt: Date?
     var note: String?
+    var area: String? = nil
+    var minutesLow: Int? = nil
+    var minutesHigh: Int? = nil
+    var crux: Bool? = nil
+
+    /// Midpoint estimate in minutes.
+    var estimate: Int? {
+        if let l = minutesLow, let h = minutesHigh { return (l + h) / 2 }
+        return minutes
+    }
+
+    var rangeText: String? {
+        if let l = minutesLow, let h = minutesHigh, h > l { return "\(l)–\(h)m" }
+        return estimate.map { "~\($0)m" }
+    }
+
+    /// Actual minutes, once the step has been finished.
+    var actualMinutes: Double? {
+        guard let s = startedAt, let f = finishedAt, status == .done else { return nil }
+        return f.timeIntervalSince(s) / 60
+    }
+}
+
+/// Where the coach thinks the real problem is, before any steps are made.
+struct ProblemFraming: Codable, Equatable {
+    struct Area: Codable, Equatable, Identifiable {
+        var id: String { name }
+        var name: String
+        var share: Int              // % of total effort
+        var uncertainty: String     // low / medium / high
+        var why: String?
+    }
+    var heart = ""
+    var whyHeart: String?
+    var instinct = ""               // what the user will probably want to do first
+    var instinctVerdict = ""        // good / risky / premature
+    var instinctReason: String?
+    var areas: [Area] = []
+    var focus = ""
+    var assumptions: [String] = []
+
+    // The user's reaction
+    var heartConfirmed: Bool?
+    var heartCorrection: String?
+    var instinctConfirmed: Bool?
+    var userInstinct: String?
+
+    var asText: String {
+        var t = "Heart of the problem: \(heartCorrection?.isEmpty == false ? heartCorrection! : heart)"
+        if let u = userInstinct, !u.isEmpty { t += "\nMy instinct: \(u)" }
+        else if instinctConfirmed == true { t += "\nMy instinct: \(instinct)" }
+        if !areas.isEmpty {
+            t += "\nWork areas: " + areas.map { "\($0.name) \($0.share)% (\($0.uncertainty) uncertainty)" }.joined(separator: ", ")
+        }
+        if !focus.isEmpty { t += "\nFocus first: \(focus)" }
+        if !assumptions.isEmpty { t += "\nAssumptions to test: " + assumptions.joined(separator: "; ") }
+        return t
+    }
 }
 
 struct PlanEvent: Identifiable, Codable, Equatable {
@@ -57,6 +115,9 @@ struct Plan: Identifiable, Codable, Equatable {
     var details: String?          // the user's own description of the goal
     var clarifications: [Clarification]? = nil
     var brief: GoalBrief?
+    var framing: ProblemFraming?
+    var budgetMinutes: Int?           // time available today for this plan
+    var declined: [String]?           // suggested steps the user left out
     var lesson: String?           // one-line AI lesson
 
     /// The step being worked on, or the next one to do.
@@ -169,6 +230,37 @@ final class PlanStore: ObservableObject {
         return counts.sorted { $0.value > $1.value }.map { (category: $0.key, count: $0.value) }
     }
 
+    /// How long you really take vs your estimates, from finished steps (needs 3+).
+    var paceFactor: (factor: Double, samples: Int)? {
+        var actual = 0.0, estimated = 0.0, n = 0
+        for p in plans {
+            for s in p.steps {
+                guard let a = s.actualMinutes, let e = s.estimate, e > 0, a > 0.5 else { continue }
+                actual += a; estimated += Double(e); n += 1
+            }
+        }
+        guard n >= 3, estimated > 0 else { return nil }
+        return (min(3, max(0.5, actual / estimated)), n)
+    }
+
+    /// What the user tends to do, for the coach to "read their instinct".
+    func habitsContext() -> String {
+        var lines: [String] = []
+        let added = plans.flatMap { $0.steps.filter { $0.source == .user && $0.status != .skipped }.map(\.text) }.suffix(10)
+        if !added.isEmpty { lines.append("Steps I tend to add myself: " + added.joined(separator: "; ")) }
+        let declined = plans.flatMap { $0.declined ?? [] }.suffix(10)
+        if !declined.isEmpty { lines.append("Suggestions I usually leave out: " + declined.joined(separator: "; ")) }
+        let firsts = plans.compactMap { p in p.steps.first(where: { $0.status == .done || $0.status == .doing })?.text }.suffix(6)
+        if !firsts.isEmpty { lines.append("What I actually started with in past plans: " + firsts.joined(separator: "; ")) }
+        let instincts = plans.compactMap { $0.framing?.userInstinct }.filter { !$0.isEmpty }.suffix(5)
+        if !instincts.isEmpty { lines.append("My stated instincts before: " + instincts.joined(separator: "; ")) }
+        if let top = blockerStats.first { lines.append("My most common flow break: \(top.category) (\(top.count)×)") }
+        if let pace = paceFactor {
+            lines.append(String(format: "I usually take %.1f× my time estimates (from %d steps)", pace.factor, pace.samples))
+        }
+        return lines.isEmpty ? "(no habits recorded yet)" : lines.joined(separator: "\n")
+    }
+
     /// Past outcomes and flow breaks, for AI prompts.
     func lessonsContext() -> String {
         var lines: [String] = []
@@ -202,7 +294,11 @@ extension CoachService {
     private static func steps(from json: [String: Any]) -> [BreakdownStep] {
         (json["steps"] as? [[String: Any]] ?? []).compactMap { s in
             guard let t = s["step"] as? String, !t.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-            return BreakdownStep(text: t, minutes: (s["minutes"] as? NSNumber)?.intValue, why: s["why"] as? String)
+            let low = (s["minutes_low"] as? NSNumber)?.intValue
+            let high = (s["minutes_high"] as? NSNumber)?.intValue
+            let mid = (low != nil && high != nil) ? (low! + high!) / 2 : (s["minutes"] as? NSNumber)?.intValue
+            return BreakdownStep(text: t, minutes: mid, why: s["why"] as? String, area: s["area"] as? String,
+                                 minutesLow: low, minutesHigh: high, crux: s["crux"] as? Bool ?? false)
         }
     }
 
@@ -253,13 +349,84 @@ extension CoachService {
         return (ready, questions)
     }
 
+    /// Finds the heart of the problem, reads the user's instinct, and maps where the effort is.
+    func frameProblem(goal: String, details: String, answered: [Clarification], previous: ProblemFraming?,
+                      plans: PlanStore) async throws -> ProblemFraming {
+        let system = """
+        You are an expert problem-solver coaching an experienced engineer and product manager. \
+        Do NOT plan yet. First find the heart of the problem: the single hardest or most uncertain part \
+        that decides whether this goal succeeds — not the most visible part. \
+        Then read the person: predict the instinctive first move they will want to make, judging from how \
+        they describe the goal and from their habits, and judge that instinct honestly (good / risky / premature). \
+        Estimate where the bulk of the effort and the uncertainty really sit. Be specific to this goal, never generic. \
+        Output only valid JSON.
+        """
+        var corrections = ""
+        if let p = previous {
+            if p.heartConfirmed == false, let c = p.heartCorrection, !c.isEmpty {
+                corrections += "I disagree with your earlier 'heart': \"\(p.heart)\". It's actually: \(c)\n"
+            }
+            if p.instinctConfirmed == false, let u = p.userInstinct, !u.isEmpty {
+                corrections += "You guessed my instinct as \"\(p.instinct)\" — my real instinct is: \(u)\n"
+            }
+        }
+        let user = """
+        \(goalsContext())
+
+        Goal: "\(goal)"
+        Description: \(details.isEmpty ? "(none)" : details)
+        Interview:
+        \(answered.isEmpty ? "(none)" : Self.qaText(answered))
+
+        My habits:
+        \(plans.habitsContext())
+
+        Past plans and blockers:
+        \(plans.lessonsContext())
+
+        Relevant history:
+        \(relevantHistory(for: goal + " " + details))
+        \(corrections.isEmpty ? "" : "\nMy corrections (respect them):\n" + corrections)
+        Return {"heart": "max 30 words: the crux that decides success",
+                "why_heart": "max 20 words",
+                "instinct": "max 20 words: the first thing I'll probably want to do",
+                "instinct_verdict": "good" or "risky" or "premature",
+                "instinct_reason": "max 20 words",
+                "areas": [{"name": "max 4 words", "share": 40, "uncertainty": "low|medium|high", "why": "max 12 words"}],
+                "focus": "max 20 words: what to attack first and why",
+                "assumptions": ["max 15 words each, 2-3 risky assumptions to test early"]}
+        Areas: 2-5, shares add up to 100.
+        """
+        let raw = try await ask(system: system, user: user, json: true)
+        guard let json = extractJSON(raw), let heart = json["heart"] as? String, !heart.isEmpty else {
+            throw CoachError.badResponse
+        }
+        let areas = (json["areas"] as? [[String: Any]] ?? []).compactMap { a -> ProblemFraming.Area? in
+            guard let name = a["name"] as? String else { return nil }
+            return .init(name: name, share: (a["share"] as? NSNumber)?.intValue ?? 0,
+                         uncertainty: (a["uncertainty"] as? String ?? "medium").lowercased(), why: a["why"] as? String)
+        }
+        var f = ProblemFraming()
+        f.heart = heart
+        f.whyHeart = json["why_heart"] as? String
+        f.instinct = json["instinct"] as? String ?? ""
+        f.instinctVerdict = (json["instinct_verdict"] as? String ?? "").lowercased()
+        f.instinctReason = json["instinct_reason"] as? String
+        f.areas = areas
+        f.focus = json["focus"] as? String ?? ""
+        f.assumptions = (json["assumptions"] as? [String] ?? []).filter { !$0.isEmpty }
+        return f
+    }
+
     /// Writes the goal brief from the title, description and answers.
-    func writeBrief(goal: String, details: String, answered: [Clarification]) async throws -> GoalBrief {
+    func writeBrief(goal: String, details: String, answered: [Clarification],
+                    framing: ProblemFraming? = nil) async throws -> GoalBrief {
         let user = """
         Goal title: "\(goal)"
         Description: \(details.isEmpty ? "(none)" : details)
         Interview:
         \(answered.isEmpty ? "(none)" : Self.qaText(answered))
+        \(framing.map { "Agreed framing:\n\($0.asText)" } ?? "")
 
         Write a crisp goal brief using only what is stated above; where something is unknown, say "Unclear: ..." briefly.
         Return {"summary": "max 25 words, what this goal is",
@@ -279,7 +446,7 @@ extension CoachService {
     }
 
     /// First breakdown of a goal into a chain of steps.
-    func suggestPlanSteps(goal: String, brief: GoalBrief? = nil, details: String = "",
+    func suggestPlanSteps(goal: String, brief: GoalBrief? = nil, framing: ProblemFraming? = nil, details: String = "",
                           answered: [Clarification] = [], existing: [String],
                           plans: PlanStore) async throws -> [BreakdownStep] {
         let system = "You turn goals into a short chain of concrete, ordered steps. Output only valid JSON."
@@ -297,11 +464,18 @@ extension CoachService {
         \(details.isEmpty ? "" : "My description: \(details)")
         \(answered.isEmpty ? "" : "My answers:\n\(Self.qaText(answered))")
         \(existing.isEmpty ? "" : "Steps I already have (don't repeat them): \(existing.joined(separator: "; "))")
+        \(framing.map { "Agreed framing (plan around the heart of the problem):\n\($0.asText)" } ?? "")
+        My habits:
+        \(plans.habitsContext())
         Make the steps specific to this goal (names, data, tools from the brief), not generic project steps.
+        Attack the heart of the problem early: the first step (15 min or less) should touch it, and steps that \
+        reduce the biggest uncertainty come before polishing work. Mark steps on the heart of the problem as crux. \
+        Each step belongs to one of the work areas. Give an honest time range (low-high minutes).
 
-        Rules: 5-8 steps in order; each max 12 words starting with a verb; the first step takes 15 minutes or less; \
-        include a step to verify the result; realistic minute estimates; "why" max 10 words.
-        Return {"steps": [{"step": "...", "minutes": 20, "why": "..."}]}
+        Rules: 5-9 steps in order; each max 12 words starting with a verb; include a step to verify the result; \
+        "why" max 10 words.
+        Return {"steps": [{"step": "...", "area": "one of the work areas", "minutes_low": 20, "minutes_high": 40, \
+        "crux": true, "why": "..."}]}
         """
         let raw = try await ask(system: system, user: user, json: true)
         guard let json = extractJSON(raw) else { throw CoachError.badResponse }

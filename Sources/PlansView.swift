@@ -188,6 +188,15 @@ struct DraftStep: Identifiable, Equatable {
     var why: String?
     var source: PlanStep.Source
     var included = true
+    var area: String? = nil
+    var minutesLow: Int? = nil
+    var minutesHigh: Int? = nil
+    var crux = false
+
+    var estimate: Int? {
+        if let l = minutesLow, let h = minutesHigh { return (l + h) / 2 }
+        return minutes
+    }
 }
 
 struct PlanDraftView: View {
@@ -196,7 +205,7 @@ struct PlanDraftView: View {
     @ObservedObject var nav: Navigator
     let planID: UUID
 
-    enum Stage { case describe, questions, brief, steps }
+    enum Stage { case describe, questions, framing, brief, steps }
 
     @State private var stage: Stage = .describe
     @State private var goal = ""
@@ -211,6 +220,8 @@ struct PlanDraftView: View {
     @State private var loadingText = ""
     @State private var error: String?
     @State private var loaded = false
+    @State private var framing: ProblemFraming?
+    @State private var budget = 0          // minutes available today (0 = not set)
 
     private var picked: [DraftStep] { drafts.filter { $0.included && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty } }
     private var totalMinutes: Int { picked.compactMap(\.minutes).reduce(0, +) }
@@ -229,6 +240,7 @@ struct PlanDraftView: View {
                 switch stage {
                 case .describe: describeStage
                 case .questions: questionsStage
+                case .framing: framingStage
                 case .brief: briefStage
                 case .steps: stepsStage
                 }
@@ -239,6 +251,7 @@ struct PlanDraftView: View {
         .onChange(of: drafts) { _ in persist() }
         .onChange(of: goal) { _ in persist() }
         .onChange(of: details) { _ in persist() }
+        .onChange(of: budget) { _ in persist() }
     }
 
     // MARK: Title + guide
@@ -271,15 +284,16 @@ struct PlanDraftView: View {
         let current: Int = {
             switch stage {
             case .describe, .questions: return 1
-            case .brief: return 2
-            case .steps: return drafts.isEmpty ? 3 : 4
+            case .framing: return 2
+            case .brief: return 3
+            case .steps: return 4
             }
         }()
         return HStack(spacing: 14) {
             guideItem(1, "Describe", "Answer a few questions", n: current)
-            guideItem(2, "Brief", "Agree what done means", n: current)
-            guideItem(3, "Suggest", "Coach proposes steps", n: current)
-            guideItem(4, "Pick & start", "Keep, add, reorder, go", n: current)
+            guideItem(2, "Heart", "Find the real problem", n: current)
+            guideItem(3, "Brief", "Agree what done means", n: current)
+            guideItem(4, "Steps & time", "Pick, add, fit your time", n: current)
         }
     }
 
@@ -365,6 +379,176 @@ struct PlanDraftView: View {
         }
     }
 
+    // MARK: Stage 2b — heart of the problem
+
+    @ViewBuilder private var framingStage: some View {
+        if let f = framing {
+            VStack(alignment: .leading, spacing: 14) {
+                Card(title: "The heart of the problem", symbol: "scope") {
+                    Text(f.heart)
+                        .font(.title3.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let w = f.whyHeart, !w.isEmpty { Text(w).foregroundStyle(.secondary) }
+                    HStack(spacing: 8) {
+                        Button { framing?.heartConfirmed = true; framing?.heartCorrection = nil } label: {
+                            Label("That's it", systemImage: f.heartConfirmed == true ? "checkmark.circle.fill" : "checkmark.circle")
+                        }
+                        .tint(f.heartConfirmed == true ? .green : nil)
+                        Button { framing?.heartConfirmed = false } label: {
+                            Label("Not quite", systemImage: f.heartConfirmed == false ? "xmark.circle.fill" : "xmark.circle")
+                        }
+                        .tint(f.heartConfirmed == false ? .orange : nil)
+                    }
+                    .buttonStyle(.bordered)
+                    if f.heartConfirmed == false {
+                        TextField("Correction", text: Binding(get: { framing?.heartCorrection ?? "" },
+                                                              set: { framing?.heartCorrection = $0 }),
+                                  prompt: Text("What's really the hard part?"), axis: .vertical)
+                            .labelsHidden().textFieldStyle(.roundedBorder).lineLimit(1...3)
+                    }
+                }
+
+                Card(title: "Your instinct", symbol: "brain.head.profile") {
+                    Text("You'll probably want to start with:").foregroundStyle(.secondary)
+                    Text(f.instinct).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button { framing?.instinctConfirmed = true; framing?.userInstinct = nil } label: {
+                            Label("Yes, that's me", systemImage: f.instinctConfirmed == true ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        }
+                        .tint(f.instinctConfirmed == true ? .green : nil)
+                        Button { framing?.instinctConfirmed = false } label: {
+                            Label("No, I'd start elsewhere", systemImage: f.instinctConfirmed == false ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        }
+                        .tint(f.instinctConfirmed == false ? .orange : nil)
+                    }
+                    .buttonStyle(.bordered)
+                    if f.instinctConfirmed == false {
+                        TextField("My instinct", text: Binding(get: { framing?.userInstinct ?? "" },
+                                                               set: { framing?.userInstinct = $0 }),
+                                  prompt: Text("Where would you start, honestly?"), axis: .vertical)
+                            .labelsHidden().textFieldStyle(.roundedBorder).lineLimit(1...3)
+                    }
+                    if f.instinctConfirmed != nil && !f.instinctVerdict.isEmpty {
+                        let good = f.instinctVerdict == "good"
+                        Label {
+                            Text("\(good ? "Good instinct" : (f.instinctVerdict == "premature" ? "Premature" : "Risky"))\(f.instinctReason.map { " — \($0)" } ?? "")")
+                        } icon: {
+                            Image(systemName: good ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        }
+                        .foregroundStyle(good ? Color.green : Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if !f.areas.isEmpty {
+                    Card(title: "Where the bulk is", symbol: "chart.bar.xaxis") {
+                        EffortBar(areas: f.areas)
+                        ForEach(f.areas) { a in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Circle().fill(areaColor(a.name)).frame(width: 9, height: 9)
+                                Text(a.name).font(.body.weight(.semibold))
+                                Text("\(a.share)%").monospacedDigit().foregroundStyle(.secondary)
+                                UncertaintyBadge(level: a.uncertainty)
+                                if let w = a.why { Text(w).font(.callout).foregroundStyle(.secondary).lineLimit(2) }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                }
+
+                Card(title: "Focus first", symbol: "flag.fill") {
+                    Text(f.focus).fixedSize(horizontal: false, vertical: true)
+                    if !f.assumptions.isEmpty {
+                        Text("ASSUMPTIONS TO TEST EARLY").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+                        ForEach(f.assumptions, id: \.self) { a in
+                            Label(a, systemImage: "questionmark.diamond").font(.callout)
+                        }
+                    }
+                }
+
+                HStack {
+                    Button("Back to questions") { stage = answered.isEmpty ? .describe : .questions }
+                        .buttonStyle(.borderless)
+                    if f.heartConfirmed == false || f.instinctConfirmed == false {
+                        Button { Task { await makeFraming() } } label: {
+                            Label("Re-think with my corrections", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(loading)
+                    }
+                    Spacer()
+                    if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
+                    Button { Task { persist(); await makeBrief() } } label: {
+                        Label("Write the brief", systemImage: "arrow.right")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(loading)
+                }
+            }
+            .onChange(of: framing) { _ in persist() }
+        }
+    }
+
+    // MARK: Time
+
+    /// Steps that fit in today's budget (cumulative, using your pace).
+    private var fitsToday: Set<UUID> {
+        guard budget > 0 else { return [] }
+        let factor = plans.paceFactor?.factor ?? 1
+        var used = 0.0
+        var result = Set<UUID>()
+        for d in picked {
+            used += Double(d.estimate ?? 20) * factor
+            if used <= Double(budget) { result.insert(d.id) } else { break }
+        }
+        return result
+    }
+
+    private var timeCard: some View {
+        let low = picked.reduce(0) { $0 + ($1.minutesLow ?? $1.estimate ?? 0) }
+        let high = picked.reduce(0) { $0 + ($1.minutesHigh ?? $1.estimate ?? 0) }
+        let mid = picked.reduce(0) { $0 + ($1.estimate ?? 0) }
+        let pace = plans.paceFactor
+        var byArea: [String: Int] = [:]
+        for d in picked { byArea[d.area ?? "Other", default: 0] += d.estimate ?? 0 }
+        let areas = byArea.sorted { $0.value > $1.value }
+            .map { ProblemFraming.Area(name: $0.key, share: mid > 0 ? Int(Double($0.value) / Double(mid) * 100) : 0, uncertainty: "") }
+        return Card(title: "Time", symbol: "clock") {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(high > low ? "\(durationText(Double(low) * 60)) – \(durationText(Double(high) * 60))" : durationText(Double(mid) * 60))
+                        .font(.title2.weight(.semibold)).monospacedDigit()
+                    Text("Estimated for \(picked.count) steps").font(.caption).foregroundStyle(.secondary)
+                }
+                if let pace {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("≈ \(durationText(Double(mid) * 60 * pace.factor))")
+                            .font(.title2.weight(.semibold)).monospacedDigit()
+                            .foregroundStyle(pace.factor > 1.1 ? Color.orange : Color.green)
+                        Text(String(format: "At your pace (%.1f× estimates, %d steps)", pace.factor, pace.samples))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            if mid > 0 && areas.count > 1 { EffortBar(areas: areas) }
+            HStack {
+                Text("Time I have today")
+                Picker("Time I have today", selection: $budget) {
+                    Text("Not set").tag(0)
+                    ForEach([30, 60, 90, 120, 180, 240, 360], id: \.self) { m in Text(durationText(Double(m) * 60)).tag(m) }
+                }
+                .labelsHidden()
+                .frame(width: 120)
+                if budget > 0 {
+                    Text("\(fitsToday.count) of \(picked.count) steps fit today")
+                        .foregroundStyle(fitsToday.count == picked.count ? Color.green : Color.secondary)
+                }
+                Spacer()
+            }
+        }
+    }
+
     // MARK: Stage 3 — brief
 
     private var briefStage: some View {
@@ -381,6 +565,9 @@ struct PlanDraftView: View {
                 Button("Ask more questions") { Task { await moreQuestions() } }
                     .buttonStyle(.borderless)
                     .disabled(loading)
+                if framing != nil {
+                    Button("Back to the heart") { stage = .framing }.buttonStyle(.borderless)
+                }
                 Spacer()
                 if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
                 Button { Task { await approveBrief() } } label: {
@@ -428,12 +615,24 @@ struct PlanDraftView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
             }
 
+            if let f = framing {
+                Card(title: "Heart of the problem", symbol: "scope") {
+                    Text(f.heartCorrection?.isEmpty == false ? f.heartCorrection! : f.heart)
+                    if !f.focus.isEmpty {
+                        Label("Focus first: \(f.focus)", systemImage: "flag.fill").font(.callout).foregroundStyle(.secondary)
+                    }
+                    Button("Revisit") { stage = .framing }.buttonStyle(.borderless)
+                }
+            }
+
             Card(title: "Steps", symbol: "list.number") {
                 if drafts.isEmpty && !loading {
                     Text("Ask the coach for a breakdown, or add your own steps below.").foregroundStyle(.secondary)
                 }
+                let fits = fitsToday
                 ForEach($drafts) { $d in
                     DraftRow(draft: $d,
+                             fitsToday: budget > 0 && d.included ? fits.contains(d.id) : nil,
                              isFirst: d.id == drafts.first?.id,
                              isLast: d.id == drafts.last?.id,
                              onMove: { move(d.id, by: $0) },
@@ -452,6 +651,8 @@ struct PlanDraftView: View {
                 }
                 .padding(.top, 4)
             }
+
+            if !picked.isEmpty { timeCard }
 
             HStack(spacing: 12) {
                 Button { Task { await suggest() } } label: {
@@ -480,12 +681,16 @@ struct PlanDraftView: View {
         round = (qa.map(\.round).max() ?? 0) + (qa.contains { !$0.answered } ? 0 : 1)
         round = max(1, min(round, qa.contains { !$0.answered } ? (qa.map(\.round).max() ?? 1) : round))
         if let b = plan.brief { brief = b; hasBrief = true }
+        framing = plan.framing
+        budget = plan.budgetMinutes ?? 0
         drafts = plan.steps.map {
             DraftStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
-                      included: $0.status != .skipped)
+                      included: $0.status != .skipped, area: $0.area, minutesLow: $0.minutesLow,
+                      minutesHigh: $0.minutesHigh, crux: $0.crux ?? false)
         }
         if !drafts.isEmpty { stage = .steps }
         else if hasBrief { stage = .brief }
+        else if framing != nil { stage = .framing }
         else if !pending.isEmpty { stage = .questions }
         else { stage = .describe }
         loaded = true
@@ -500,9 +705,12 @@ struct PlanDraftView: View {
             plan.details = details.isEmpty ? nil : details
             plan.clarifications = qa.isEmpty ? nil : qa
             plan.brief = hasBrief ? brief : nil
+            plan.framing = framing
+            plan.budgetMinutes = budget > 0 ? budget : nil
             plan.steps = drafts.map {
                 PlanStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
-                         status: $0.included ? .todo : .skipped)
+                         status: $0.included ? .todo : .skipped, area: $0.area, minutesLow: $0.minutesLow,
+                         minutesHigh: $0.minutesHigh, crux: $0.crux)
             }
         }
     }
@@ -529,7 +737,7 @@ struct PlanDraftView: View {
                                                                  answered: answered, round: round, plans: plans)
             if result.ready || result.questions.isEmpty {
                 loading = false
-                await makeBrief()
+                await makeFraming()
                 return
             }
             qa.removeAll { !$0.answered }
@@ -554,14 +762,27 @@ struct PlanDraftView: View {
             round = 2
             await fetchQuestions()
         } else {
-            await makeBrief()
+            await makeFraming()
         }
+    }
+
+    private func makeFraming() async {
+        busy("Looking for the heart of the problem…")
+        do {
+            framing = try await app.coach.frameProblem(goal: goalText, details: details, answered: answered,
+                                                       previous: framing, plans: plans)
+            stage = .framing
+            persist()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        loading = false
     }
 
     private func makeBrief() async {
         busy("Writing the goal brief…")
         do {
-            brief = try await app.coach.writeBrief(goal: goalText, details: details, answered: answered)
+            brief = try await app.coach.writeBrief(goal: goalText, details: details, answered: answered, framing: framing)
             hasBrief = true
             stage = .brief
             persist()
@@ -591,10 +812,14 @@ struct PlanDraftView: View {
         do {
             let mine = drafts.filter { $0.source == .user }
             let steps = try await app.coach.suggestPlanSteps(goal: goalText, brief: hasBrief ? brief : nil,
+                                                             framing: framing,
                                                              details: details, answered: answered,
                                                              existing: mine.map(\.text), plans: plans)
             // Replace previous AI suggestions, keep the user's own steps after them.
-            drafts = steps.map { DraftStep(text: $0.text, minutes: $0.minutes, why: $0.why, source: .ai) } + mine
+            drafts = steps.map {
+                DraftStep(text: $0.text, minutes: $0.minutes, why: $0.why, source: .ai,
+                          area: $0.area, minutesLow: $0.minutesLow, minutesHigh: $0.minutesHigh, crux: $0.crux)
+            } + mine
         } catch {
             self.error = error.localizedDescription
         }
@@ -617,11 +842,14 @@ struct PlanDraftView: View {
 
     private func startPlan() {
         let chosen = picked
+        let left = drafts.filter { !$0.included && $0.source == .ai }.map(\.text)
         persist()
         plans.update(planID) { plan in
             plan.goal = goalText
+            plan.declined = (plan.declined ?? []) + left
             plan.steps = chosen.map {
-                PlanStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source)
+                PlanStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
+                         area: $0.area, minutesLow: $0.minutesLow, minutesHigh: $0.minutesHigh, crux: $0.crux)
             }
             plan.status = .active
             plan.startedAt = Date()
@@ -666,6 +894,7 @@ struct QuestionCard: View {
 
 struct DraftRow: View {
     @Binding var draft: DraftStep
+    var fitsToday: Bool? = nil
     let isFirst: Bool
     let isLast: Bool
     let onMove: (Int) -> Void
@@ -687,6 +916,16 @@ struct DraftRow: View {
                     .textFieldStyle(.plain)
                     .foregroundStyle(draft.included ? Color.primary : Color.secondary)
                 HStack(spacing: 6) {
+                    if draft.crux {
+                        Label("HEART", systemImage: "scope").font(.caption2.weight(.bold)).foregroundStyle(.red)
+                    }
+                    if let area = draft.area {
+                        Text(area).font(.caption2.weight(.semibold)).foregroundStyle(areaColor(area))
+                    }
+                    if let fits = fitsToday {
+                        Text(fits ? "TODAY" : "LATER").font(.caption2.weight(.bold))
+                            .foregroundStyle(fits ? Color.green : Color.secondary)
+                    }
                     if draft.source == .user {
                         Text("Added by you").font(.caption2.weight(.semibold)).foregroundStyle(Color.accentColor)
                     }
@@ -696,7 +935,9 @@ struct DraftRow: View {
                 }
             }
             Spacer(minLength: 8)
-            if let m = draft.minutes {
+            if let l = draft.minutesLow, let h = draft.minutesHigh, h > l {
+                Text("\(l)–\(h)m").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            } else if let m = draft.minutes {
                 Text("\(m)m").font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             HStack(spacing: 2) {
@@ -792,6 +1033,13 @@ struct PlanRunView: View {
                 if let s = plan.startedAt {
                     Text("· started \(s.formatted(.relative(presentation: .named)))").foregroundStyle(.secondary)
                 }
+                let remaining = plan.steps.filter { $0.status == .todo || $0.status == .doing || $0.status == .blocked }
+                    .reduce(0) { $0 + ($1.estimate ?? 0) }
+                if remaining > 0 {
+                    let factor = plans.paceFactor?.factor ?? 1
+                    Text("· ≈ \(durationText(Double(remaining) * 60 * factor)) left\(factor != 1 ? String(format: " at your pace (%.1f×)", factor) : "")")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -808,9 +1056,19 @@ struct PlanRunView: View {
             case .doing:
                 if let start = step.startedAt {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        Label("In progress · \(mmss(Int(Date().timeIntervalSince(start))))", systemImage: "timer")
-                            .foregroundStyle(Color.accentColor)
-                            .monospacedDigit()
+                        let elapsed = Date().timeIntervalSince(start)
+                        let limit = Double(step.minutesHigh ?? step.estimate ?? 0) * 60
+                        let over = limit > 0 && elapsed > limit
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("In progress · \(mmss(Int(elapsed)))\(step.rangeText.map { " of \($0)" } ?? "")",
+                                  systemImage: over ? "exclamationmark.triangle.fill" : "timer")
+                                .foregroundStyle(over ? Color.orange : Color.accentColor)
+                                .monospacedDigit()
+                            if over {
+                                Text("Taking longer than expected — is something blocking you, or is this step bigger than it looked?")
+                                    .font(.caption).foregroundStyle(.orange)
+                            }
+                        }
                     }
                 }
                 TextField("Note (optional) — what you did or found", text: $stepNote)
@@ -952,9 +1210,15 @@ struct ChainRow<Controls: View>: View {
                     }
                 }
                 HStack(spacing: 8) {
-                    if let m = step.minutes, step.status == .todo { Text("~\(m) min") }
-                    if let s = step.startedAt, let f = step.finishedAt, step.status == .done {
-                        Text("took \(durationText(f.timeIntervalSince(s)))")
+                    if step.crux == true {
+                        Label("HEART", systemImage: "scope").font(.caption2.weight(.bold)).foregroundStyle(.red)
+                    }
+                    if let area = step.area { Text(area).foregroundStyle(areaColor(area)) }
+                    if let r = step.rangeText, step.status == .todo || step.status == .doing { Text(r) }
+                    if let a = step.actualMinutes {
+                        let est = Double(step.estimate ?? 0)
+                        Text("took \(durationText(a * 60))\(est > 0 ? " (est \(Int(est))m)" : "")")
+                            .foregroundStyle(est > 0 && a > est * 1.3 ? Color.orange : Color.secondary)
                     }
                     if let note = step.note { Text(note).lineLimit(2) }
                 }
@@ -1338,5 +1602,53 @@ struct PlanSummaryView: View {
         guard let s = plan.startedAt, let f = plan.finishedAt else { return "–" }
         let days = Calendar.current.dateComponents([.day], from: s, to: f).day ?? 0
         return days >= 1 ? "\(days) day\(days == 1 ? "" : "s")" : durationText(f.timeIntervalSince(s))
+    }
+}
+
+
+// MARK: - Planning visuals
+
+private let areaPalette: [Color] = [
+    Color(red: 0.31, green: 0.42, blue: 0.93), Color(red: 0.08, green: 0.64, blue: 0.55),
+    Color(red: 0.91, green: 0.51, blue: 0.23), Color(red: 0.76, green: 0.28, blue: 0.61),
+    Color(red: 0.54, green: 0.36, blue: 0.96), Color(red: 0.85, green: 0.64, blue: 0.11),
+]
+
+/// Stable colour per work area name.
+func areaColor(_ name: String) -> Color {
+    let sum = name.lowercased().unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
+    return areaPalette[sum % areaPalette.count]
+}
+
+/// Horizontal stacked bar of effort shares.
+struct EffortBar: View {
+    let areas: [ProblemFraming.Area]
+
+    var body: some View {
+        let total = max(1, areas.reduce(0) { $0 + max(0, $1.share) })
+        GeometryReader { geo in
+            HStack(spacing: 2) {
+                ForEach(areas) { a in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(areaColor(a.name))
+                        .frame(width: max(4, geo.size.width * CGFloat(max(0, a.share)) / CGFloat(total) - 2))
+                        .help("\(a.name): \(a.share)%")
+                }
+            }
+        }
+        .frame(height: 12)
+    }
+}
+
+struct UncertaintyBadge: View {
+    let level: String
+
+    var body: some View {
+        let color: Color = level == "high" ? .red : (level == "low" ? .green : .orange)
+        Text("\(level) uncertainty")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.12)))
     }
 }
