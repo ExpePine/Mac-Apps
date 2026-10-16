@@ -1,0 +1,35 @@
+# Generate the Xcode project with XcodeGen:  brew install xcodegen && xcodegen generate
+name: ActivityLogger
+options:
+  bundleIdPrefix: com.raj
+  deploymentTarget:
+    macOS: "13.0"
+targets:
+  ActivityLogger:
+    type: application
+    platform: macOS
+    sources: [Sources]
+    scheme: {}                                 # shared scheme so xcodebuild -scheme works
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Activity Logger
+        LSUIElement: true                      # menu-bar only, no Dock icon
+        NSMicrophoneUsageDescription: Activity Logger records short voice notes about what you worked on.
+        NSSpeechRecognitionUsageDescription: Activity Logger converts your voice notes to text.
+    entitlements:
+      path: Sources/ActivityLogger.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.device.audio-input: true          # microphone
+        com.apple.security.files.user-selected.read-write: true  # CSV export via Save panel
+        com.apple.security.network.client: true             # server speech recognition fallback
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.raj.ActivityLogger
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"                # "Sign to Run Locally"; set your Team in Xcode if you have one
