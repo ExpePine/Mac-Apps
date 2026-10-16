@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let stuckStore: StuckStore
     let coach: CoachService
     let archive: ReportArchive
+    let plans: PlanStore
     let nav = Navigator()
 
     /// The check-in that is waiting for an answer (if any).
@@ -39,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         goals = GoalsStore(directory: store.directory)
         stuckStore = StuckStore(directory: store.directory)
         coach = CoachService(settings: settings, store: store, goals: goals, usage: usage, stuck: stuckStore)
+        plans = PlanStore(directory: store.directory)
+        coach.plans = plans
         archive = ReportArchive(baseDirectory: store.directory, store: store, usage: usage, goals: goals)
         reports = ReportService(settings: settings, store: store, usage: usage, goals: goals, archive: archive)
         super.init()
@@ -81,6 +84,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     // MARK: - Main window & goals
+
+    /// Creates a draft plan and opens it in Plans.
+    func startPlan(goal: String, template: Plan? = nil, autoSuggest: Bool = false) {
+        var plan = Plan(goal: goal)
+        if let template {
+            plan.steps = template.steps.map { PlanStep(text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source) }
+        }
+        plan.log(.created, template == nil ? "Draft created" : "Draft created from an earlier plan")
+        plans.upsert(plan)
+        nav.selectedPlan = plan.id
+        if autoSuggest && !goal.isEmpty && template == nil { nav.autoSuggestPlan = plan.id }
+        showMain(.plans)
+    }
 
     func showMain(_ section: MainSection) {
         nav.section = section
@@ -153,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         let session = PromptSession(prompt: prompt, settings: settings, store: store)
         session.goalTexts = goals.activeToday.filter { !$0.done }.map(\.text)
+        if let plan = plans.activePlan, let i = plan.currentIndex { session.currentStep = plan.steps[i].text }
         session.onFinish = { [weak self] entry in self?.resolve(entry) }
         session.onStuck = { [weak self] in self?.showMain(.stuck) }
         activeSession = session

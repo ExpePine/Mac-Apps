@@ -31,6 +31,12 @@ struct PromptView: View {
                 Text(session.prompt.rangeText)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                if let step = session.currentStep {
+                    Label("Now: \(step)", systemImage: "checklist")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                }
                 if !session.goalTexts.isEmpty {
                     Label(session.goalTexts.joined(separator: " · "), systemImage: "target")
                         .font(.caption)

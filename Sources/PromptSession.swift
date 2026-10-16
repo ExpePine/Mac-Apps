@@ -18,6 +18,8 @@ final class PromptSession: ObservableObject {
     var onStuck: (@MainActor () -> Void)?
     /// Today's open goals, shown as a reminder in the window.
     var goalTexts: [String] = []
+    /// The current step of the active plan, if any.
+    var currentStep: String?
 
     private let settings: SettingsStore
     private let store: EntryStore

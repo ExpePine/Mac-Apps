@@ -2,13 +2,14 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, Hashable, CaseIterable, Identifiable {
-    case today, goals, insights, stuck, reports, history, settings
+    case today, goals, plans, insights, stuck, reports, history, settings
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .today: return "Today"
         case .goals: return "Goals"
+        case .plans: return "Plans"
         case .insights: return "Insights"
         case .stuck: return "Stuck"
         case .reports: return "Reports"
@@ -21,6 +22,7 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
         switch self {
         case .today: return "sun.max"
         case .goals: return "target"
+        case .plans: return "checklist"
         case .insights: return "chart.line.uptrend.xyaxis"
         case .stuck: return "lifepreserver"
         case .reports: return "doc.richtext"
@@ -33,6 +35,9 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
 @MainActor
 final class Navigator: ObservableObject {
     @Published var section: MainSection? = .today
+    @Published var selectedPlan: UUID?
+    /// A new draft plan that should ask the coach for steps as soon as it opens.
+    @Published var autoSuggestPlan: UUID?
 }
 
 struct MainWindowView: View {
@@ -43,7 +48,7 @@ struct MainWindowView: View {
         NavigationSplitView {
             List(selection: $nav.section) {
                 Section {
-                    ForEach([MainSection.today, .goals, .insights, .stuck]) { s in
+                    ForEach([MainSection.today, .goals, .plans, .insights, .stuck]) { s in
                         Label(s.title, systemImage: s.icon).tag(s)
                     }
                 }
@@ -67,7 +72,9 @@ struct MainWindowView: View {
         case .today:
             TodayView(app: app, goals: app.goals, store: app.store, tracker: app.tracker)
         case .goals:
-            GoalsView(goals: app.goals, coach: app.coach)
+            GoalsView(goals: app.goals, coach: app.coach) { text in app.startPlan(goal: text, autoSuggest: true) }
+        case .plans:
+            PlansView(app: app, plans: app.plans, nav: nav)
         case .insights:
             InsightsView(coach: app.coach, store: app.store)
         case .stuck:
@@ -271,6 +278,7 @@ struct CheckinRow: View {
 struct GoalsView: View {
     @ObservedObject var goals: GoalsStore
     let coach: CoachService
+    var onPlan: (String) -> Void = { _ in }
 
     @State private var today: [Goal] = []
     @State private var month: [Goal] = []
@@ -296,7 +304,7 @@ struct GoalsView: View {
             Section {
                 ForEach($today) { $goal in
                     GoalRow(goal: $goal,
-                            onBreakdown: { breakdownGoal = goal },
+                            onBreakdown: { onPlan(goal.text) },
                             onDelete: { today.removeAll { $0.id == goal.id } })
                 }
                 Button { today.append(Goal(text: "")) } label: { Label("Add goal", systemImage: "plus") }
@@ -305,13 +313,13 @@ struct GoalsView: View {
             } header: {
                 Text("Today · \(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))")
             } footer: {
-                Text("Tip: use the ✦ button to break a goal into small steps.").foregroundStyle(.secondary)
+                Text("Tip: the ✦ button turns a goal into a plan — a chain of steps you can work through.").foregroundStyle(.secondary)
             }
 
             Section {
                 ForEach($month) { $goal in
                     GoalRow(goal: $goal,
-                            onBreakdown: { breakdownGoal = goal },
+                            onBreakdown: { onPlan(goal.text) },
                             onDelete: { month.removeAll { $0.id == goal.id } })
                 }
                 Button { month.append(Goal(text: "")) } label: { Label("Add monthly goal", systemImage: "plus") }
@@ -355,7 +363,7 @@ struct GoalRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onBreakdown) { Image(systemName: "sparkles") }
                 .buttonStyle(.borderless)
-                .help("Break down into steps")
+                .help("Plan this goal: break it into steps")
                 .disabled(goal.text.trimmingCharacters(in: .whitespaces).isEmpty)
             Button(action: onDelete) { Image(systemName: "minus.circle") }
                 .buttonStyle(.borderless)

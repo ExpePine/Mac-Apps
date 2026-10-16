@@ -47,6 +47,7 @@ struct BreakdownStep: Identifiable {
     let id = UUID()
     let text: String
     let minutes: Int?
+    var why: String? = nil
 }
 
 enum CoachError: LocalizedError {
@@ -117,6 +118,9 @@ final class CoachService: ObservableObject {
     private let usage: UsageStore
     let stuck: StuckStore
 
+    /// Set by the app delegate; used to mention the active plan step in prompts.
+    var plans: PlanStore?
+
     private var lastSnapshot: DayUsage?
     private var lastSnapshotKey = ""
 
@@ -130,7 +134,7 @@ final class CoachService: ObservableObject {
 
     var hasKey: Bool { !Keychain.get(Keychain.groqAPIKey).isEmpty }
 
-    private func ask(system: String, user: String, json: Bool) async throws -> String {
+    func ask(system: String, user: String, json: Bool) async throws -> String {
         let key = Keychain.get(Keychain.groqAPIKey)
         guard !key.isEmpty else { throw CoachError.noKey }
         return try await Groq.complete(apiKey: key, model: settings.groqModel, system: system, user: user, jsonMode: json)
@@ -153,7 +157,11 @@ final class CoachService: ObservableObject {
         let daily = d.isEmpty ? "(none set)" : d.enumerated()
             .map { "\($0 + 1). \($1.text)\($1.done ? " [done]" : "")" }.joined(separator: "\n")
         let monthly = m.isEmpty ? "(none set)" : m.map { "- \($0.text)\($0.done ? " [done]" : "")" }.joined(separator: "\n")
-        return "Today's goals:\n\(daily)\n\nThis month's goals:\n\(monthly)"
+        var context = "Today's goals:\n\(daily)\n\nThis month's goals:\n\(monthly)"
+        if let plan = plans?.activePlan, let i = plan.currentIndex {
+            context += "\n\nActive plan: \(plan.goal)\nCurrent step: \(plan.steps[i].text)"
+        }
+        return context
     }
 
     /// Website/app time since the previous check-in (difference of daily totals).
