@@ -142,84 +142,41 @@ struct PlanDraftView: View {
     @ObservedObject var nav: Navigator
     let planID: UUID
 
+    enum Stage { case describe, questions, brief, steps }
+
+    @State private var stage: Stage = .describe
     @State private var goal = ""
+    @State private var details = ""
+    @State private var qa: [Clarification] = []          // all questions, answered or not
+    @State private var brief = GoalBrief()
+    @State private var hasBrief = false
+    @State private var round = 1
     @State private var drafts: [DraftStep] = []
     @State private var newStep = ""
     @State private var loading = false
+    @State private var loadingText = ""
     @State private var error: String?
     @State private var loaded = false
 
     private var picked: [DraftStep] { drafts.filter { $0.included && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty } }
     private var totalMinutes: Int { picked.compactMap(\.minutes).reduce(0, +) }
+    private var pending: [Clarification] { qa.filter { !$0.answered } }
+    private var answered: [Clarification] { qa.filter { $0.answered } }
+    private var goalText: String { goal.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("NEW PLAN").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    TextField("Goal", text: $goal, prompt: Text("What do you want to achieve?"), axis: .vertical)
-                        .labelsHidden()
-                        .textFieldStyle(.plain)
-                        .font(.title.weight(.bold))
-                    let suggestions = (app.goals.activeToday + app.goals.activeMonth).map(\.text)
-                    if !suggestions.isEmpty {
-                        Menu {
-                            ForEach(suggestions, id: \.self) { g in Button(g) { goal = g } }
-                        } label: {
-                            Label("Use one of my goals", systemImage: "target")
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                    }
-                }
-
+                titleArea
                 stepGuide
-
-                Card(title: "Steps", symbol: "list.number") {
-                    if drafts.isEmpty && !loading {
-                        Text("Ask the coach for a first breakdown, or add your own steps below.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach($drafts) { $d in
-                        DraftRow(draft: $d,
-                                 isFirst: d.id == drafts.first?.id,
-                                 isLast: d.id == drafts.last?.id,
-                                 onMove: { move(d.id, by: $0) },
-                                 onDelete: { drafts.removeAll { $0.id == d.id } })
-                    }
-                    if loading {
-                        HStack { ProgressView().controlSize(.small); Text("Breaking it down…").foregroundStyle(.secondary) }
-                    }
-                    if let error { Text(error).foregroundStyle(.red).font(.callout) }
-                    HStack {
-                        Image(systemName: "plus.circle").foregroundStyle(.secondary)
-                        TextField("Add a missing step…", text: $newStep)
-                            .textFieldStyle(.plain)
-                            .onSubmit(addStep)
-                        Button("Add", action: addStep)
-                            .disabled(newStep.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    .padding(.top, 4)
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.callout)
                 }
-
-                HStack(spacing: 12) {
-                    Button { Task { await suggest() } } label: {
-                        Label(drafts.contains { $0.source == .ai } ? "Suggest again" : "Suggest steps", systemImage: "sparkles")
-                    }
-                    .disabled(loading || goal.trimmingCharacters(in: .whitespaces).isEmpty)
-                    Button("Delete draft", role: .destructive) {
-                        plans.delete(planID)
-                        nav.selectedPlan = nil
-                    }
-                    .buttonStyle(.borderless)
-                    Spacer()
-                    Text("\(picked.count) steps\(totalMinutes > 0 ? " · about \(durationText(Double(totalMinutes) * 60))" : "")")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    Button { startPlan() } label: { Label("Start plan", systemImage: "play.fill") }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(picked.isEmpty || goal.trimmingCharacters(in: .whitespaces).isEmpty)
+                switch stage {
+                case .describe: describeStage
+                case .questions: questionsStage
+                case .brief: briefStage
+                case .steps: stepsStage
                 }
             }
             .padding(28)
@@ -227,23 +184,58 @@ struct PlanDraftView: View {
         .onAppear(perform: load)
         .onChange(of: drafts) { _ in persist() }
         .onChange(of: goal) { _ in persist() }
+        .onChange(of: details) { _ in persist() }
     }
 
-    private var stepGuide: some View {
-        HStack(spacing: 18) {
-            guideItem(1, "Suggest", "Coach proposes steps", active: drafts.isEmpty)
-            guideItem(2, "Pick & add", "Untick what's not relevant, add what's missing", active: !drafts.isEmpty)
-            guideItem(3, "Start", "Work the chain step by step", active: false)
+    // MARK: Title + guide
+
+    private var titleArea: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("NEW PLAN").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            TextField("Goal", text: $goal, prompt: Text("What do you want to achieve?"), axis: .vertical)
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .font(.title.weight(.bold))
+            let suggestions = (app.goals.activeToday + app.goals.activeMonth).map(\.text)
+            if !suggestions.isEmpty && stage == .describe {
+                Menu {
+                    ForEach(suggestions, id: \.self) { g in Button(g) { goal = g } }
+                } label: {
+                    Label("Use one of my goals", systemImage: "target")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
         }
     }
 
-    private func guideItem(_ n: Int, _ title: String, _ detail: String, active: Bool) -> some View {
+    private var stepGuide: some View {
+        let current: Int = {
+            switch stage {
+            case .describe, .questions: return 1
+            case .brief: return 2
+            case .steps: return drafts.isEmpty ? 3 : 4
+            }
+        }()
+        return HStack(spacing: 14) {
+            guideItem(1, "Describe", "Answer a few questions", n: current)
+            guideItem(2, "Brief", "Agree what done means", n: current)
+            guideItem(3, "Suggest", "Coach proposes steps", n: current)
+            guideItem(4, "Pick & start", "Keep, add, reorder, go", n: current)
+        }
+    }
+
+    private func guideItem(_ i: Int, _ title: String, _ detail: String, n: Int) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Text("\(n)")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(active ? Color.white : Color.secondary)
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(active ? Color.accentColor : Color.secondary.opacity(0.15)))
+            ZStack {
+                Circle().fill(i == n ? Color.accentColor : (i < n ? Color.green.opacity(0.85) : Color.secondary.opacity(0.15)))
+                if i < n {
+                    Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                } else {
+                    Text("\(i)").font(.caption.weight(.bold)).foregroundStyle(i == n ? Color.white : Color.secondary)
+                }
+            }
+            .frame(width: 20, height: 20)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.callout.weight(.semibold))
                 Text(detail).font(.caption).foregroundStyle(.secondary)
@@ -252,20 +244,199 @@ struct PlanDraftView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: Actions
+    // MARK: Stage 1 — describe
+
+    private var describeStage: some View {
+        Card(title: "Tell the coach about this goal", symbol: "text.bubble") {
+            Text("A few sentences is enough: what it is, why it matters, what \"done\" looks like, and what already exists.")
+                .foregroundStyle(.secondary)
+            TextField("Description", text: $details,
+                      prompt: Text("e.g. A stock picker that screens NSE stocks using the new MV2 data; first version should rank the top 20 daily…"),
+                      axis: .vertical)
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(4...10)
+            HStack {
+                if !drafts.isEmpty {
+                    Button("Back to steps") { stage = .steps }.buttonStyle(.borderless)
+                }
+                Button("Skip questions") { Task { await skipToSteps() } }
+                    .buttonStyle(.borderless)
+                    .disabled(goalText.isEmpty || loading)
+                Spacer()
+                if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
+                Button { Task { await askQuestions() } } label: {
+                    Label("Ask me questions", systemImage: "questionmark.bubble")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(goalText.isEmpty || loading)
+            }
+        }
+    }
+
+    // MARK: Stage 2 — questions
+
+    private var questionsStage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !answered.isEmpty {
+                Card(title: "Already answered", symbol: "checkmark.bubble") {
+                    ForEach(answered) { q in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(q.question).font(.callout.weight(.semibold))
+                            Text(q.answer.isEmpty ? "(skipped)" : q.answer).font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            Card(title: round == 1 ? "A few questions first" : "Just a couple more", symbol: "questionmark.bubble") {
+                ForEach($qa) { $q in
+                    if !q.answered { QuestionCard(item: $q) }
+                }
+                HStack {
+                    Button("Back") { stage = .describe }.buttonStyle(.borderless)
+                    Spacer()
+                    if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
+                    Button { Task { await submitAnswers() } } label: { Label("Continue", systemImage: "arrow.right") }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(loading)
+                }
+            }
+        }
+    }
+
+    // MARK: Stage 3 — brief
+
+    private var briefStage: some View {
+        Card(title: "Goal brief", symbol: "doc.text.magnifyingglass") {
+            Text("Check this is right — the steps will be built from it. Edit anything.")
+                .foregroundStyle(.secondary)
+            briefField("Summary", $brief.summary)
+            briefField("Outcome", $brief.outcome)
+            briefField("Done when", $brief.doneWhen)
+            briefField("Scope", $brief.scope)
+            briefField("Constraints", $brief.constraints)
+            briefField("Context", $brief.context)
+            HStack {
+                Button("Ask more questions") { Task { await moreQuestions() } }
+                    .buttonStyle(.borderless)
+                    .disabled(loading)
+                Spacer()
+                if loading { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
+                Button { Task { await approveBrief() } } label: {
+                    Label("Looks right — suggest steps", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(loading)
+            }
+        }
+    }
+
+    private func briefField(_ label: String, _ text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            TextField(label, text: text, axis: .vertical)
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...4)
+        }
+    }
+
+    // MARK: Stage 4 — steps
+
+    private var stepsStage: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if hasBrief {
+                Card(title: "Goal brief", symbol: "doc.text") {
+                    if !brief.summary.isEmpty { Text(brief.summary) }
+                    if !brief.doneWhen.isEmpty {
+                        Label("Done when: \(brief.doneWhen)", systemImage: "flag.checkered")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    Button("Edit brief") { stage = .brief }.buttonStyle(.borderless)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: "lightbulb").foregroundStyle(.orange)
+                    Text("These steps were made without a goal brief. Describe the goal for steps that fit it properly.")
+                        .font(.callout)
+                    Spacer()
+                    Button("Describe this goal") { stage = .describe }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
+            }
+
+            Card(title: "Steps", symbol: "list.number") {
+                if drafts.isEmpty && !loading {
+                    Text("Ask the coach for a breakdown, or add your own steps below.").foregroundStyle(.secondary)
+                }
+                ForEach($drafts) { $d in
+                    DraftRow(draft: $d,
+                             isFirst: d.id == drafts.first?.id,
+                             isLast: d.id == drafts.last?.id,
+                             onMove: { move(d.id, by: $0) },
+                             onDelete: { drafts.removeAll { $0.id == d.id } })
+                }
+                if loading {
+                    HStack { ProgressView().controlSize(.small); Text(loadingText).foregroundStyle(.secondary) }
+                }
+                HStack {
+                    Image(systemName: "plus.circle").foregroundStyle(.secondary)
+                    TextField("Add a missing step…", text: $newStep)
+                        .textFieldStyle(.plain)
+                        .onSubmit(addStep)
+                    Button("Add", action: addStep)
+                        .disabled(newStep.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(.top, 4)
+            }
+
+            HStack(spacing: 12) {
+                Button { Task { await suggest() } } label: {
+                    Label(drafts.contains { $0.source == .ai } ? "Suggest again" : "Suggest steps", systemImage: "sparkles")
+                }
+                .disabled(loading || goalText.isEmpty)
+                Button("Delete draft", role: .destructive) {
+                    plans.delete(planID)
+                    nav.selectedPlan = nil
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                Text("\(picked.count) steps\(totalMinutes > 0 ? " · about \(durationText(Double(totalMinutes) * 60))" : "")")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Button { startPlan() } label: { Label("Start plan", systemImage: "play.fill") }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(picked.isEmpty || goalText.isEmpty)
+            }
+        }
+    }
+
+    // MARK: Load / save
 
     private func load() {
         guard !loaded, let plan = plans.plan(planID) else { return }
-        loaded = true
         goal = plan.goal
+        details = plan.details ?? ""
+        qa = plan.clarifications ?? []
+        round = (qa.map(\.round).max() ?? 0) + (qa.contains { !$0.answered } ? 0 : 1)
+        round = max(1, min(round, qa.contains { !$0.answered } ? (qa.map(\.round).max() ?? 1) : round))
+        if let b = plan.brief { brief = b; hasBrief = true }
         drafts = plan.steps.map {
             DraftStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
                       included: $0.status != .skipped)
         }
-        if nav.autoSuggestPlan == planID {
-            nav.autoSuggestPlan = nil
-            Task { await suggest() }
-        }
+        if !drafts.isEmpty { stage = .steps }
+        else if hasBrief { stage = .brief }
+        else if !pending.isEmpty { stage = .questions }
+        else { stage = .describe }
+        loaded = true
+        if nav.autoSuggestPlan == planID { nav.autoSuggestPlan = nil }   // interview first
     }
 
     /// Drafts are saved on the plan: unticked steps are stored as "skipped".
@@ -273,6 +444,9 @@ struct PlanDraftView: View {
         guard loaded else { return }
         plans.update(planID) { plan in
             plan.goal = goal
+            plan.details = details.isEmpty ? nil : details
+            plan.clarifications = qa.isEmpty ? nil : qa
+            plan.brief = hasBrief ? brief : nil
             plan.steps = drafts.map {
                 PlanStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source,
                          status: $0.included ? .todo : .skipped)
@@ -280,14 +454,92 @@ struct PlanDraftView: View {
         }
     }
 
+    private func busy(_ text: String) { loading = true; loadingText = text; error = nil }
+
+    // MARK: Interview actions
+
+    private func askQuestions() async {
+        busy("Thinking of questions…")
+        round = 1
+        await fetchQuestions()
+    }
+
+    private func moreQuestions() async {
+        busy("Thinking of follow-ups…")
+        round = max(2, (qa.map(\.round).max() ?? 1) + 1)
+        await fetchQuestions()
+    }
+
+    private func fetchQuestions() async {
+        do {
+            let result = try await app.coach.clarifyingQuestions(goal: goalText, details: details,
+                                                                 answered: answered, round: round, plans: plans)
+            if result.ready || result.questions.isEmpty {
+                loading = false
+                await makeBrief()
+                return
+            }
+            qa.removeAll { !$0.answered }
+            qa += result.questions
+            stage = .questions
+            persist()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        loading = false
+    }
+
+    private func submitAnswers() async {
+        for i in qa.indices where !qa[i].answered {
+            qa[i].answer = qa[i].answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            qa[i].answered = true
+        }
+        persist()
+        // One follow-up round at most, then write the brief.
+        if round < 2 {
+            busy("Checking for gaps…")
+            round = 2
+            await fetchQuestions()
+        } else {
+            await makeBrief()
+        }
+    }
+
+    private func makeBrief() async {
+        busy("Writing the goal brief…")
+        do {
+            brief = try await app.coach.writeBrief(goal: goalText, details: details, answered: answered)
+            hasBrief = true
+            stage = .brief
+            persist()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        loading = false
+    }
+
+    private func approveBrief() async {
+        hasBrief = true
+        persist()
+        stage = .steps
+        await suggest()
+    }
+
+    private func skipToSteps() async {
+        stage = .steps
+        if drafts.isEmpty { await suggest() }
+    }
+
+    // MARK: Step actions
+
     private func suggest() async {
-        let g = goal.trimmingCharacters(in: .whitespaces)
-        guard !g.isEmpty else { return }
-        loading = true
-        error = nil
+        guard !goalText.isEmpty else { return }
+        busy("Breaking it down…")
         do {
             let mine = drafts.filter { $0.source == .user }
-            let steps = try await app.coach.suggestPlanSteps(goal: g, existing: mine.map(\.text), plans: plans)
+            let steps = try await app.coach.suggestPlanSteps(goal: goalText, brief: hasBrief ? brief : nil,
+                                                             details: details, answered: answered,
+                                                             existing: mine.map(\.text), plans: plans)
             // Replace previous AI suggestions, keep the user's own steps after them.
             drafts = steps.map { DraftStep(text: $0.text, minutes: $0.minutes, why: $0.why, source: .ai) } + mine
         } catch {
@@ -312,8 +564,9 @@ struct PlanDraftView: View {
 
     private func startPlan() {
         let chosen = picked
+        persist()
         plans.update(planID) { plan in
-            plan.goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            plan.goal = goalText
             plan.steps = chosen.map {
                 PlanStep(id: $0.id, text: $0.text, minutes: $0.minutes, why: $0.why, source: $0.source)
             }
@@ -322,6 +575,39 @@ struct PlanDraftView: View {
             let ai = chosen.filter { $0.source == .ai }.count
             plan.log(.started, "Started with \(chosen.count) steps (\(ai) suggested, \(chosen.count - ai) added by you)")
         }
+    }
+}
+
+/// One clarifying question with quick-answer chips and a free-text answer.
+struct QuestionCard: View {
+    @Binding var item: Clarification
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.question).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+            if let why = item.why, !why.isEmpty {
+                Text(why).font(.caption).foregroundStyle(.secondary)
+            }
+            if !item.options.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(item.options.prefix(4), id: \.self) { option in
+                        Button(option) {
+                            if item.answer.isEmpty { item.answer = option }
+                            else if !item.answer.contains(option) { item.answer += "; " + option }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            TextField("Answer", text: $item.answer, prompt: Text("Your answer (leave blank to skip)"), axis: .vertical)
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...4)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
     }
 }
 
