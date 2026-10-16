@@ -22,6 +22,7 @@ xcodebuild \
   -destination "generic/platform=macOS" \
   ARCHS="arm64 x86_64" \
   ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
   CODE_SIGN_IDENTITY="-" \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM="" \
