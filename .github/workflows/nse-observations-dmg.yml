@@ -68,6 +68,7 @@ jobs:
           ls -la "$SRC" || true
           mkdir -p docs/screenshots
           cp "$SRC"/*.png docs/screenshots/
+          grep COMPRESS shots.log | sed 's/^COMPRESS //; s/ | /\n/g' > docs/screenshots/compression.txt || true
           for f in docs/screenshots/*.png; do echo "::notice title=Screenshot::$(basename "$f") $(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/{printf "%s ", $2}')"; done
 
       - name: Commit screenshots
