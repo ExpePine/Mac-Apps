@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum DetailTab: String, CaseIterable, Identifiable {
-    case notes = "Observations", trades = "Trades", ai = "AI Analysis"
+    case notes = "Observations", news = "News", trades = "Trades", ai = "AI Analysis"
     var id: String { rawValue }
 }
 
@@ -11,6 +11,8 @@ private enum ActiveSheet: Identifiable {
     case newTrade
     case editTrade(Trade)
     case editSymbol
+    case newNews
+    case editNews(NewsItem)
 
     var id: String {
         switch self {
@@ -19,6 +21,8 @@ private enum ActiveSheet: Identifiable {
         case .newTrade: return "newTrade"
         case .editTrade(let t): return "trade-\(t.id)"
         case .editSymbol: return "symbol"
+        case .newNews: return "newNews"
+        case .editNews(let n): return "news-\(n.id)"
         }
     }
 }
@@ -62,11 +66,12 @@ struct SymbolDetailView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: 520)
 
                     switch tab {
                     case .notes: notesSection
                     case .trades: tradesSection
+                    case .news: newsSection
                     case .ai: aiSection(symbol)
                     }
                 }
@@ -103,6 +108,8 @@ struct SymbolDetailView: View {
                     case .newTrade: TradeEditor(symbolID: symbolID, existing: nil)
                     case .editTrade(let t): TradeEditor(symbolID: symbolID, existing: t)
                     case .editSymbol: SymbolEditor(existing: symbol)
+                    case .newNews: NewsEditor(existing: nil, defaultSymbolID: symbolID)
+                    case .editNews(let n): NewsEditor(existing: n)
                     }
                 }
                 .environmentObject(store)
@@ -288,6 +295,30 @@ struct SymbolDetailView: View {
         }
     }
 
+    // MARK: News
+
+    private var newsSection: some View {
+        let items = store.news(for: nil).filter { $0.symbolID == symbolID }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("\(items.count) news summar\(items.count == 1 ? "y" : "ies")").font(.headline)
+                Spacer()
+                Button { sheet = .newNews } label: { Label("Add News Summary", systemImage: "plus") }
+            }
+            if items.isEmpty {
+                Card {
+                    Text("Paste news summaries you gather (from ChatGPT, Perplexity or news sites) to keep them next to your chart notes. The AI features read them too.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ForEach(items) { n in
+                NewsCard(item: n, outcome: ObservationOutcome.compute(for: n.date, candles: candles), showSymbol: false) {
+                    sheet = .editNews(n)
+                }
+            }
+        }
+    }
+
     // MARK: Trades
 
     private var tradesSection: some View {
@@ -460,6 +491,8 @@ struct ObservationCard: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 if !observation.tags.isEmpty { TagChips(tags: observation.tags) }
+
+                if !observation.imageFiles.isEmpty { AttachmentThumbnails(names: observation.imageFiles) }
 
                 if let oc = outcome {
                     HStack(spacing: 14) {

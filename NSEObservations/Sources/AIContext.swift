@@ -73,6 +73,11 @@ enum AIContext {
                 out += "- \(Fmt.isoDay.string(from: t.date)) \(t.side.title) \(formatQty(t.quantity)) @ \(String(format: "%.2f", t.price))\(t.note.isEmpty ? "" : " (\(t.note))")\n"
             }
         }
+        let news = store.news(for: nil).filter { $0.symbolID == s.id }.sorted { $0.date < $1.date }
+        if !news.isEmpty {
+            out += "News summaries the trader saved (oldest first):\n"
+            for n in news { out += newsLine(n) }
+        }
         let obs = store.observations(for: s.id).sorted { $0.date < $1.date }
         out += "Observations (oldest first):\n"
         for o in obs {
@@ -92,19 +97,57 @@ enum AIContext {
         let ordered = symbols.sorted {
             (store.lastObservationDate(for: $0.id) ?? .distantPast) > (store.lastObservationDate(for: $1.id) ?? .distantPast)
         }
-        var text = ""
         var included = 0
-        for s in ordered where store.observationCount(for: s.id) > 0 || !store.trades(for: s.id).isEmpty {
+        func hasContent(_ s: TrackedSymbol) -> Bool {
+            store.observationCount(for: s.id) > 0 || !store.trades(for: s.id).isEmpty
+                || store.data.news.contains { $0.symbolID == s.id }
+        }
+        // General market news and Pine Script change notes go first, within a small share of the budget.
+        var text = extrasBlock(store: store, budget: budget / 5)
+        for s in ordered where hasContent(s) {
             let block = symbolBlock(s, store: store, series: seriesBySymbol[s.yahooSymbol], includeOutcomes: includeOutcomes)
             if text.count + block.count > budget {
-                if included == 0 { text = String(block.prefix(budget)); included = 1 }
+                if included == 0 { text += String(block.prefix(max(0, budget - text.count))); included = 1 }
                 break
             }
             text += block + "\n"
             included += 1
         }
-        let total = ordered.filter { store.observationCount(for: $0.id) > 0 || !store.trades(for: $0.id).isEmpty }.count
+        let total = ordered.filter(hasContent).count
         return (text, included, max(0, total - included))
+    }
+
+    static func newsLine(_ n: NewsItem) -> String {
+        let body = n.text.replacingOccurrences(of: "\n", with: " ")
+        let clipped = body.count > 700 ? String(body.prefix(700)) + "…" : body
+        return "- [\(Fmt.isoDay.string(from: n.date))]\(n.source.isEmpty ? "" : " (\(n.source))") \(n.title): \(clipped)\n"
+    }
+
+    /// Market-wide news and Pine Script version notes (code is not sent).
+    static func extrasBlock(store: Store, budget: Int) -> String {
+        var out = ""
+        let market = store.data.news.filter { $0.symbolID == nil }.sorted { $0.date > $1.date }
+        if !market.isEmpty {
+            out += "## Market / general news summaries (newest first)\n"
+            for n in market {
+                let line = newsLine(n)
+                if out.count + line.count > budget { break }
+                out += line
+            }
+            out += "\n"
+        }
+        if !store.data.scripts.isEmpty {
+            out += "## Pine Script strategy versions (change notes only)\n"
+            for sc in store.scriptsByRecent {
+                for v in sc.versions.sorted(by: { $0.number < $1.number }) {
+                    let line = "- \(sc.name) v\(v.number) [\(Fmt.isoDay.string(from: v.date))]: \(v.note.isEmpty ? "no note" : v.note)\n"
+                    if out.count + line.count > budget { break }
+                    out += line
+                }
+            }
+            out += "\n"
+        }
+        return out
     }
 
     // MARK: Prompts

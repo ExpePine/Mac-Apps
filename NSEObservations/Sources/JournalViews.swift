@@ -391,7 +391,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Your journal")
                 } footer: {
-                    Text("Everything stays on this Mac. Import merges a backup into your current journal.")
+                    Text("Everything stays on this Mac. Export Backup saves notes, trades, news and Pine Script versions as one JSON file; screenshot images live in the Attachments folder, so copy that folder too for a full backup. Import merges a backup into your current journal.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
@@ -415,6 +415,42 @@ struct SettingsView: View {
                     Text("Used for search-as-you-type when adding symbols. The app tries to refresh it from NSE weekly; if NSE blocks the request, the current list keeps working.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section {
+                    LabeledContent("Saved in the app") {
+                        HStack {
+                            Text("\(store.data.scripts.count) script\(store.data.scripts.count == 1 ? "" : "s"), \(store.data.scripts.reduce(0) { $0 + $1.versions.count }) versions")
+                            Button("Show in Finder") { store.revealFolder(store.scriptsFolder) }
+                        }
+                    }
+                    LabeledContent("Safe folder") {
+                        HStack {
+                            if let name = store.mirrorFolderName {
+                                Label(name, systemImage: "checkmark.shield.fill").foregroundStyle(.green)
+                                Button("Change…") { store.chooseMirrorFolder() }
+                                Button("Stop") { store.stopMirroring() }
+                            } else {
+                                Text("Not set").foregroundStyle(.secondary)
+                                Button("Choose Folder…") { store.chooseMirrorFolder() }
+                            }
+                        }
+                    }
+                    if store.mirrorFolderName != nil {
+                        Button("Copy All Versions Again") { store.copyAllScriptsToMirror() }
+                    }
+                } header: {
+                    Text("Pine Scripts")
+                } footer: {
+                    Text("Every version is saved as a .pine file inside the app. Pick a safe folder (for example in iCloud Drive or a backup disk) and each new version is also copied there automatically, organised as Script Name/v3_date.pine. Deleting a version in the app never deletes these files.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Screenshots") {
+                    HStack {
+                        Text("Chart screenshots you attach are stored in the app's Attachments folder.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Show in Finder") { store.revealFolder(store.attachmentsFolder) }
+                    }
+                }
                 Section("Prices") {
                     Text("Daily OHLC comes from Yahoo Finance's public chart endpoint using the .NS suffix (e.g. RELIANCE → RELIANCE.NS). It is unofficial and can change or rate-limit without notice. For indices, enter the Yahoo symbol directly, e.g. ^NSEI for Nifty 50.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -423,7 +459,7 @@ struct SettingsView: View {
             .formStyle(.grouped)
             .tabItem { Label("Data", systemImage: "externaldrive") }
         }
-        .frame(width: 580, height: 600)
+        .frame(width: 620, height: 680)
         .task { if settings.hasKey && models.isEmpty { await refreshModels() } }
     }
 

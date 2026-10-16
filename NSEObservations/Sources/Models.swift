@@ -100,6 +100,51 @@ struct Observation: Identifiable, Codable, Hashable {
     var notedPrice: Double? = nil
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    /// Chart screenshots: file names inside the app's Attachments folder.
+    var attachments: [String]? = nil
+
+    var imageFiles: [String] { attachments ?? [] }
+}
+
+// MARK: - News summaries (pasted by you)
+
+struct NewsItem: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    /// nil = general market news, not tied to one stock.
+    var symbolID: UUID?
+    var date: Date = Date()
+    var title: String = ""
+    /// Where the summary came from, e.g. ChatGPT, Perplexity, Moneycontrol.
+    var source: String = ""
+    var text: String = ""
+    var createdAt: Date = Date()
+}
+
+// MARK: - Pine Script library
+
+struct ScriptVersion: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var number: Int
+    var date: Date = Date()
+    var code: String
+    /// What changed in this version.
+    var note: String = ""
+    var linesAdded: Int? = nil
+    var linesRemoved: Int? = nil
+    /// File written to the app's PineScripts folder for this version.
+    var fileName: String? = nil
+}
+
+struct PineScript: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var name: String
+    var notes: String = ""
+    var symbolIDs: [UUID] = []
+    var createdAt: Date = Date()
+    var versions: [ScriptVersion] = []
+
+    var latest: ScriptVersion? { versions.max { $0.number < $1.number } }
+    var updatedAt: Date { versions.map(\.date).max() ?? createdAt }
 }
 
 // MARK: - Trades
@@ -154,12 +199,66 @@ struct ChatMessage: Identifiable, Codable, Hashable {
 // MARK: - Root document
 
 struct AppData: Codable {
-    var version: Int = 1
+    var version: Int = 2
     var symbols: [TrackedSymbol] = []
     var observations: [Observation] = []
     var trades: [Trade] = []
     var analyses: [SavedAnalysis] = []
     var chat: [ChatMessage] = []
+    var news: [NewsItem] = []
+    var scripts: [PineScript] = []
+}
+
+extension AppData {
+    /// Tolerates files from older versions of the app that lack newer sections.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        symbols = try c.decodeIfPresent([TrackedSymbol].self, forKey: .symbols) ?? []
+        observations = try c.decodeIfPresent([Observation].self, forKey: .observations) ?? []
+        trades = try c.decodeIfPresent([Trade].self, forKey: .trades) ?? []
+        analyses = try c.decodeIfPresent([SavedAnalysis].self, forKey: .analyses) ?? []
+        chat = try c.decodeIfPresent([ChatMessage].self, forKey: .chat) ?? []
+        news = try c.decodeIfPresent([NewsItem].self, forKey: .news) ?? []
+        scripts = try c.decodeIfPresent([PineScript].self, forKey: .scripts) ?? []
+    }
+}
+
+// MARK: - Line diff (for Pine Script versions)
+
+enum LineDiff: Hashable {
+    case same(String), added(String), removed(String)
+
+    /// LCS-based line diff. Returns nil when the inputs are too large to compare quickly.
+    static func compute(_ old: [String], _ new: [String]) -> [LineDiff]? {
+        let n = old.count, m = new.count
+        guard n * m <= 6_000_000 else { return nil }
+        var table = [Int32](repeating: 0, count: (n + 1) * (m + 1))
+        let w = m + 1
+        if n > 0 && m > 0 {
+            for i in stride(from: n - 1, through: 0, by: -1) {
+                for j in stride(from: m - 1, through: 0, by: -1) {
+                    table[i * w + j] = old[i] == new[j]
+                        ? table[(i + 1) * w + j + 1] + 1
+                        : max(table[(i + 1) * w + j], table[i * w + j + 1])
+                }
+            }
+        }
+        var out: [LineDiff] = []
+        var i = 0, j = 0
+        while i < n && j < m {
+            if old[i] == new[j] { out.append(.same(old[i])); i += 1; j += 1 }
+            else if table[(i + 1) * w + j] >= table[i * w + j + 1] { out.append(.removed(old[i])); i += 1 }
+            else { out.append(.added(new[j])); j += 1 }
+        }
+        while i < n { out.append(.removed(old[i])); i += 1 }
+        while j < m { out.append(.added(new[j])); j += 1 }
+        return out
+    }
+
+    static func lines(_ code: String) -> [String] {
+        code.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+    }
 }
 
 // MARK: - Market data

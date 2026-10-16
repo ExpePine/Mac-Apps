@@ -184,6 +184,8 @@ struct ObservationEditor: View {
     @State private var text = ""
     @State private var tags = ""
     @State private var price = ""
+    @State private var images: [String] = []
+    @State private var pendingImages: [PendingImage] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -211,6 +213,8 @@ struct ObservationEditor: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             }
 
+            AttachmentEditorStrip(existing: $images, pending: $pendingImages)
+
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
@@ -221,9 +225,10 @@ struct ObservationEditor: View {
             }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(width: 560)
         .onAppear {
             if let e = existing {
+                images = e.imageFiles
                 date = e.date; timeframe = e.timeframe; sentiment = e.sentiment; text = e.text
                 tags = e.tags.joined(separator: ", ")
                 price = e.notedPrice.map { String(format: "%.2f", $0) } ?? ""
@@ -239,6 +244,11 @@ struct ObservationEditor: View {
         o.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         o.tags = Fmt.tags(from: tags)
         o.notedPrice = Double(price.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces))
+        // Images: delete the ones you removed, save the new ones as PNG files.
+        for removed in Set(o.imageFiles).subtracting(images) { store.deleteImage(removed) }
+        let added = pendingImages.compactMap { ImageIO.png(from: $0.image) }.compactMap { store.saveImage($0) }
+        let all = images + added
+        o.attachments = all.isEmpty ? nil : all
         store.upsert(o)
         dismiss()
     }

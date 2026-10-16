@@ -49,6 +49,77 @@ enum DemoData {
         return out
     }
 
+    static let pineV1 = """
+    //@version=5
+    strategy("EMA Pullback", overlay=true)
+    fast = ta.ema(close, 20)
+    longCond = ta.crossover(close, fast)
+    if longCond
+        strategy.entry("Long", strategy.long)
+    strategy.exit("Exit", "Long", loss=200, profit=400)
+    plot(fast, color=color.orange)
+    """
+
+    static let pineV2 = """
+    //@version=5
+    strategy("EMA Pullback", overlay=true)
+    fast = ta.ema(close, 20)
+    slow = ta.ema(close, 50)
+    trendUp = fast > slow
+    longCond = trendUp and ta.crossover(close, fast)
+    if longCond
+        strategy.entry("Long", strategy.long)
+    strategy.exit("Exit", "Long", loss=200, profit=400)
+    plot(fast, color=color.orange)
+    plot(slow, color=color.blue)
+    """
+
+    static let pineV3 = """
+    //@version=5
+    strategy("EMA Pullback", overlay=true)
+    fast = ta.ema(close, 20)
+    slow = ta.ema(close, 50)
+    atr = ta.atr(14)
+    volOK = volume > ta.sma(volume, 20) * 1.5
+    trendUp = fast > slow
+    longCond = trendUp and ta.crossover(close, fast) and volOK
+    if longCond
+        strategy.entry("Long", strategy.long)
+    strategy.exit("Exit", "Long", stop=close - 1.5 * atr, limit=close + 3 * atr)
+    plot(fast, color=color.orange)
+    plot(slow, color=color.blue)
+    """
+
+    /// A simple candle chart drawn in code, standing in for a TradingView screenshot.
+    static func chartImage(_ all: [Candle]) -> NSImage {
+        let candles = Array(all.suffix(80))
+        let size = NSSize(width: 1200, height: 640)
+        return NSImage(size: size, flipped: false) { rect in
+            NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.12, alpha: 1).setFill()
+            rect.fill()
+            guard let lo = candles.map(\.low).min(), let hi = candles.map(\.high).max(), hi > lo else { return true }
+            let pad: CGFloat = 40
+            func y(_ v: Double) -> CGFloat { pad + CGFloat((v - lo) / (hi - lo)) * (rect.height - 2 * pad) }
+            NSColor(white: 1, alpha: 0.06).setStroke()
+            for k in 0...4 {
+                let gy = pad + CGFloat(k) / 4 * (rect.height - 2 * pad)
+                let p = NSBezierPath(); p.move(to: NSPoint(x: pad, y: gy)); p.line(to: NSPoint(x: rect.width - pad, y: gy)); p.stroke()
+            }
+            let step = (rect.width - 2 * pad) / CGFloat(max(candles.count, 1))
+            for (i, c) in candles.enumerated() {
+                let x = pad + step * (CGFloat(i) + 0.5)
+                (c.close >= c.open ? NSColor.systemGreen : NSColor.systemRed).set()
+                let wick = NSBezierPath(); wick.move(to: NSPoint(x: x, y: y(c.low))); wick.line(to: NSPoint(x: x, y: y(c.high))); wick.lineWidth = 1.5; wick.stroke()
+                let top = y(max(c.open, c.close)), bottom = y(min(c.open, c.close))
+                NSBezierPath(rect: NSRect(x: x - step * 0.35, y: bottom, width: step * 0.7, height: max(top - bottom, 1.5))).fill()
+            }
+            let title = "RELIANCE · 1D · sample screenshot" as NSString
+            title.draw(at: NSPoint(x: pad, y: rect.height - 32),
+                       withAttributes: [.foregroundColor: NSColor(white: 1, alpha: 0.75), .font: NSFont.systemFont(ofSize: 18, weight: .semibold)])
+            return true
+        }
+    }
+
     struct DemoSet {
         var data: AppData
         var series: [String: QuoteSeries]
@@ -149,6 +220,20 @@ enum DemoData {
         _Sample analysis generated for the screenshot — your own will come from Groq._
         """, model: AppSettings.defaultModel, createdAt: daysAgo(1, 20, 10)))
 
+        if let rel = ids["RELIANCE"], let bel = ids["BEL"] {
+            data.news = [
+                NewsItem(symbolID: rel, date: daysAgo(9, 8, 45), title: "Q2 results: refining margins recover, retail steady",
+                         source: "ChatGPT",
+                         text: "Summary: Q2 EBITDA up ~6% QoQ on better refining margins. Retail growth steady; telecom ARPU up after tariff changes. Management flagged higher capex for new energy. Street reaction: mildly positive; key watch is gross refining margin trend next quarter."),
+                NewsItem(symbolID: bel, date: daysAgo(30, 19, 10), title: "Large defence order win",
+                         source: "Perplexity",
+                         text: "BEL announced orders worth a few thousand crore for radar and communication systems. Order book now covers ~3 years of revenue. Analysts see execution as the main risk."),
+                NewsItem(symbolID: nil, date: daysAgo(3, 7, 50), title: "RBI policy: rates on hold, stance neutral",
+                         source: "Moneycontrol",
+                         text: "RBI kept the repo rate unchanged and retained a neutral stance. Inflation projection trimmed slightly. Banks and rate-sensitive sectors reacted mildly positive.")
+            ]
+        }
+
         data.chat = [
             ChatMessage(role: .user, content: "Where were my bearish calls wrong?", date: daysAgo(0, 9, 30)),
             ChatMessage(role: .assistant, content: """
@@ -182,6 +267,28 @@ enum ScreenshotRunner {
         settings.hasKey = true
         let directory = SymbolDirectory()
 
+        // Sample Pine Script with three versions.
+        var script = PineScript(name: "EMA Pullback Strategy")
+        script.notes = "Long on pullbacks to the 20 EMA in an uptrend; daily chart."
+        script.symbolIDs = [demo.featured]
+        store.upsert(script)
+        let cal = Calendar.ist
+        func ago(_ d: Int) -> Date { cal.date(byAdding: .day, value: -d, to: Date()) ?? Date() }
+        store.addVersion(to: script.id, code: DemoData.pineV1, note: "First version", date: ago(120))
+        store.addVersion(to: script.id, code: DemoData.pineV2, note: "Added 50 EMA trend filter", date: ago(60))
+        store.addVersion(to: script.id, code: DemoData.pineV3, note: "Volume filter, stop at 1.5× ATR", date: ago(6))
+
+        // A sample chart screenshot attached to the newest RELIANCE note.
+        var editorNote: Observation?
+        if let candles = demo.series["RELIANCE.NS"]?.candles,
+           let png = ImageIO.png(from: DemoData.chartImage(candles)),
+           let name = store.saveImage(png),
+           var latest = store.observations(for: demo.featured).first {
+            latest.attachments = [name]
+            store.upsert(latest)
+            editorNote = latest
+        }
+
         func env<V: View>(_ v: V) -> AnyView {
             AnyView(v.environmentObject(store).environmentObject(settings).environmentObject(directory))
         }
@@ -196,6 +303,12 @@ enum ScreenshotRunner {
         await snap(env(ContentView(initialSelection: .chat)), size: main, name: "5-chat", dir: dir)
         await snap(env(SymbolEditor(existing: nil, initialQuery: "tata")), size: CGSize(width: 520, height: 640),
                    name: "6-add-symbol", dir: dir)
+        await snap(env(ContentView(initialSelection: .news)), size: main, name: "7-news", dir: dir)
+        await snap(env(ContentView(initialSelection: .scripts)), size: main, name: "8-pine-scripts", dir: dir)
+        if let note = editorNote {
+            await snap(env(ObservationEditor(symbolID: demo.featured, existing: note)), size: CGSize(width: 560, height: 760),
+                       name: "9-observation-with-screenshot", dir: dir)
+        }
         print("SCREENSHOTS_DIR=\(dir.path)")
     }
 

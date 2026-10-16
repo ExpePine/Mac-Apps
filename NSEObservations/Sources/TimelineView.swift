@@ -47,7 +47,8 @@ enum OutcomeHorizon: String, CaseIterable, Identifiable {
 }
 
 private enum KindFilter: String, CaseIterable, Identifiable {
-    case all = "All", bullish = "Bullish", bearish = "Bearish", neutral = "Neutral", trades = "Trades"
+    case all = "All", bullish = "Bullish", bearish = "Bearish", neutral = "Neutral", trades = "Trades",
+         news = "News", scripts = "Pine Scripts"
     var id: String { rawValue }
 }
 
@@ -74,9 +75,9 @@ enum Verdict {
 
     /// "Worked" = moved the way you called by more than 0.5%.
     static func judge(expectsUp: Bool?, move: Double?, hasPrices: Bool) -> Verdict {
+        guard let up = expectsUp else { return .info }   // neutral notes, news and scripts aren't scored
         guard hasPrices else { return .noData }
         guard let move else { return .tooEarly }
-        guard let up = expectsUp else { return .info }
         let inFavour = up ? move : -move
         if inFavour > 0.5 { return .worked }
         if inFavour < -0.5 { return .failed }
@@ -115,11 +116,27 @@ enum Verdict {
 }
 
 struct TimelineEntry: Identifiable {
-    enum Kind { case observation(Observation), trade(Trade) }
+    enum Kind { case observation(Observation), trade(Trade), news(NewsItem), script(PineScript, ScriptVersion) }
     let id: UUID
     let date: Date
-    let symbol: TrackedSymbol
+    let symbol: TrackedSymbol?
     let kind: Kind
+
+    var heading: String {
+        if let symbol { return symbol.ticker }
+        switch kind {
+        case .news: return "Market"
+        case .script(let s, _): return s.name
+        default: return ""
+        }
+    }
+
+    /// Where clicking the row goes.
+    var target: SidebarItem {
+        if case .script = kind { return .scripts }
+        if let symbol { return .symbol(symbol.id) }
+        return .news
+    }
     /// true = you expected a rise (bullish note / buy), false = a fall (bearish note / sell), nil = neutral.
     let expectsUp: Bool?
     let outcome: ObservationOutcome?
@@ -166,7 +183,7 @@ private struct PeriodGroup: Identifiable {
 
 struct TimelineView: View {
     @EnvironmentObject private var store: Store
-    var openSymbol: (UUID) -> Void
+    var open: (SidebarItem) -> Void
 
     @State private var grouping: TimelineGrouping = .month
     @State private var horizon: OutcomeHorizon = .s20
@@ -186,7 +203,7 @@ struct TimelineView: View {
         for s in store.symbols {
             let candles = series[s.yahooSymbol]?.candles
             let has = !(candles ?? []).isEmpty
-            if filter != .trades {
+            if [.all, .bullish, .bearish, .neutral].contains(filter) {
                 for o in store.observations(for: s.id) {
                     switch filter {
                     case .bullish where o.sentiment != .bullish: continue
@@ -205,6 +222,23 @@ struct TimelineView: View {
                     out.append(TimelineEntry(id: t.id, date: t.date, symbol: s, kind: .trade(t), expectsUp: t.side == .buy,
                                              outcome: candles.flatMap { ObservationOutcome.compute(for: t.date, candles: $0) },
                                              hasPrices: has))
+                }
+            }
+        }
+        if filter == .all || filter == .news {
+            for n in store.data.news {
+                let s = n.symbolID.flatMap { store.symbol($0) }
+                let candles = s.flatMap { series[$0.yahooSymbol]?.candles }
+                out.append(TimelineEntry(id: n.id, date: n.date, symbol: s, kind: .news(n), expectsUp: nil,
+                                         outcome: candles.flatMap { ObservationOutcome.compute(for: n.date, candles: $0) },
+                                         hasPrices: candles != nil))
+            }
+        }
+        if filter == .all || filter == .scripts {
+            for sc in store.data.scripts {
+                for v in sc.versions {
+                    out.append(TimelineEntry(id: v.id, date: v.date, symbol: nil, kind: .script(sc, v), expectsUp: nil,
+                                             outcome: nil, hasPrices: false))
                 }
             }
         }
@@ -230,7 +264,7 @@ struct TimelineView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Timeline")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text("Every note and trade across your symbols, by date — and whether the price moved the way you called.")
+                    Text("Every note, trade, news summary and Pine Script version, by date — and whether the price moved the way you called.")
                         .foregroundStyle(.secondary)
                 }
 
@@ -314,10 +348,10 @@ struct TimelineView: View {
                          detail: "\(favours.count) directional entr\(favours.count == 1 ? "y" : "ies")",
                          tint: avg?.changeColor ?? .primary)
                 StatTile(title: "Best call", value: Fmt.pct(best?.moveInFavour(horizon)),
-                         detail: best.map { "\($0.symbol.ticker) · \(Fmt.day.string(from: $0.date))" },
+                         detail: best.map { "\($0.heading) · \(Fmt.day.string(from: $0.date))" },
                          tint: .green)
                 StatTile(title: "Worst call", value: Fmt.pct(worst?.moveInFavour(horizon)),
-                         detail: worst.map { "\($0.symbol.ticker) · \(Fmt.day.string(from: $0.date))" },
+                         detail: worst.map { "\($0.heading) · \(Fmt.day.string(from: $0.date))" },
                          tint: .red)
             }
             Text("“Worked” = price moved more than 0.5% in the direction of your bullish/bearish note or trade (buy = up, sell = down), measured from that day's close. Neutral notes show the move but aren't scored.\(early > 0 ? " \(early) entr\(early == 1 ? "y is" : "ies are") too recent for this horizon." : "")")
@@ -398,7 +432,7 @@ struct TimelineView: View {
                     VStack(spacing: 0) {
                         ForEach(g.entries) { e in
                             TimelineRow(entry: e, horizon: horizon, showDay: grouping != .day) {
-                                openSymbol(e.symbol.id)
+                                open(e.target)
                             }
                             if e.id != g.entries.last?.id { Divider() }
                         }
@@ -409,7 +443,9 @@ struct TimelineView: View {
     }
 
     private func loadPrices(force: Bool) async {
-        let symbols = store.symbols.filter { store.observationCount(for: $0.id) > 0 || !store.trades(for: $0.id).isEmpty }
+        let symbols = store.symbols.filter { s in
+            store.observationCount(for: s.id) > 0 || !store.trades(for: s.id).isEmpty || store.data.news.contains { $0.symbolID == s.id }
+        }
         guard !symbols.isEmpty else { return }
         loading = true
         defer { loading = false }
@@ -450,11 +486,11 @@ private struct TimelineRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
-                        Text(entry.symbol.ticker)
+                        Text(entry.heading)
                             .font(.system(.body, design: .rounded).weight(.semibold))
                         badge
-                        if !entry.symbol.displayName.isEmpty {
-                            Text(entry.symbol.displayName)
+                        if let name = entry.symbol?.displayName, !name.isEmpty {
+                            Text(name)
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
@@ -494,7 +530,12 @@ private struct TimelineRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Open \(entry.symbol.ticker)")
+        .help("Open \(entry.heading)")
+    }
+
+    private var imageCount: Int {
+        if case .observation(let o) = entry.kind { return o.imageFiles.count }
+        return 0
     }
 
     private var detailText: String {
@@ -503,6 +544,11 @@ private struct TimelineRow: View {
             return o.text.replacingOccurrences(of: "\n", with: " ")
         case .trade(let t):
             return "\(t.side.title) \(AIContext.formatQty(t.quantity)) @ \(Fmt.rupees(t.price))\(t.note.isEmpty ? "" : " — \(t.note)")"
+        case .news(let n):
+            return n.title + (n.source.isEmpty ? "" : " — \(n.source)")
+        case .script(_, let v):
+            let delta = v.linesAdded.map { a in " (+\(a) / −\(v.linesRemoved ?? 0) lines)" } ?? ""
+            return (v.note.isEmpty ? "New version" : v.note) + delta
         }
     }
 
@@ -526,6 +572,25 @@ private struct TimelineRow: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(t.side.color.opacity(0.12), in: Capsule())
+        case .news:
+            Label("News", systemImage: "newspaper")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.indigo)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.indigo.opacity(0.12), in: Capsule())
+        case .script(_, let v):
+            Label("Pine v\(v.number)", systemImage: "chevron.left.forwardslash.chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.orange)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.orange.opacity(0.12), in: Capsule())
+        }
+        if imageCount > 0 {
+            Label("\(imageCount)", systemImage: "photo")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 }

@@ -2,6 +2,8 @@ import SwiftUI
 
 enum SidebarItem: Hashable {
     case timeline
+    case news
+    case scripts
     case patterns
     case chat
     case symbol(UUID)
@@ -49,7 +51,11 @@ struct ContentView: View {
     private var detail: some View {
         switch selection {
         case .timeline?:
-            TimelineView { id in selection = .symbol(id) }
+            TimelineView { selection = $0 }
+        case .news?:
+            NewsListView { id in selection = .symbol(id) }
+        case .scripts?:
+            PineScriptsView { id in selection = .symbol(id) }
         case .patterns?:
             PatternsView()
         case .chat?:
@@ -83,6 +89,10 @@ struct SidebarView: View {
             Section("Journal") {
                 Label("Timeline", systemImage: "calendar")
                     .tag(SidebarItem.timeline)
+                Label("News", systemImage: "newspaper")
+                    .tag(SidebarItem.news)
+                Label("Pine Scripts", systemImage: "chevron.left.forwardslash.chevron.right")
+                    .tag(SidebarItem.scripts)
                 Label("Patterns", systemImage: "sparkles")
                     .tag(SidebarItem.patterns)
                 Label("Ask Your Notes", systemImage: "bubble.left.and.bubble.right")

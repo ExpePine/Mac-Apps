@@ -144,7 +144,10 @@ final class Store: ObservableObject {
 
     func deleteSymbol(_ id: UUID) {
         data.symbols.removeAll { $0.id == id }
+        data.observations.filter { $0.symbolID == id }.flatMap(\.imageFiles).forEach(deleteImage)
         data.observations.removeAll { $0.symbolID == id }
+        data.news.removeAll { $0.symbolID == id }
+        for i in data.scripts.indices { data.scripts[i].symbolIDs.removeAll { $0 == id } }
         data.trades.removeAll { $0.symbolID == id }
         data.analyses.removeAll { $0.symbolID == id }
         save()
@@ -168,6 +171,9 @@ final class Store: ObservableObject {
     }
 
     func deleteObservation(_ id: UUID) {
+        if let o = data.observations.first(where: { $0.id == id }) {
+            o.imageFiles.forEach(deleteImage)
+        }
         data.observations.removeAll { $0.id == id }
         save()
     }
@@ -245,6 +251,8 @@ final class Store: ObservableObject {
             data.trades = merge(data.trades, incoming.trades)
             data.analyses = merge(data.analyses, incoming.analyses)
             data.chat = merge(data.chat, incoming.chat).sorted { $0.date < $1.date }
+            data.news = merge(data.news, incoming.news)
+            data.scripts = merge(data.scripts, incoming.scripts)
             save()
         } catch {
             lastError = "Import failed: \(error.localizedDescription)"
@@ -253,5 +261,210 @@ final class Store: ObservableObject {
 
     func revealDataFile() {
         NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+    }
+
+    // MARK: Folders
+
+    var dataFolder: URL { fileURL.deletingLastPathComponent() }
+
+    var attachmentsFolder: URL {
+        let u = dataFolder.appendingPathComponent("Attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+        return u
+    }
+
+    var scriptsFolder: URL {
+        let u = dataFolder.appendingPathComponent("PineScripts", isDirectory: true)
+        try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+        return u
+    }
+
+    func revealFolder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    // MARK: Observation images
+
+    private static let thumbCache = NSCache<NSString, NSImage>()
+
+    func imageURL(_ name: String) -> URL { attachmentsFolder.appendingPathComponent(name) }
+
+    func image(_ name: String) -> NSImage? {
+        if let hit = Self.thumbCache.object(forKey: name as NSString) { return hit }
+        guard let img = NSImage(contentsOf: imageURL(name)) else { return nil }
+        Self.thumbCache.setObject(img, forKey: name as NSString)
+        return img
+    }
+
+    /// Writes PNG data to the Attachments folder and returns the new file name.
+    func saveImage(_ png: Data) -> String? {
+        let name = "\(UUID().uuidString).png"
+        do {
+            try png.write(to: imageURL(name), options: .atomic)
+            return name
+        } catch {
+            lastError = "Couldn't save image: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func deleteImage(_ name: String) {
+        Self.thumbCache.removeObject(forKey: name as NSString)
+        try? FileManager.default.removeItem(at: imageURL(name))
+    }
+
+    // MARK: News
+
+    func news(for symbolID: UUID?) -> [NewsItem] {
+        data.news.filter { symbolID == nil || $0.symbolID == symbolID }.sorted { $0.date > $1.date }
+    }
+
+    func upsert(_ item: NewsItem) {
+        if let i = data.news.firstIndex(where: { $0.id == item.id }) { data.news[i] = item } else { data.news.append(item) }
+        save()
+    }
+
+    func deleteNews(_ id: UUID) {
+        data.news.removeAll { $0.id == id }
+        save()
+    }
+
+    // MARK: Pine scripts
+
+    func script(_ id: UUID) -> PineScript? { data.scripts.first { $0.id == id } }
+
+    var scriptsByRecent: [PineScript] { data.scripts.sorted { $0.updatedAt > $1.updatedAt } }
+
+    func upsert(_ script: PineScript) {
+        if let i = data.scripts.firstIndex(where: { $0.id == script.id }) { data.scripts[i] = script } else { data.scripts.append(script) }
+        save()
+    }
+
+    func deleteScript(_ id: UUID) {
+        data.scripts.removeAll { $0.id == id }
+        save()
+    }
+
+    /// Adds a new version (numbered after the latest), writes it to disk and to the safe folder.
+    @discardableResult
+    func addVersion(to scriptID: UUID, code: String, note: String, date: Date = Date()) -> ScriptVersion? {
+        guard let i = data.scripts.firstIndex(where: { $0.id == scriptID }) else { return nil }
+        let previous = data.scripts[i].latest
+        var v = ScriptVersion(number: (previous?.number ?? 0) + 1, date: date, code: code, note: note)
+        if let prev = previous, let diff = LineDiff.compute(LineDiff.lines(prev.code), LineDiff.lines(code)) {
+            v.linesAdded = diff.filter { if case .added = $0 { return true } else { return false } }.count
+            v.linesRemoved = diff.filter { if case .removed = $0 { return true } else { return false } }.count
+        }
+        v.fileName = writeScriptFile(scriptName: data.scripts[i].name, version: v)
+        data.scripts[i].versions.append(v)
+        save()
+        return v
+    }
+
+    func deleteVersion(_ versionID: UUID, of scriptID: UUID) {
+        guard let i = data.scripts.firstIndex(where: { $0.id == scriptID }) else { return }
+        // The file on disk is kept on purpose: the folder is your safety net.
+        data.scripts[i].versions.removeAll { $0.id == versionID }
+        save()
+    }
+
+    static func safeFileName(_ s: String) -> String {
+        let bad = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        let cleaned = s.components(separatedBy: bad).joined(separator: "-").trimmingCharacters(in: .whitespaces)
+        return cleaned.isEmpty ? "Untitled" : cleaned
+    }
+
+    private static let fileStamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        return f
+    }()
+
+    func relativeScriptPath(scriptName: String, version: ScriptVersion) -> String {
+        "\(Self.safeFileName(scriptName))/v\(version.number)_\(Self.fileStamp.string(from: version.date)).pine"
+    }
+
+    private func writeScriptFile(scriptName: String, version: ScriptVersion) -> String? {
+        let rel = relativeScriptPath(scriptName: scriptName, version: version)
+        let url = scriptsFolder.appendingPathComponent(rel)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try version.code.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            lastError = "Couldn't write script file: \(error.localizedDescription)"
+            return nil
+        }
+        mirror(code: version.code, relativePath: rel)
+        return rel
+    }
+
+    // MARK: Safe folder (a folder you choose, e.g. in iCloud Drive)
+
+    @Published private(set) var mirrorFolderName: String? = MirrorBookmark.resolve()?.lastPathComponent
+
+    var mirrorFolderPath: String? { MirrorBookmark.resolve()?.path }
+
+    func chooseMirrorFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose a safe folder (for example in iCloud Drive). Every Pine Script version will also be saved there."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let bm = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            UserDefaults.standard.set(bm, forKey: MirrorBookmark.key)
+            mirrorFolderName = url.lastPathComponent
+            copyAllScriptsToMirror()
+        } catch {
+            lastError = "Couldn't remember that folder: \(error.localizedDescription)"
+        }
+    }
+
+    func stopMirroring() {
+        UserDefaults.standard.removeObject(forKey: MirrorBookmark.key)
+        mirrorFolderName = nil
+    }
+
+    private func mirror(code: String, relativePath: String) {
+        guard let root = MirrorBookmark.resolve() else { return }
+        let ok = root.startAccessingSecurityScopedResource()
+        defer { if ok { root.stopAccessingSecurityScopedResource() } }
+        let url = root.appendingPathComponent(relativePath)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try code.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            lastError = "Saved inside the app, but couldn't copy to your safe folder: \(error.localizedDescription)"
+        }
+    }
+
+    /// Writes every stored version to the safe folder (existing files are overwritten with the same content).
+    func copyAllScriptsToMirror() {
+        for s in data.scripts {
+            for v in s.versions {
+                mirror(code: v.code, relativePath: v.fileName ?? relativeScriptPath(scriptName: s.name, version: v))
+            }
+        }
+    }
+
+    func exportScriptVersion(_ v: ScriptVersion, scriptName: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(Self.safeFileName(scriptName))_v\(v.number).pine"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try v.code.write(to: url, atomically: true, encoding: .utf8) }
+        catch { lastError = "Export failed: \(error.localizedDescription)" }
+    }
+}
+
+/// Security-scoped bookmark to the Pine Script safe folder the user picked.
+enum MirrorBookmark {
+    static let key = "pineSafeFolderBookmark"
+
+    static func resolve() -> URL? {
+        guard let bm = UserDefaults.standard.data(forKey: key) else { return nil }
+        var stale = false
+        return try? URL(resolvingBookmarkData: bm, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale)
     }
 }

@@ -27,6 +27,7 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true               # Yahoo Finance + Groq
         com.apple.security.files.user-selected.read-write: true  # export / import backups
+        com.apple.security.files.bookmarks.app-scope: true     # remember the Pine Script safe folder
     settings:
       base:
         PRODUCT_NAME: NSE Observations
