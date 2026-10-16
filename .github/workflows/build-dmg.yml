@@ -3,6 +3,9 @@ name: Build DMG
 on:
   push:
     branches: [main]
+    paths-ignore:      # NSE Observations has its own workflow
+      - "NSEObservations/**"
+      - ".github/workflows/nse-observations-dmg.yml"
   workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
 
 permissions:
