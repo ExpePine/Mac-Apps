@@ -1,0 +1,45 @@
+name: NSE Observations DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "NSEObservations/**"
+      - ".github/workflows/nse-observations-dmg.yml"
+  workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: NSEObservations
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build app and DMG
+        run: |
+          chmod +x scripts/build-dmg.sh
+          ./scripts/build-dmg.sh
+
+      - name: Upload DMG (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NSEObservations-dmg
+          path: NSEObservations/dist/NSEObservations.dmg
+
+      - name: Publish Release with DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="nse-observations-build-${{ github.run_number }}"
+          gh release create "$TAG" dist/NSEObservations.dmg \
+            --title "NSE Observations (build ${{ github.run_number }})" \
+            --notes "Download NSEObservations.dmg below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch. Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
