@@ -17,13 +17,13 @@ targets:
         LSUIElement: true                      # menu-bar only, no Dock icon
         NSMicrophoneUsageDescription: Activity Logger records short voice notes about what you worked on.
         NSSpeechRecognitionUsageDescription: Activity Logger converts your voice notes to text.
+        NSAppleEventsUsageDescription: Activity Logger reads the website in your browser's front tab to measure how long you spend on each site. Only domain names are stored, on this Mac.
     entitlements:
       path: Sources/ActivityLogger.entitlements
       properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.device.audio-input: true          # microphone
-        com.apple.security.files.user-selected.read-write: true  # CSV export via Save panel
-        com.apple.security.network.client: true             # server speech recognition fallback
+        com.apple.security.app-sandbox: false                # off: browser tab lookup needs Apple Events to any browser
+        com.apple.security.device.audio-input: true          # microphone (hardened runtime)
+        com.apple.security.automation.apple-events: true     # ask browsers for their front tab URL
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.raj.ActivityLogger

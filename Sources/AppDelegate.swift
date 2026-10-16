@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let scheduler: Scheduler
     let windows: WindowManager
     let reports: ReportService
+    let tracker: UsageTracker
 
     /// The check-in that is waiting for an answer (if any).
     private var pendingPrompt: Prompt?
@@ -23,11 +24,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     override init() {
+        SandboxMigration.runIfNeeded()   // must run before stores load
         settings = SettingsStore()
         store = EntryStore()
         scheduler = Scheduler(settings: settings)
         windows = WindowManager()
-        reports = ReportService(settings: settings, store: store)
+        let usage = UsageStore(baseDirectory: store.directory)
+        tracker = UsageTracker(settings: settings, usage: usage)
+        reports = ReportService(settings: settings, store: store, usage: usage)
         super.init()
 
         scheduler.onPrompt = { [weak self] start, end in
@@ -99,7 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func showEmailSettings() {
-        windows.showEmailSettings(settings: settings, reports: reports)
+        windows.showEmailSettings(settings: settings, reports: reports, tracker: tracker)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        tracker.flush()
     }
 
     private func openSession(for prompt: Prompt) {

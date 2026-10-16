@@ -10,7 +10,8 @@ struct ActivityLoggerApp: App {
                 app: appDelegate,
                 settings: appDelegate.settings,
                 scheduler: appDelegate.scheduler,
-                store: appDelegate.store
+                store: appDelegate.store,
+                tracker: appDelegate.tracker
             )
         } label: {
             MenuBarLabel(scheduler: appDelegate.scheduler)

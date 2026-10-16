@@ -4,6 +4,7 @@ import SwiftUI
 struct EmailSettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var reports: ReportService
+    @ObservedObject var tracker: UsageTracker
 
     @State private var smtpPassword = Keychain.get(Keychain.smtpPassword)
     @State private var groqKey = Keychain.get(Keychain.groqAPIKey)
@@ -71,6 +72,41 @@ struct EmailSettingsView: View {
             }
 
             Section {
+                Toggle("Track active time on websites and apps", isOn: $settings.trackUsage)
+                Toggle("Include it in the daily email", isOn: $settings.includeUsageInEmail)
+                Stepper("Idle after \(settings.idleMinutes) min without keyboard/mouse",
+                        value: $settings.idleMinutes, in: 1...15)
+                TextField("Hide these sites", text: $settings.excludedDomains,
+                          prompt: Text("e.g. hdfcbank.com, mail.google.com"))
+                if !tracker.deniedBrowsers.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No permission to read the tab in: \(tracker.deniedBrowsers.joined(separator: ", "))")
+                            .foregroundStyle(.red)
+                        Text("Turn it on in System Settings → Privacy & Security → Automation → Activity Logger.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if tracker.today.activeSeconds >= 60 {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Today so far: \(durationText(tracker.today.activeSeconds)) active").bold()
+                        ForEach(tracker.today.top(tracker.today.sites, 5), id: \.name) { item in
+                            Text("\(durationText(item.seconds))  \(item.name)").monospacedDigit()
+                        }
+                        ForEach(tracker.today.top(tracker.today.apps, 5), id: \.name) { item in
+                            Text("\(durationText(item.seconds))  \(item.name)")
+                                .monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.callout)
+                }
+            } header: {
+                Text("Website & app tracking")
+            } footer: {
+                Text("Works with Safari, Chrome, Edge, Brave, Arc, Vivaldi and Opera (each asks permission once). Firefox counts as app time only. Only domain names are stored, on this Mac.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 HStack {
                     Button("Send test email now") {
                         Task { await reports.sendTest() }
@@ -93,6 +129,6 @@ struct EmailSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 540, height: 680)
+        .frame(width: 560, height: 760)
     }
 }

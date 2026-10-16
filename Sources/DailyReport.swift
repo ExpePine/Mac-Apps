@@ -158,6 +158,7 @@ final class ReportService: ObservableObject {
 
     private let settings: SettingsStore
     private let store: EntryStore
+    private let usage: UsageStore
     private let defaults = UserDefaults.standard
     private var loop: Task<Void, Never>?
     private var nextRetry: Date?
@@ -167,9 +168,10 @@ final class ReportService: ObservableObject {
         static let lastStatus = "reportLastStatus"
     }
 
-    init(settings: SettingsStore, store: EntryStore) {
+    init(settings: SettingsStore, store: EntryStore, usage: UsageStore) {
         self.settings = settings
         self.store = store
+        self.usage = usage
         lastStatus = UserDefaults.standard.string(forKey: Keys.lastStatus) ?? "No summary sent yet."
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -226,8 +228,11 @@ final class ReportService: ObservableObject {
 
         let dayText = day.formatted(.dateTime.weekday(.wide).day().month(.wide))
         let entries = store.entries(on: day).sorted { $0.periodStart < $1.periodStart }
+        let dayUsage = settings.includeUsageInEmail ? usage.usage(for: day) : nil
+        let hasUsage = (dayUsage?.activeSeconds ?? 0) >= 60
+        let usageText = hasUsage ? Self.usageText(dayUsage!) : ""
 
-        if entries.isEmpty && settings.reportSkipEmptyDays && !isTest {
+        if entries.isEmpty && !hasUsage && settings.reportSkipEmptyDays && !isTest {
             setStatus("No entries for \(dayText) - nothing to send.")
             return true
         }
@@ -235,21 +240,22 @@ final class ReportService: ObservableObject {
         let log = Self.logText(entries)
         var summary: String
         let apiKey = Keychain.get(Keychain.groqAPIKey)
-        if entries.isEmpty {
-            summary = "No check-ins were logged on this day."
+        if entries.isEmpty && !hasUsage {
+            summary = "No check-ins or computer activity were logged on this day."
         } else if apiKey.isEmpty {
             summary = "(Add a Groq API key in Daily email settings to get an AI summary.)"
         } else {
             do {
                 summary = try await Groq.complete(apiKey: apiKey, model: settings.groqModel,
                                                   system: Self.systemPrompt,
-                                                  user: Self.userPrompt(dayText: dayText, entries: entries, log: log))
+                                                  user: Self.userPrompt(dayText: dayText, entries: entries,
+                                                                        log: log, usageText: usageText))
             } catch {
                 summary = "(AI summary unavailable: \(error.localizedDescription))"
             }
         }
 
-        let body = """
+        var body = """
         Good morning!
 
         Here's what you did on \(dayText).
@@ -257,12 +263,21 @@ final class ReportService: ObservableObject {
         \(summary)
 
         ------------------------------
-        FULL LOG
+        CHECK-IN LOG
         ------------------------------
         \(log.isEmpty ? "(no entries)" : log)
-
-        -- Sent by Activity Logger
         """
+        if hasUsage {
+            body += """
+
+
+            ------------------------------
+            WEB & APP TIME (active, idle excluded)
+            ------------------------------
+            \(usageText)
+            """
+        }
+        body += "\n\n-- Sent by Activity Logger"
         let subject = (isTest ? "[Test] " : "") + "Your activity summary - \(dayText)"
 
         do {
@@ -321,7 +336,30 @@ final class ReportService: ObservableObject {
     Write plain text only: no markdown, no asterisks, no # headings. Be concise and specific.
     """
 
-    private static func userPrompt(dayText: String, entries: [Entry], log: String) -> String {
+    static func usageText(_ u: DayUsage) -> String {
+        let timeFmt: (Date?) -> String = { $0?.formatted(date: .omitted, time: .shortened) ?? "-" }
+        var lines = ["Active computer time: \(durationText(u.activeSeconds)) (first \(timeFmt(u.firstActive)), last \(timeFmt(u.lastActive)))"]
+        let sites = u.top(u.sites, 12).filter { $0.seconds >= 60 }
+        if !sites.isEmpty {
+            lines.append("")
+            lines.append("Top websites:")
+            lines += sites.map { "  \(durationText($0.seconds).padding(toLength: 8, withPad: " ", startingAt: 0)) \($0.name)" }
+        }
+        let apps = u.top(u.apps, 10).filter { $0.seconds >= 60 }
+        if !apps.isEmpty {
+            lines.append("")
+            lines.append("Top apps:")
+            lines += apps.map { "  \(durationText($0.seconds).padding(toLength: 8, withPad: " ", startingAt: 0)) \($0.name)" }
+        }
+        let hours = u.hourly.keys.sorted().filter { (u.hourly[$0] ?? 0) >= 60 }
+        if !hours.isEmpty {
+            lines.append("")
+            lines.append("Active by hour: " + hours.map { "\($0):00 \(durationText(u.hourly[$0] ?? 0))" }.joined(separator: " | "))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func userPrompt(dayText: String, entries: [Entry], log: String, usageText: String) -> String {
         let answered = entries.filter { $0.status != .missed && $0.status != .skipped }.count
         let missed = entries.filter { $0.status == .missed }.count
         let skipped = entries.filter { $0.status == .skipped }.count
@@ -329,8 +367,11 @@ final class ReportService: ObservableObject {
         Date: \(dayText)
         Check-ins: \(entries.count) total, \(answered) answered, \(missed) missed, \(skipped) skipped.
 
-        Log (time range, status, what I did):
-        \(log)
+        Check-in log (time range, status, what I did):
+        \(log.isEmpty ? "(no check-ins)" : log)
+
+        Computer activity measured automatically (active time only):
+        \(usageText.isEmpty ? "(not available)" : usageText)
 
         Write the summary in exactly this structure:
 
@@ -342,6 +383,9 @@ final class ReportService: ObservableObject {
 
         TIME BY THEME
         - theme: approximate duration (based on check-in time ranges)
+
+        WEB & APP TIME
+        2-3 lines interpreting the measured website/app time: where most time went, and whether it matches the check-ins. Skip this section if computer activity is not available.
 
         GAPS
         One line about missed/skipped check-ins or unclear stretches (or "None").

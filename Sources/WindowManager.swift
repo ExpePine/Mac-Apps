@@ -53,14 +53,14 @@ final class WindowManager: NSObject, NSWindowDelegate {
         bringToFront(window)
     }
 
-    func showEmailSettings(settings: SettingsStore, reports: ReportService) {
+    func showEmailSettings(settings: SettingsStore, reports: ReportService, tracker: UsageTracker) {
         if let emailWindow {
             bringToFront(emailWindow)
             return
         }
-        let host = NSHostingController(rootView: EmailSettingsView(settings: settings, reports: reports))
+        let host = NSHostingController(rootView: EmailSettingsView(settings: settings, reports: reports, tracker: tracker))
         let window = NSWindow(contentViewController: host)
-        window.title = "Daily Summary Email"
+        window.title = "Daily Email & Tracking"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.delegate = self

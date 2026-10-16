@@ -19,6 +19,10 @@ final class SettingsStore: ObservableObject {
         static let smtpPort = "smtpPort"
         static let smtpUsername = "smtpUsername"
         static let groqModel = "groqModel"
+        static let trackUsage = "trackUsage"
+        static let idleMinutes = "idleMinutes"
+        static let excludedDomains = "excludedDomains"
+        static let includeUsageInEmail = "includeUsageInEmail"
     }
 
     static let intervalPresets = [15, 20, 30, 40, 60]
@@ -55,6 +59,14 @@ final class SettingsStore: ObservableObject {
     @Published var smtpUsername: String { didSet { defaults.set(smtpUsername, forKey: Keys.smtpUsername) } }
     @Published var groqModel: String { didSet { defaults.set(groqModel, forKey: Keys.groqModel) } }
 
+    // MARK: Website & app tracking
+    @Published var trackUsage: Bool { didSet { defaults.set(trackUsage, forKey: Keys.trackUsage) } }
+    /// No keyboard/mouse input for this long = idle (not counted).
+    @Published var idleMinutes: Int { didSet { defaults.set(idleMinutes, forKey: Keys.idleMinutes) } }
+    /// Comma-separated domains to hide, e.g. "hdfcbank.com, mail.google.com".
+    @Published var excludedDomains: String { didSet { defaults.set(excludedDomains, forKey: Keys.excludedDomains) } }
+    @Published var includeUsageInEmail: Bool { didSet { defaults.set(includeUsageInEmail, forKey: Keys.includeUsageInEmail) } }
+
     init() {
         defaults.register(defaults: [
             Keys.interval: 20,
@@ -72,6 +84,10 @@ final class SettingsStore: ObservableObject {
             Keys.smtpPort: 465,
             Keys.smtpUsername: "",
             Keys.groqModel: "openai/gpt-oss-120b",
+            Keys.trackUsage: true,
+            Keys.idleMinutes: 2,
+            Keys.excludedDomains: "",
+            Keys.includeUsageInEmail: true,
         ])
         intervalMinutes = defaults.integer(forKey: Keys.interval)
         entryWindowMinutes = defaults.integer(forKey: Keys.window)
@@ -88,6 +104,10 @@ final class SettingsStore: ObservableObject {
         smtpPort = defaults.integer(forKey: Keys.smtpPort)
         smtpUsername = defaults.string(forKey: Keys.smtpUsername) ?? ""
         groqModel = defaults.string(forKey: Keys.groqModel) ?? "openai/gpt-oss-120b"
+        trackUsage = defaults.bool(forKey: Keys.trackUsage)
+        idleMinutes = max(1, defaults.integer(forKey: Keys.idleMinutes))
+        excludedDomains = defaults.string(forKey: Keys.excludedDomains) ?? ""
+        includeUsageInEmail = defaults.bool(forKey: Keys.includeUsageInEmail)
     }
 }
 

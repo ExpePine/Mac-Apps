@@ -6,6 +6,7 @@ struct MenuContentView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var scheduler: Scheduler
     @ObservedObject var store: EntryStore
+    @ObservedObject var tracker: UsageTracker
 
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var loginError: String?
@@ -62,6 +63,13 @@ struct MenuContentView: View {
 
             Divider()
 
+            HStack {
+                Image(systemName: "globe")
+                Text(settings.trackUsage
+                     ? "Active today: \(durationText(tracker.today.activeSeconds))"
+                     : "Website & app tracking off")
+                Spacer()
+            }
             HStack {
                 Image(systemName: "envelope")
                 Text(settings.reportEnabled
