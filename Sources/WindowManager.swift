@@ -6,6 +6,7 @@ import SwiftUI
 final class WindowManager: NSObject, NSWindowDelegate {
     private var promptWindow: NSWindow?
     private var historyWindow: NSWindow?
+    private var emailWindow: NSWindow?
 
     /// Called when the user closes the check-in window with the red ✕.
     var onPromptClosedByUser: (@MainActor () -> Void)?
@@ -52,6 +53,22 @@ final class WindowManager: NSObject, NSWindowDelegate {
         bringToFront(window)
     }
 
+    func showEmailSettings(settings: SettingsStore, reports: ReportService) {
+        if let emailWindow {
+            bringToFront(emailWindow)
+            return
+        }
+        let host = NSHostingController(rootView: EmailSettingsView(settings: settings, reports: reports))
+        let window = NSWindow(contentViewController: host)
+        window.title = "Daily Summary Email"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        emailWindow = window
+        bringToFront(window)
+    }
+
     private func bringToFront(_ window: NSWindow) {
         if #available(macOS 14.0, *) {
             NSApp.activate()
@@ -68,6 +85,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
             onPromptClosedByUser?()
         } else if window === historyWindow {
             historyWindow = nil
+        } else if window === emailWindow {
+            emailWindow = nil
         }
     }
 }

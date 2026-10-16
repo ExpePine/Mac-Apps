@@ -10,6 +10,15 @@ final class SettingsStore: ObservableObject {
         static let sound = "playSound"
         static let autoTranscribe = "autoTranscribe"
         static let locale = "speechLocaleID"
+        static let reportEnabled = "reportEnabled"
+        static let reportHour = "reportHour"
+        static let reportMinute = "reportMinute"
+        static let reportRecipient = "reportRecipient"
+        static let reportSkipEmpty = "reportSkipEmptyDays"
+        static let smtpHost = "smtpHost"
+        static let smtpPort = "smtpPort"
+        static let smtpUsername = "smtpUsername"
+        static let groqModel = "groqModel"
     }
 
     static let intervalPresets = [15, 20, 30, 40, 60]
@@ -33,6 +42,19 @@ final class SettingsStore: ObservableObject {
     @Published var autoTranscribe: Bool { didSet { defaults.set(autoTranscribe, forKey: Keys.autoTranscribe) } }
     @Published var speechLocaleID: String { didSet { defaults.set(speechLocaleID, forKey: Keys.locale) } }
 
+    // MARK: Daily summary email
+    @Published var reportEnabled: Bool { didSet { defaults.set(reportEnabled, forKey: Keys.reportEnabled) } }
+    @Published var reportHour: Int { didSet { defaults.set(reportHour, forKey: Keys.reportHour) } }
+    @Published var reportMinute: Int { didSet { defaults.set(reportMinute, forKey: Keys.reportMinute) } }
+    /// One or more addresses, comma-separated.
+    @Published var reportRecipient: String { didSet { defaults.set(reportRecipient, forKey: Keys.reportRecipient) } }
+    @Published var reportSkipEmptyDays: Bool { didSet { defaults.set(reportSkipEmptyDays, forKey: Keys.reportSkipEmpty) } }
+    @Published var smtpHost: String { didSet { defaults.set(smtpHost, forKey: Keys.smtpHost) } }
+    @Published var smtpPort: Int { didSet { defaults.set(smtpPort, forKey: Keys.smtpPort) } }
+    /// Sender address / SMTP login. The password lives in the Keychain.
+    @Published var smtpUsername: String { didSet { defaults.set(smtpUsername, forKey: Keys.smtpUsername) } }
+    @Published var groqModel: String { didSet { defaults.set(groqModel, forKey: Keys.groqModel) } }
+
     init() {
         defaults.register(defaults: [
             Keys.interval: 20,
@@ -41,6 +63,15 @@ final class SettingsStore: ObservableObject {
             Keys.sound: true,
             Keys.autoTranscribe: true,
             Keys.locale: "en-IN",
+            Keys.reportEnabled: false,
+            Keys.reportHour: 8,
+            Keys.reportMinute: 0,
+            Keys.reportRecipient: "",
+            Keys.reportSkipEmpty: true,
+            Keys.smtpHost: "smtp.gmail.com",
+            Keys.smtpPort: 465,
+            Keys.smtpUsername: "",
+            Keys.groqModel: "openai/gpt-oss-120b",
         ])
         intervalMinutes = defaults.integer(forKey: Keys.interval)
         entryWindowMinutes = defaults.integer(forKey: Keys.window)
@@ -48,6 +79,15 @@ final class SettingsStore: ObservableObject {
         playSound = defaults.bool(forKey: Keys.sound)
         autoTranscribe = defaults.bool(forKey: Keys.autoTranscribe)
         speechLocaleID = defaults.string(forKey: Keys.locale) ?? "en-IN"
+        reportEnabled = defaults.bool(forKey: Keys.reportEnabled)
+        reportHour = defaults.integer(forKey: Keys.reportHour)
+        reportMinute = defaults.integer(forKey: Keys.reportMinute)
+        reportRecipient = defaults.string(forKey: Keys.reportRecipient) ?? ""
+        reportSkipEmptyDays = defaults.bool(forKey: Keys.reportSkipEmpty)
+        smtpHost = defaults.string(forKey: Keys.smtpHost) ?? "smtp.gmail.com"
+        smtpPort = defaults.integer(forKey: Keys.smtpPort)
+        smtpUsername = defaults.string(forKey: Keys.smtpUsername) ?? ""
+        groqModel = defaults.string(forKey: Keys.groqModel) ?? "openai/gpt-oss-120b"
     }
 }
 

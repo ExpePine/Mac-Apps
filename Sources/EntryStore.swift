@@ -105,6 +105,11 @@ final class EntryStore: ObservableObject {
 
     // MARK: - Stats & export
 
+    /// Entries whose check-in period ended on the given calendar day.
+    func entries(on day: Date) -> [Entry] {
+        entries.filter { Calendar.current.isDate($0.periodEnd, inSameDayAs: day) }
+    }
+
     var loggedTodayCount: Int {
         entries.filter {
             Calendar.current.isDateInToday($0.periodEnd) && $0.status != .missed && $0.status != .skipped

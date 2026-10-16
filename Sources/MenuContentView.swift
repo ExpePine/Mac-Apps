@@ -63,6 +63,17 @@ struct MenuContentView: View {
             Divider()
 
             HStack {
+                Image(systemName: "envelope")
+                Text(settings.reportEnabled
+                     ? "Daily email at \(String(format: "%02d:%02d", settings.reportHour, settings.reportMinute))"
+                     : "Daily email off")
+                Spacer()
+                Button("Set up…") { app.showEmailSettings() }
+            }
+
+            Divider()
+
+            HStack {
                 Button("History…") { app.showHistory() }
                 Button("Data folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([store.fileURL])

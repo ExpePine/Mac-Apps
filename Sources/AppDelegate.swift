@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let store: EntryStore
     let scheduler: Scheduler
     let windows: WindowManager
+    let reports: ReportService
 
     /// The check-in that is waiting for an answer (if any).
     private var pendingPrompt: Prompt?
@@ -26,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         store = EntryStore()
         scheduler = Scheduler(settings: settings)
         windows = WindowManager()
+        reports = ReportService(settings: settings, store: store)
         super.init()
 
         scheduler.onPrompt = { [weak self] start, end in
@@ -94,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func showHistory() {
         windows.showHistory(store: store, settings: settings)
+    }
+
+    func showEmailSettings() {
+        windows.showEmailSettings(settings: settings, reports: reports)
     }
 
     private func openSession(for prompt: Prompt) {
