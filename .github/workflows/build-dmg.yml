@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
 
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
 jobs:
   build:
     runs-on: macos-latest
@@ -19,8 +22,18 @@ jobs:
           chmod +x scripts/build-dmg.sh
           ./scripts/build-dmg.sh
 
-      - name: Upload DMG
+      - name: Upload DMG (Actions artifact)
         uses: actions/upload-artifact@v4
         with:
           name: ActivityLogger-dmg
           path: dist/ActivityLogger.dmg
+
+      - name: Publish Release with DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" dist/ActivityLogger.dmg \
+            --title "Activity Logger (build ${{ github.run_number }})" \
+            --notes "Download ActivityLogger.dmg below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch." \
+            --latest
