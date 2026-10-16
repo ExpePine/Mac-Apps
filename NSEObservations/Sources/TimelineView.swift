@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import AppKit
 
 // MARK: - Options
 
@@ -441,6 +442,7 @@ struct TimelineView: View {
                     VStack(spacing: 0) {
                         ForEach(g.entries) { e in
                             TimelineRow(entry: e, horizon: horizon, showDay: grouping != .day) {
+                                if case .shot(let sh) = e.kind { store.focusShotID = sh.id }
                                 open(e.target)
                             }
                             if e.id != g.entries.last?.id { Divider() }
@@ -495,6 +497,14 @@ private struct TimelineRow: View {
                 }
                 .frame(width: 52, alignment: .trailing)
 
+                if let img = shotThumbnail {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 96, height: 58)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(Color.primary.opacity(0.1)))
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
                         Text(entry.heading)
@@ -542,6 +552,11 @@ private struct TimelineRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Open \(entry.heading)")
+    }
+
+    private var shotThumbnail: NSImage? {
+        if case .shot(let sh) = entry.kind { return store.image(sh.imageFile) }
+        return nil
     }
 
     private var imageCount: Int {

@@ -65,7 +65,6 @@ struct SymbolDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header(symbol)
-                    stats
                     Picker("Section", selection: $tab) {
                         ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -77,7 +76,7 @@ struct SymbolDetailView: View {
                     switch tab {
                     case .notes: notesSection
                     case .trades: tradesSection
-                    case .shots: ChartShotsSection(symbolID: symbolID, candles: candles) { sheet = .editShot($0) }
+                    case .shots: ShotWorkspace(symbolID: symbolID)
                     case .news: newsSection
                     case .ai: aiSection(symbol)
                     }
@@ -177,29 +176,6 @@ struct SymbolDetailView: View {
                 }
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                if let last = candles.last {
-                    Text(Fmt.rupees(last.close))
-                        .font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit())
-                    if candles.count > 1 {
-                        let prev = candles[candles.count - 2].close
-                        let ch = (last.close - prev) / prev * 100
-                        Text("\(Fmt.pct(ch)) on the day")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(ch.changeColor)
-                    }
-                    Text("Close \(Fmt.day.string(from: last.date)) · Yahoo Finance")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                } else if loading {
-                    ProgressView().controlSize(.small)
-                } else if loadError != nil {
-                    Text("Price data unavailable")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .help(loadError ?? "")
-                }
-            }
         }
     }
 

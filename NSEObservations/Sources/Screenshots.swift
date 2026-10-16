@@ -341,7 +341,6 @@ enum ScreenshotRunner {
         }
 
         let main = CGSize(width: 1360, height: 900)
-        await snap(env(ContentView(initialSelection: .screenshots)), size: main, name: "0-screenshots-library", dir: dir)
         if let img = captureImage {
             await snap(env(NewScreenshotSheet(presetSymbolID: demo.featured, initial: [(img, Date())])),
                        size: CGSize(width: 720, height: 460), name: "0b-new-screenshot", dir: dir)
@@ -366,8 +365,6 @@ enum ScreenshotRunner {
                        name: "10-news-editor", dir: dir)
         }
         await snap(env(TagManagerSheet()), size: CGSize(width: 680, height: 480), name: "11-tag-manager", dir: dir)
-        await snap(env(SymbolDetailView(symbolID: demo.featured, initialTab: "Screenshots")), size: CGSize(width: 1100, height: 900),
-                   name: "12-screenshots-tab", dir: dir)
         if let id = shotID {
             await snap(env(ChartShotEditor(shotID: id)), size: CGSize(width: 1200, height: 760), name: "13-annotate", dir: dir)
         }

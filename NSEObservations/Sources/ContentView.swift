@@ -1,7 +1,6 @@
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case screenshots
     case timeline
     case news
     case scripts
@@ -15,13 +14,12 @@ struct ContentView: View {
     @EnvironmentObject private var directory: SymbolDirectory
     @State private var selection: SidebarItem?
 
-    init(initialSelection: SidebarItem? = .screenshots) {
+    init(initialSelection: SidebarItem? = .timeline) {
         _selection = State(initialValue: initialSelection)
     }
     @State private var search = ""
     @State private var showAddSymbol = false
     @State private var capturing = false
-    @State private var editingShot: ScreenshotLibraryView.ShotRef?
 
     var body: some View {
         NavigationSplitView {
@@ -43,15 +41,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .newScreenshot)) { _ in capturing = true }
         .sheet(isPresented: $capturing) {
             NewScreenshotSheet(presetSymbolID: { if case .symbol(let id) = selection { return id }; return nil }()) { ids in
-                if ids.count == 1, let id = ids.first {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editingShot = .init(id: id) }
+                // Open the stock's page on the newest screenshot, ready to write on.
+                if let id = ids.last, let shot = store.chartShot(id) {
+                    store.focusShotID = id
+                    selection = .symbol(shot.symbolID)
                 }
             }
             .environmentObject(store)
             .environmentObject(directory)
-        }
-        .sheet(item: $editingShot) { ref in
-            ChartShotEditor(shotID: ref.id).environmentObject(store)
         }
         .alert("Something went wrong", isPresented: Binding(
             get: { store.lastError != nil },
@@ -66,8 +63,6 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
-        case .screenshots?:
-            ScreenshotLibraryView { id in selection = .symbol(id) }
         case .timeline?:
             TimelineView { selection = $0 }
         case .news?:
@@ -105,8 +100,6 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selection) {
             Section("Journal") {
-                Label("Screenshots", systemImage: "photo.on.rectangle.angled")
-                    .tag(SidebarItem.screenshots)
                 Label("Timeline", systemImage: "calendar")
                     .tag(SidebarItem.timeline)
                 Label("News", systemImage: "newspaper")
@@ -183,7 +176,7 @@ struct SidebarView: View {
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { s in
             Button("Delete Symbol and All Its Notes", role: .destructive) {
-                if selection == .symbol(s.id) { selection = .screenshots }
+                if selection == .symbol(s.id) { selection = .timeline }
                 store.deleteSymbol(s.id)
             }
         } message: { _ in

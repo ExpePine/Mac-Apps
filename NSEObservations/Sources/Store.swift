@@ -8,6 +8,8 @@ import UniformTypeIdentifiers
 final class Store: ObservableObject {
     @Published private(set) var data = AppData()
     @Published var lastError: String?
+    /// A screenshot to show when its stock page opens (set by Timeline clicks and quick capture).
+    @Published var focusShotID: UUID?
 
     let fileURL: URL
 
