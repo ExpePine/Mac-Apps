@@ -47,6 +47,7 @@ struct PlanList: View {
     @ObservedObject var plans: PlanStore
     @Binding var selection: UUID?
     let onNew: () -> Void
+    @State private var pendingDelete: Plan?
 
     private var active: [Plan] { plans.plans.filter { $0.status == .active }.sorted { $0.lastActivity > $1.lastActivity } }
     private var drafts: [Plan] { plans.plans.filter { $0.status == .drafting } }
@@ -64,16 +65,32 @@ struct PlanList: View {
 
             List(selection: $selection) {
                 if !active.isEmpty {
-                    Section("In progress") { ForEach(active) { PlanListRow(plan: $0).tag($0.id) } }
+                    Section("In progress") { ForEach(active) { p in PlanListRow(plan: p).tag(p.id).contextMenu { deleteMenu(p) } } }
                 }
                 if !drafts.isEmpty {
-                    Section("Drafts") { ForEach(drafts) { PlanListRow(plan: $0).tag($0.id) } }
+                    Section("Drafts") { ForEach(drafts) { p in PlanListRow(plan: p).tag(p.id).contextMenu { deleteMenu(p) } } }
                 }
                 if !plans.finished.isEmpty {
-                    Section("Finished") { ForEach(plans.finished) { PlanListRow(plan: $0).tag($0.id) } }
+                    Section("Finished") { ForEach(plans.finished) { p in PlanListRow(plan: p).tag(p.id).contextMenu { deleteMenu(p) } } }
                 }
             }
             .listStyle(.inset)
+            .onDeleteCommand {
+                if let id = selection, let p = plans.plan(id) { pendingDelete = p }
+            }
+            .confirmationDialog(deleteTitle, isPresented: Binding(get: { pendingDelete != nil },
+                                                                 set: { if !$0 { pendingDelete = nil } })) {
+                Button("Delete", role: .destructive) {
+                    if let p = pendingDelete {
+                        if selection == p.id { selection = nil }
+                        plans.delete(p.id)
+                    }
+                    pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: {
+                Text("This removes the plan, its steps, flow breaks and lessons. It can't be undone.")
+            }
 
             if !plans.finished.isEmpty || !plans.blockerStats.isEmpty {
                 Divider()
@@ -90,6 +107,43 @@ struct PlanList: View {
                 .padding(14)
             }
         }
+    }
+}
+
+extension PlanList {
+    private var deleteTitle: String {
+        guard let p = pendingDelete else { return "Delete plan?" }
+        return "Delete \(p.status == .drafting ? "draft" : "plan") “\(p.goal.isEmpty ? "Untitled plan" : p.goal)”?"
+    }
+
+    @ViewBuilder private func deleteMenu(_ p: Plan) -> some View {
+        Button(role: .destructive) { pendingDelete = p } label: {
+            Label(p.status == .drafting ? "Delete draft…" : "Delete plan…", systemImage: "trash")
+        }
+    }
+}
+
+/// Trash button with confirmation, used at the top of each plan.
+struct DeletePlanButton: View {
+    @ObservedObject var plans: PlanStore
+    @ObservedObject var nav: Navigator
+    let planID: UUID
+    @State private var confirming = false
+
+    var body: some View {
+        Button { confirming = true } label: { Image(systemName: "trash") }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Delete this plan")
+            .confirmationDialog("Delete this plan?", isPresented: $confirming) {
+                Button("Delete", role: .destructive) {
+                    nav.selectedPlan = nil
+                    plans.delete(planID)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the plan, its steps, flow breaks and lessons. It can't be undone.")
+            }
     }
 }
 
@@ -191,7 +245,11 @@ struct PlanDraftView: View {
 
     private var titleArea: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("NEW PLAN").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            HStack {
+                Text("NEW PLAN").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                DeletePlanButton(plans: plans, nav: nav, planID: planID)
+            }
             TextField("Goal", text: $goal, prompt: Text("What do you want to achieve?"), axis: .vertical)
                 .labelsHidden()
                 .textFieldStyle(.plain)
@@ -400,11 +458,6 @@ struct PlanDraftView: View {
                     Label(drafts.contains { $0.source == .ai } ? "Suggest again" : "Suggest steps", systemImage: "sparkles")
                 }
                 .disabled(loading || goalText.isEmpty)
-                Button("Delete draft", role: .destructive) {
-                    plans.delete(planID)
-                    nav.selectedPlan = nil
-                }
-                .buttonStyle(.borderless)
                 Spacer()
                 Text("\(picked.count) steps\(totalMinutes > 0 ? " · about \(durationText(Double(totalMinutes) * 60))" : "")")
                     .foregroundStyle(.secondary)
