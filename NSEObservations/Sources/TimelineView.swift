@@ -48,7 +48,7 @@ enum OutcomeHorizon: String, CaseIterable, Identifiable {
 
 private enum KindFilter: String, CaseIterable, Identifiable {
     case all = "All", bullish = "Bullish", bearish = "Bearish", neutral = "Neutral", trades = "Trades",
-         news = "News", scripts = "Pine Scripts"
+         shots = "Screenshots", news = "News", scripts = "Pine Scripts"
     var id: String { rawValue }
 }
 
@@ -116,7 +116,7 @@ enum Verdict {
 }
 
 struct TimelineEntry: Identifiable {
-    enum Kind { case observation(Observation), trade(Trade), news(NewsItem), script(PineScript, ScriptVersion) }
+    enum Kind { case observation(Observation), trade(Trade), news(NewsItem), script(PineScript, ScriptVersion), shot(ChartShot) }
     let id: UUID
     let date: Date
     let symbol: TrackedSymbol?
@@ -231,6 +231,15 @@ struct TimelineView: View {
                 let candles = s.flatMap { series[$0.yahooSymbol]?.candles }
                 out.append(TimelineEntry(id: n.id, date: n.date, symbol: s, kind: .news(n), expectsUp: nil,
                                          outcome: candles.flatMap { ObservationOutcome.compute(for: n.date, candles: $0) },
+                                         hasPrices: candles != nil))
+            }
+        }
+        if filter == .all || filter == .shots {
+            for sh in store.data.chartShots {
+                guard let s = store.symbol(sh.symbolID) else { continue }
+                let candles = series[s.yahooSymbol]?.candles
+                out.append(TimelineEntry(id: sh.id, date: sh.date, symbol: s, kind: .shot(sh), expectsUp: nil,
+                                         outcome: candles.flatMap { ObservationOutcome.compute(for: sh.date, candles: $0) },
                                          hasPrices: candles != nil))
             }
         }
@@ -445,6 +454,7 @@ struct TimelineView: View {
     private func loadPrices(force: Bool) async {
         let symbols = store.symbols.filter { s in
             store.observationCount(for: s.id) > 0 || !store.trades(for: s.id).isEmpty || store.data.news.contains { $0.symbolID == s.id }
+                || store.data.chartShots.contains { $0.symbolID == s.id }
         }
         guard !symbols.isEmpty else { return }
         loading = true
@@ -550,6 +560,10 @@ private struct TimelineRow: View {
         case .script(_, let v):
             let delta = v.linesAdded.map { a in " (+\(a) / −\(v.linesRemoved ?? 0) lines)" } ?? ""
             return (v.note.isEmpty ? "New version" : v.note) + delta
+        case .shot(let sh):
+            let labels = sh.annotations.map(\.text).filter { !$0.isEmpty }.joined(separator: " · ")
+            let text = [sh.caption.replacingOccurrences(of: "\n", with: " "), labels].filter { !$0.isEmpty }.joined(separator: " — ")
+            return text.isEmpty ? "Chart screenshot" : text
         }
     }
 
@@ -581,6 +595,16 @@ private struct TimelineRow: View {
                 .padding(.vertical, 2)
                 .background(Color.indigo.opacity(0.12), in: Capsule())
             NewsTagChips(tags: store.tags(for: n))
+        case .shot(let sh):
+            Label("Chart", systemImage: "photo")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.blue)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.blue.opacity(0.12), in: Capsule())
+            Text(sh.timeframe.title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         case .script(_, let v):
             Label("Pine v\(v.number)", systemImage: "chevron.left.forwardslash.chevron.right")
                 .font(.caption2.weight(.semibold))

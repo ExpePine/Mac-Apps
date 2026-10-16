@@ -147,6 +147,8 @@ final class Store: ObservableObject {
         data.observations.filter { $0.symbolID == id }.flatMap(\.imageFiles).forEach(deleteImage)
         data.observations.removeAll { $0.symbolID == id }
         data.news.removeAll { $0.symbolID == id }
+        data.chartShots.filter { $0.symbolID == id }.map(\.imageFile).forEach(deleteImage)
+        data.chartShots.removeAll { $0.symbolID == id }
         for i in data.scripts.indices { data.scripts[i].symbolIDs.removeAll { $0 == id } }
         data.trades.removeAll { $0.symbolID == id }
         data.analyses.removeAll { $0.symbolID == id }
@@ -253,6 +255,7 @@ final class Store: ObservableObject {
             data.chat = merge(data.chat, incoming.chat).sorted { $0.date < $1.date }
             data.news = merge(data.news, incoming.news)
             data.scripts = merge(data.scripts, incoming.scripts)
+            data.chartShots = merge(data.chartShots, incoming.chartShots)
             save()
         } catch {
             lastError = "Import failed: \(error.localizedDescription)"
@@ -327,6 +330,39 @@ final class Store: ObservableObject {
     func deleteNews(_ id: UUID) {
         data.news.removeAll { $0.id == id }
         save()
+    }
+
+    // MARK: Chart screenshots
+
+    func chartShots(for symbolID: UUID) -> [ChartShot] {
+        data.chartShots.filter { $0.symbolID == symbolID }.sorted { $0.date > $1.date }
+    }
+
+    func chartShot(_ id: UUID) -> ChartShot? { data.chartShots.first { $0.id == id } }
+
+    func upsert(_ shot: ChartShot) {
+        if let i = data.chartShots.firstIndex(where: { $0.id == shot.id }) { data.chartShots[i] = shot } else { data.chartShots.append(shot) }
+        save()
+    }
+
+    func deleteChartShot(_ id: UUID) {
+        if let s = chartShot(id) { deleteImage(s.imageFile) }
+        data.chartShots.removeAll { $0.id == id }
+        save()
+    }
+
+    /// Saves images as new chart screenshots for a symbol and returns their ids (oldest first).
+    @discardableResult
+    func addChartShots(_ items: [(image: NSImage, date: Date)], symbolID: UUID) -> [UUID] {
+        var ids: [UUID] = []
+        for item in items.sorted(by: { $0.date < $1.date }) {
+            guard let png = ImageIO.png(from: item.image), let name = saveImage(png) else { continue }
+            let shot = ChartShot(symbolID: symbolID, date: item.date, imageFile: name)
+            data.chartShots.append(shot)
+            ids.append(shot.id)
+        }
+        save()
+        return ids
     }
 
     // MARK: News tags

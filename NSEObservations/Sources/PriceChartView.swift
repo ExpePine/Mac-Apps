@@ -36,12 +36,14 @@ private struct ChartMarker: Identifiable {
     let color: Color
     let label: String
     let isTrade: Bool
+    var isShot = false
 }
 
 struct PriceChartView: View {
     let candles: [Candle]
     let observations: [Observation]
     let trades: [Trade]
+    var shots: [ChartShot] = []
     let style: ChartStyle
 
     @State private var hover: Candle?
@@ -71,6 +73,12 @@ struct PriceChartView: View {
                 out.append(ChartMarker(id: t.id, date: hit.0, price: t.price, color: t.side.color,
                                        label: "\(t.side.title) \(AIContext.formatQty(t.quantity)) @ \(Fmt.rupees(t.price))",
                                        isTrade: true))
+            }
+        }
+        for sh in shots {
+            if let hit = priceOn(sh.date) {
+                let label = sh.caption.isEmpty ? "Screenshot (\(sh.timeframe.title))" : "📷 " + sh.caption
+                out.append(ChartMarker(id: sh.id, date: hit.0, price: hit.1, color: .blue, label: label, isTrade: false, isShot: true))
             }
         }
         return out
@@ -107,7 +115,7 @@ struct PriceChartView: View {
 
             ForEach(markers) { m in
                 PointMark(x: .value("Date", m.date), y: .value("Price", m.price))
-                    .symbol(m.isTrade ? BasicChartSymbolShape.triangle : BasicChartSymbolShape.circle)
+                    .symbol(m.isTrade ? BasicChartSymbolShape.triangle : (m.isShot ? BasicChartSymbolShape.square : BasicChartSymbolShape.circle))
                     .symbolSize(m.isTrade ? 90 : 70)
                     .foregroundStyle(m.color)
             }

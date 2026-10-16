@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum DetailTab: String, CaseIterable, Identifiable {
-    case notes = "Observations", news = "News", trades = "Trades", ai = "AI Analysis"
+    case notes = "Observations", shots = "Screenshots", news = "News", trades = "Trades", ai = "AI Analysis"
     var id: String { rawValue }
 }
 
@@ -13,6 +13,7 @@ private enum ActiveSheet: Identifiable {
     case editSymbol
     case newNews
     case editNews(NewsItem)
+    case editShot(UUID)
 
     var id: String {
         switch self {
@@ -23,6 +24,7 @@ private enum ActiveSheet: Identifiable {
         case .editSymbol: return "symbol"
         case .newNews: return "newNews"
         case .editNews(let n): return "news-\(n.id)"
+        case .editShot(let id): return "shot-\(id)"
         }
     }
 }
@@ -32,6 +34,8 @@ struct SymbolDetailView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var directory: SymbolDirectory
     let symbolID: UUID
+    /// Optional tab to open first, e.g. "Screenshots".
+    var initialTab: String? = nil
 
     @State private var series: QuoteSeries?
     @State private var loading = false
@@ -56,6 +60,7 @@ struct SymbolDetailView: View {
 
     var body: some View {
         if let symbol {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header(symbol)
@@ -66,11 +71,13 @@ struct SymbolDetailView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(maxWidth: 520)
+                    .frame(maxWidth: 640)
+                    .id("tabs")
 
                     switch tab {
                     case .notes: notesSection
                     case .trades: tradesSection
+                    case .shots: ChartShotsSection(symbolID: symbolID, candles: candles) { sheet = .editShot($0) }
                     case .news: newsSection
                     case .ai: aiSection(symbol)
                     }
@@ -78,6 +85,12 @@ struct SymbolDetailView: View {
                 .padding(24)
                 .frame(maxWidth: 1100, alignment: .leading)
                 .frame(maxWidth: .infinity)
+            }
+            .onAppear {
+                if initialTab != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo("tabs", anchor: .top) }
+                }
+            }
             }
             .navigationTitle(symbol.ticker)
             .toolbar {
@@ -97,6 +110,7 @@ struct SymbolDetailView: View {
                 }
             }
             .task { await load(force: false) }
+            .onAppear { if let t = initialTab, let dt = DetailTab(rawValue: t) { tab = dt } }
             .onReceive(NotificationCenter.default.publisher(for: .newObservation)) { _ in
                 sheet = .newObservation
             }
@@ -110,6 +124,7 @@ struct SymbolDetailView: View {
                     case .editSymbol: SymbolEditor(existing: symbol)
                     case .newNews: NewsEditor(existing: nil, defaultSymbolID: symbolID)
                     case .editNews(let n): NewsEditor(existing: n)
+                    case .editShot(let id): ChartShotEditor(shotID: id)
                     }
                 }
                 .environmentObject(store)
@@ -243,7 +258,8 @@ struct SymbolDetailView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        PriceChartView(candles: visibleCandles, observations: observations, trades: trades, style: style)
+                        PriceChartView(candles: visibleCandles, observations: observations, trades: trades,
+                                       shots: store.chartShots(for: symbolID), style: style)
                     }
                 }
                 .frame(height: 300)
@@ -258,6 +274,10 @@ struct SymbolDetailView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "triangle.fill").font(.system(size: 7)).foregroundStyle(.secondary)
                         Text("Trade").font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.fill").font(.system(size: 7)).foregroundStyle(Color.blue)
+                        Text("Screenshot").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text("Daily data, unofficial Yahoo Finance feed — verify important levels on NSE.")

@@ -163,6 +163,45 @@ struct NewsTag: Identifiable, Codable, Hashable {
     ]
 }
 
+// MARK: - Chart screenshots (e.g. from TradingView) with text annotations
+
+struct ShotAnnotation: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var text: String = ""
+    /// Centre of the label, as a fraction of the image width/height (0…1).
+    var x: Double = 0.5
+    var y: Double = 0.5
+    var colorName: String = "yellow"
+    /// Font size in points for a 1000-pixel-wide image; scales with the image.
+    var size: Double = 22
+    var background: Bool = true
+
+    static let colorNames = ["yellow", "white", "orange", "red", "green", "teal", "blue", "purple", "pink", "black"]
+
+    static func color(named name: String) -> Color {
+        switch name {
+        case "white": return .white
+        case "black": return .black
+        default: return NewsTag.color(named: name)
+        }
+    }
+
+    var color: Color { Self.color(named: colorName) }
+}
+
+struct ChartShot: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var symbolID: UUID
+    /// The date of the chart / when you looked at it.
+    var date: Date = Date()
+    var timeframe: ChartTimeframe = .daily
+    var imageFile: String
+    /// Your written observations about this chart.
+    var caption: String = ""
+    var annotations: [ShotAnnotation] = []
+    var createdAt: Date = Date()
+}
+
 // MARK: - Pine Script library
 
 struct ScriptVersion: Identifiable, Codable, Hashable {
@@ -252,6 +291,7 @@ struct AppData: Codable {
     var scripts: [PineScript] = []
     /// nil until you edit tags; then your own list.
     var newsTagDefs: [NewsTag]? = nil
+    var chartShots: [ChartShot] = []
 }
 
 extension AppData {
@@ -267,6 +307,7 @@ extension AppData {
         news = try c.decodeIfPresent([NewsItem].self, forKey: .news) ?? []
         scripts = try c.decodeIfPresent([PineScript].self, forKey: .scripts) ?? []
         newsTagDefs = try c.decodeIfPresent([NewsTag].self, forKey: .newsTagDefs)
+        chartShots = try c.decodeIfPresent([ChartShot].self, forKey: .chartShots) ?? []
     }
 }
 

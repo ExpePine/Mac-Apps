@@ -78,6 +78,21 @@ enum AIContext {
             out += "News summaries the trader saved (oldest first):\n"
             for n in news { out += newsLine(n, store: store) }
         }
+        let shots = store.chartShots(for: s.id).sorted { $0.date < $1.date }
+            .filter { !$0.caption.isEmpty || !$0.annotations.isEmpty }
+        if !shots.isEmpty {
+            out += "Notes written on chart screenshots (oldest first):\n"
+            for sh in shots {
+                var line = "- [\(Fmt.isoDayTime.string(from: sh.date)) IST] \(sh.timeframe.title) chart"
+                if !sh.caption.isEmpty { line += ": \(sh.caption.replacingOccurrences(of: "\n", with: " "))" }
+                let labels = sh.annotations.map(\.text).filter { !$0.isEmpty }
+                if !labels.isEmpty { line += " | labels on chart: \(labels.joined(separator: "; "))" }
+                if includeOutcomes, let c = series?.candles, let oc = ObservationOutcome.compute(for: sh.date, candles: c) {
+                    line += " | price after: +5 \(Fmt.pct(oc.after5)), +20 \(Fmt.pct(oc.after20)), to latest \(Fmt.pct(oc.sinceThen))"
+                }
+                out += line + "\n"
+            }
+        }
         let obs = store.observations(for: s.id).sorted { $0.date < $1.date }
         out += "Observations (oldest first):\n"
         for o in obs {
@@ -101,6 +116,7 @@ enum AIContext {
         func hasContent(_ s: TrackedSymbol) -> Bool {
             store.observationCount(for: s.id) > 0 || !store.trades(for: s.id).isEmpty
                 || store.data.news.contains { $0.symbolID == s.id }
+                || store.data.chartShots.contains { $0.symbolID == s.id }
         }
         // General market news and Pine Script change notes go first, within a small share of the budget.
         var text = extrasBlock(store: store, budget: budget / 5)

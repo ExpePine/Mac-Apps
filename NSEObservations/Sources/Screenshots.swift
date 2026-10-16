@@ -289,6 +289,32 @@ enum ScreenshotRunner {
             editorNote = latest
         }
 
+        // Two sample "TradingView" screenshots with labels written on them.
+        var shotID: UUID?
+        if let candles = demo.series["RELIANCE.NS"]?.candles {
+            let img = DemoData.chartImage(candles)
+            let ids = store.addChartShots([(img, ago(40)), (img, ago(2))], symbolID: demo.featured)
+            if let first = ids.first, var s = store.chartShot(first) {
+                s.timeframe = .weekly
+                s.caption = "Weekly base near the highs. Watching for a close above resistance with volume."
+                s.annotations = [
+                    ShotAnnotation(text: "Resistance ~1,380", x: 0.72, y: 0.12, colorName: "yellow", size: 24),
+                    ShotAnnotation(text: "Higher lows", x: 0.35, y: 0.78, colorName: "green", size: 22)
+                ]
+                store.upsert(s)
+            }
+            if let last = ids.last, var s = store.chartShot(last) {
+                s.caption = "Breakout attempt today. Volume above average; stop under the last swing low."
+                s.annotations = [
+                    ShotAnnotation(text: "Breakout candle", x: 0.86, y: 0.2, colorName: "orange", size: 26),
+                    ShotAnnotation(text: "Stop below swing low", x: 0.62, y: 0.7, colorName: "red", size: 22),
+                    ShotAnnotation(text: "Volume > 1.5× avg", x: 0.25, y: 0.3, colorName: "teal", size: 20, background: true)
+                ]
+                store.upsert(s)
+                shotID = s.id
+            }
+        }
+
         func env<V: View>(_ v: V) -> AnyView {
             AnyView(v.environmentObject(store).environmentObject(settings).environmentObject(directory))
         }
@@ -314,6 +340,11 @@ enum ScreenshotRunner {
                        name: "10-news-editor", dir: dir)
         }
         await snap(env(TagManagerSheet()), size: CGSize(width: 680, height: 480), name: "11-tag-manager", dir: dir)
+        await snap(env(SymbolDetailView(symbolID: demo.featured, initialTab: "Screenshots")), size: CGSize(width: 1100, height: 900),
+                   name: "12-screenshots-tab", dir: dir)
+        if let id = shotID {
+            await snap(env(ChartShotEditor(shotID: id)), size: CGSize(width: 1200, height: 760), name: "13-annotate", dir: dir)
+        }
         print("SCREENSHOTS_DIR=\(dir.path)")
     }
 
