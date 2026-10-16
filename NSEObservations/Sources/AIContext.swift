@@ -120,7 +120,8 @@ enum AIContext {
     static func newsLine(_ n: NewsItem) -> String {
         let body = n.text.replacingOccurrences(of: "\n", with: " ")
         let clipped = body.count > 700 ? String(body.prefix(700)) + "…" : body
-        return "- [\(Fmt.isoDay.string(from: n.date))]\(n.source.isEmpty ? "" : " (\(n.source))") \(n.title): \(clipped)\n"
+        let tags = n.newsTags.isEmpty ? "" : " {tags: \(n.newsTags.map(\.title).joined(separator: ", "))}"
+        return "- [\(Fmt.isoDay.string(from: n.date))]\(n.source.isEmpty ? "" : " (\(n.source))")\(tags) \(n.title): \(clipped)\n"
     }
 
     /// Market-wide news and Pine Script version notes (code is not sent).

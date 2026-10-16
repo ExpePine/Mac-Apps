@@ -118,6 +118,42 @@ struct NewsItem: Identifiable, Codable, Hashable {
     var source: String = ""
     var text: String = ""
     var createdAt: Date = Date()
+    /// NewsTag raw values.
+    var tags: [String]? = nil
+
+    var newsTags: [NewsTag] { (tags ?? []).compactMap(NewsTag.init(rawValue:)) }
+}
+
+enum NewsTag: String, Codable, CaseIterable, Identifiable {
+    case multibagger, shortRise, patternBreakerGainer, patternBreakerLoser
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .multibagger: return "Multibagger"
+        case .shortRise: return "Short rise"
+        case .patternBreakerGainer: return "Pattern breaker – Gainer"
+        case .patternBreakerLoser: return "Pattern breaker – Loser"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .multibagger: return "star.fill"
+        case .shortRise: return "arrow.up.forward"
+        case .patternBreakerGainer: return "chart.line.uptrend.xyaxis"
+        case .patternBreakerLoser: return "chart.line.downtrend.xyaxis"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .multibagger: return .purple
+        case .shortRise: return .teal
+        case .patternBreakerGainer: return .green
+        case .patternBreakerLoser: return .red
+        }
+    }
 }
 
 // MARK: - Pine Script library

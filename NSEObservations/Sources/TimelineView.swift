@@ -572,13 +572,14 @@ private struct TimelineRow: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(t.side.color.opacity(0.12), in: Capsule())
-        case .news:
+        case .news(let n):
             Label("News", systemImage: "newspaper")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(Color.indigo)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.indigo.opacity(0.12), in: Capsule())
+            NewsTagChips(tags: n.newsTags)
         case .script(_, let v):
             Label("Pine v\(v.number)", systemImage: "chevron.left.forwardslash.chevron.right")
                 .font(.caption2.weight(.semibold))

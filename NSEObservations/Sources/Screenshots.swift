@@ -224,13 +224,13 @@ enum DemoData {
             data.news = [
                 NewsItem(symbolID: rel, date: daysAgo(9, 8, 45), title: "Q2 results: refining margins recover, retail steady",
                          source: "ChatGPT",
-                         text: "Summary: Q2 EBITDA up ~6% QoQ on better refining margins. Retail growth steady; telecom ARPU up after tariff changes. Management flagged higher capex for new energy. Street reaction: mildly positive; key watch is gross refining margin trend next quarter."),
+                         text: "Summary: Q2 EBITDA up ~6% QoQ on better refining margins. Retail growth steady; telecom ARPU up after tariff changes. Management flagged higher capex for new energy. Street reaction: mildly positive; key watch is gross refining margin trend next quarter.", tags: [NewsTag.shortRise.rawValue]),
                 NewsItem(symbolID: bel, date: daysAgo(30, 19, 10), title: "Large defence order win",
                          source: "Perplexity",
-                         text: "BEL announced orders worth a few thousand crore for radar and communication systems. Order book now covers ~3 years of revenue. Analysts see execution as the main risk."),
-                NewsItem(symbolID: nil, date: daysAgo(3, 7, 50), title: "RBI policy: rates on hold, stance neutral",
+                         text: "BEL announced orders worth a few thousand crore for radar and communication systems. Order book now covers ~3 years of revenue. Analysts see execution as the main risk.", tags: [NewsTag.multibagger.rawValue, NewsTag.patternBreakerGainer.rawValue]),
+                NewsItem(symbolID: ids["TMPV"], date: daysAgo(3, 7, 50), title: "Monthly sales below estimates; inventory build-up",
                          source: "Moneycontrol",
-                         text: "RBI kept the repo rate unchanged and retained a neutral stance. Inflation projection trimmed slightly. Banks and rate-sensitive sectors reacted mildly positive.")
+                         text: "Passenger vehicle volumes came in below street estimates for the month and dealer inventory rose. Analysts flagged near-term pressure on margins.", tags: [NewsTag.patternBreakerLoser.rawValue])
             ]
         }
 
@@ -308,6 +308,10 @@ enum ScreenshotRunner {
         if let note = editorNote {
             await snap(env(ObservationEditor(symbolID: demo.featured, existing: note)), size: CGSize(width: 560, height: 760),
                        name: "9-observation-with-screenshot", dir: dir)
+        }
+        if let n = store.data.news.first(where: { $0.newsTags.count > 1 }) {
+            await snap(env(NewsEditor(existing: n)), size: CGSize(width: 680, height: 760),
+                       name: "10-news-editor", dir: dir)
         }
         print("SCREENSHOTS_DIR=\(dir.path)")
     }
