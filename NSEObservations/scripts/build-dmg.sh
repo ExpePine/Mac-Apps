@@ -10,6 +10,13 @@ APP_NAME="NSE Observations"
 BUILD_DIR="build"
 OUT_DIR="dist"
 
+if [ -f Resources/nse_equities.csv ]; then
+  ROWS=$(($(wc -l < Resources/nse_equities.csv) - 1))
+  echo "::notice title=NSE symbol list::bundled Resources/nse_equities.csv with ${ROWS} rows"
+else
+  echo "::warning title=NSE symbol list::Resources/nse_equities.csv not found; app will rely on refreshing from NSE"
+fi
+
 echo "==> Generating Xcode project"
 xcodegen generate
 

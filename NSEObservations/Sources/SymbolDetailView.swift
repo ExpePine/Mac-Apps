@@ -26,6 +26,7 @@ private enum ActiveSheet: Identifiable {
 struct SymbolDetailView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var directory: SymbolDirectory
     let symbolID: UUID
 
     @State private var series: QuoteSeries?
@@ -105,6 +106,7 @@ struct SymbolDetailView: View {
                     }
                 }
                 .environmentObject(store)
+                .environmentObject(directory)
             }
         }
     }

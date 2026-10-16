@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SymbolEditor: View {
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var directory: SymbolDirectory
     @Environment(\.dismiss) private var dismiss
 
     let existing: TrackedSymbol?
@@ -17,16 +18,71 @@ struct SymbolEditor: View {
     @State private var checking = false
     @State private var warning: String?
     @State private var confirmedWithoutData = false
+    @State private var picked: String?
+    @FocusState private var tickerFocused: Bool
+
+    private var suggestions: [ListedSymbol] {
+        guard existing == nil, ticker.uppercased() != picked else { return [] }
+        return directory.search(ticker, limit: 8)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(existing == nil ? "Add Symbol" : "Edit \(existing!.ticker)")
                 .font(.title2.weight(.semibold))
 
-            Form {
-                TextField("NSE symbol", text: $ticker, prompt: Text("e.g. RELIANCE, TATAMOTORS, M&M"))
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Search NSE by symbol or company", text: $ticker,
+                          prompt: Text("Type a symbol or company, e.g. tata, RELIANCE, nifty"))
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.large)
+                    .focused($tickerFocused)
                     .disabled(existing != nil)
-                TextField("Name", text: $name, prompt: Text("Filled in automatically if found"))
+                    .onChange(of: ticker) { _ in
+                        warning = nil
+                        confirmedWithoutData = false
+                    }
+                    .onSubmit {
+                        if let first = suggestions.first { pick(first) }
+                    }
+                if !suggestions.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(suggestions) { item in
+                            Button { pick(item) } label: {
+                                HStack(spacing: 10) {
+                                    Text(item.symbol)
+                                        .font(.system(.body, design: .rounded).weight(.semibold))
+                                        .frame(minWidth: 110, alignment: .leading)
+                                    Text(item.name)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if store.existingSymbol(ticker: item.symbol) != nil {
+                                        Text("In journal").font(.caption).foregroundStyle(.tertiary)
+                                    } else if item.isIndex {
+                                        Text("Index").font(.caption).foregroundStyle(.tertiary)
+                                    } else if !item.series.isEmpty && item.series != "EQ" {
+                                        Text(item.series).font(.caption).foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if item.id != suggestions.last?.id { Divider().padding(.leading, 10) }
+                        }
+                    }
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary.opacity(0.08)))
+                } else if existing == nil && directory.equityCount == 0 {
+                    Text("The NSE symbol list isn't loaded yet; type the exact NSE symbol.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Form {
+                TextField("Name", text: $name, prompt: Text("Filled in automatically"))
                 Picker("List", selection: $status) {
                     ForEach(SymbolStatus.allCases) { Label($0.title, systemImage: $0.systemImage).tag($0) }
                 }
@@ -61,13 +117,22 @@ struct SymbolEditor: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 520)
         .onAppear {
             if let e = existing {
                 ticker = e.ticker; name = e.displayName; status = e.status
                 tags = e.tags.joined(separator: ", "); thesis = e.thesis
+            } else {
+                tickerFocused = true
             }
         }
+    }
+
+    private func pick(_ item: ListedSymbol) {
+        ticker = item.symbol
+        picked = item.symbol
+        name = item.name
+        tickerFocused = false
     }
 
     private func save() async {
@@ -78,6 +143,7 @@ struct SymbolEditor: View {
         }
         var s = existing ?? TrackedSymbol(ticker: t)
         s.displayName = name.trimmingCharacters(in: .whitespaces)
+        if s.displayName.isEmpty, let listed = directory.lookup(t) { s.displayName = listed.name }
         s.status = status
         s.tags = Fmt.tags(from: tags)
         s.thesis = thesis

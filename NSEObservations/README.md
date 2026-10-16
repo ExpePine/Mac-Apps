@@ -6,6 +6,9 @@ sells, a price chart with your notes plotted on it, and Groq-powered analysis of
 
 ## Features
 - **Symbols** grouped as Holding · Watching · Exited · Archived; search across tickers, notes and tags
+- **Full NSE list built in** (`Resources/nse_equities.csv`, NSE's EQUITY_L format): type "tata" in Add Symbol
+  or the sidebar search and pick from matching stocks; main Nifty indices included. The app also tries to
+  refresh the list from NSE weekly. To update the bundled list, replace the CSV and push.
 - **Observations**: date you looked, Daily/Weekly/Monthly/Intraday chart, sentiment, tags, price you saw
 - **What happened next** under every note: % move to latest, after 5 and 20 sessions, best and worst move since
 - **Chart**: line or candles, 1M–5Y or "Notes" range, notes as coloured dots, trades as triangles, hover for OHLC

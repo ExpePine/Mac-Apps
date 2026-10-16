@@ -9,12 +9,14 @@ extension Notification.Name {
 struct NSEObservationsApp: App {
     @StateObject private var store = Store()
     @StateObject private var settings = AppSettings()
+    @StateObject private var directory = SymbolDirectory()
 
     var body: some Scene {
         Window("NSE Observations", id: "main") {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(settings)
+                .environmentObject(directory)
                 .frame(minWidth: 980, minHeight: 640)
         }
         .commands {
@@ -42,6 +44,7 @@ struct NSEObservationsApp: App {
             SettingsView()
                 .environmentObject(store)
                 .environmentObject(settings)
+                .environmentObject(directory)
         }
     }
 }

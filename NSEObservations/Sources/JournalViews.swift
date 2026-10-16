@@ -296,6 +296,7 @@ private struct ChatBubble: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var directory: SymbolDirectory
     @EnvironmentObject private var settings: AppSettings
 
     @State private var keyField = ""
@@ -391,6 +392,27 @@ struct SettingsView: View {
                     Text("Everything stays on this Mac. Import merges a backup into your current journal.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section {
+                    LabeledContent("Symbols") {
+                        Text("\(directory.equityCount.formatted()) NSE equities + \(SymbolDirectory.indices.count) indices")
+                    }
+                    LabeledContent("Source") {
+                        Text(directory.updated.map { "\(directory.sourceDescription), \(Fmt.day.string(from: $0))" } ?? directory.sourceDescription)
+                    }
+                    HStack {
+                        Button("Refresh from NSE") { Task { await directory.refresh(userInitiated: true) } }
+                            .disabled(directory.refreshing)
+                        if directory.refreshing { ProgressView().controlSize(.small) }
+                    }
+                    if let err = directory.refreshError {
+                        Text(err).font(.caption).foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("NSE symbol list")
+                } footer: {
+                    Text("Used for search-as-you-type when adding symbols. The app tries to refresh it from NSE weekly; if NSE blocks the request, the current list keeps working.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Prices") {
                     Text("Daily OHLC comes from Yahoo Finance's public chart endpoint using the .NS suffix (e.g. RELIANCE → RELIANCE.NS). It is unofficial and can change or rate-limit without notice. For indices, enter the Yahoo symbol directly, e.g. ^NSEI for Nifty 50.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -399,7 +421,7 @@ struct SettingsView: View {
             .formStyle(.grouped)
             .tabItem { Label("Data", systemImage: "externaldrive") }
         }
-        .frame(width: 560, height: 470)
+        .frame(width: 580, height: 600)
         .task { if settings.hasKey && models.isEmpty { await refreshModels() } }
     }
 

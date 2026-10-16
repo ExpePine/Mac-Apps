@@ -8,6 +8,7 @@ enum SidebarItem: Hashable {
 
 struct ContentView: View {
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var directory: SymbolDirectory
     @State private var selection: SidebarItem? = .patterns
     @State private var search = ""
     @State private var showAddSymbol = false
@@ -23,10 +24,12 @@ struct ContentView: View {
         .sheet(isPresented: $showAddSymbol) {
             SymbolEditor(existing: nil) { saved in selection = .symbol(saved.id) }
                 .environmentObject(store)
+                .environmentObject(directory)
         }
         .onReceive(NotificationCenter.default.publisher(for: .newSymbol)) { _ in
             showAddSymbol = true
         }
+        .task { await directory.refreshIfStale() }
         .alert("Something went wrong", isPresented: Binding(
             get: { store.lastError != nil },
             set: { if !$0 { store.lastError = nil } }
@@ -62,6 +65,7 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var directory: SymbolDirectory
     @Binding var selection: SidebarItem?
     var search: String
     @Binding var showAddSymbol: Bool
@@ -97,6 +101,30 @@ struct SidebarView: View {
                                 .tag(SidebarItem.symbol(s.id))
                                 .contextMenu { contextMenu(for: s) }
                         }
+                    }
+                }
+            }
+
+            let listed = directory.search(search, limit: 8).filter { store.existingSymbol(ticker: $0.symbol) == nil }
+            if !listed.isEmpty {
+                Section("Add from NSE") {
+                    ForEach(listed) { item in
+                        Button {
+                            let s = TrackedSymbol(ticker: item.symbol, displayName: item.name, status: .watching)
+                            store.upsert(s)
+                            selection = .symbol(s.id)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(item.symbol).font(.system(.body, design: .rounded).weight(.medium))
+                                    Text(item.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Add \(item.symbol) to Watching")
                     }
                 }
             }

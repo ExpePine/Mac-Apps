@@ -8,7 +8,11 @@ targets:
   NSEObservations:
     type: application
     platform: macOS
-    sources: [Sources]
+    sources:
+      - path: Sources
+      - path: Resources                        # nse_equities.csv (NSE equity list) for symbol search
+        buildPhase: resources
+        optional: true
     scheme: {}                                 # shared scheme so xcodebuild -scheme works
     info:
       path: Sources/Info.plist
