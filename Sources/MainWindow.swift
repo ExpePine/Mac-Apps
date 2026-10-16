@@ -344,9 +344,11 @@ struct GoalRow: View {
                     .foregroundStyle(goal.done ? Color.green : Color.secondary)
             }
             .buttonStyle(.plain)
-            TextField("Describe the goal", text: $goal.text)
+            TextField("Goal", text: $goal.text, prompt: Text("Describe the goal"))
+                .labelsHidden()
                 .textFieldStyle(.plain)
                 .foregroundStyle(goal.done ? Color.secondary : Color.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onBreakdown) { Image(systemName: "sparkles") }
                 .buttonStyle(.borderless)
                 .help("Break down into steps")
