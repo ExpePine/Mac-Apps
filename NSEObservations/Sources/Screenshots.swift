@@ -91,7 +91,7 @@ enum DemoData {
     """
 
     /// A simple candle chart drawn in code, standing in for a TradingView screenshot.
-    static func chartImage(_ all: [Candle]) -> NSImage {
+    static func chartImage(_ all: [Candle], title: String = "RELIANCE · 1D · sample screenshot") -> NSImage {
         let candles = Array(all.suffix(80))
         let size = NSSize(width: 1200, height: 640)
         return NSImage(size: size, flipped: false) { rect in
@@ -113,8 +113,7 @@ enum DemoData {
                 let top = y(max(c.open, c.close)), bottom = y(min(c.open, c.close))
                 NSBezierPath(rect: NSRect(x: x - step * 0.35, y: bottom, width: step * 0.7, height: max(top - bottom, 1.5))).fill()
             }
-            let title = "RELIANCE · 1D · sample screenshot" as NSString
-            title.draw(at: NSPoint(x: pad, y: rect.height - 32),
+            (title as NSString).draw(at: NSPoint(x: pad, y: rect.height - 32),
                        withAttributes: [.foregroundColor: NSColor(white: 1, alpha: 0.75), .font: NSFont.systemFont(ofSize: 18, weight: .semibold)])
             return true
         }
@@ -315,11 +314,38 @@ enum ScreenshotRunner {
             }
         }
 
+        // A few more screenshots on other stocks, so the library has something to organise.
+        let extra: [(String, Int, ChartTimeframe, String, [ShotAnnotation])] = [
+            ("BEL", 20, .weekly, "Second base above the breakout level; volume drying up.",
+             [ShotAnnotation(text: "Base 2", x: 0.7, y: 0.25, colorName: "green", size: 26)]),
+            ("TMPV", 5, .daily, "Lower highs continue under the 50-DMA. No long until a higher low.",
+             [ShotAnnotation(text: "Lower high", x: 0.55, y: 0.18, colorName: "red", size: 24),
+              ShotAnnotation(text: "Support zone", x: 0.4, y: 0.82, colorName: "yellow", size: 20)]),
+            ("HDFCBANK", 12, .daily, "Back inside the range after the failed breakout.",
+             [ShotAnnotation(text: "Failed breakout", x: 0.78, y: 0.2, colorName: "orange", size: 24)])
+        ]
+        for (ticker, daysBack, tf, caption, labels) in extra {
+            guard let sym = store.existingSymbol(ticker: ticker), let c = demo.series[sym.yahooSymbol]?.candles else { continue }
+            if let id = store.addChartShots([(DemoData.chartImage(c, title: "\(ticker) · \(tf == .weekly ? "1W" : "1D") · sample screenshot"), ago(daysBack))],
+                                           symbolID: sym.id).first, var shot = store.chartShot(id) {
+                shot.timeframe = tf
+                shot.caption = caption
+                shot.annotations = labels
+                store.upsert(shot)
+            }
+        }
+        let captureImage = demo.series["RELIANCE.NS"].map { DemoData.chartImage($0.candles) }
+
         func env<V: View>(_ v: V) -> AnyView {
             AnyView(v.environmentObject(store).environmentObject(settings).environmentObject(directory))
         }
 
         let main = CGSize(width: 1360, height: 900)
+        await snap(env(ContentView(initialSelection: .screenshots)), size: main, name: "0-screenshots-library", dir: dir)
+        if let img = captureImage {
+            await snap(env(NewScreenshotSheet(presetSymbolID: demo.featured, initial: [(img, Date())])),
+                       size: CGSize(width: 720, height: 460), name: "0b-new-screenshot", dir: dir)
+        }
         await snap(env(ContentView(initialSelection: .timeline)), size: main, name: "1-timeline", dir: dir)
         await snap(env(ContentView(initialSelection: .symbol(demo.featured))), size: CGSize(width: 1360, height: 1180),
                    name: "2-symbol", dir: dir)

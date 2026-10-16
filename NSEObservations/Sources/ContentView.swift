@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum SidebarItem: Hashable {
+    case screenshots
     case timeline
     case news
     case scripts
@@ -14,11 +15,13 @@ struct ContentView: View {
     @EnvironmentObject private var directory: SymbolDirectory
     @State private var selection: SidebarItem?
 
-    init(initialSelection: SidebarItem? = .timeline) {
+    init(initialSelection: SidebarItem? = .screenshots) {
         _selection = State(initialValue: initialSelection)
     }
     @State private var search = ""
     @State private var showAddSymbol = false
+    @State private var capturing = false
+    @State private var editingShot: ScreenshotLibraryView.ShotRef?
 
     var body: some View {
         NavigationSplitView {
@@ -37,6 +40,19 @@ struct ContentView: View {
             showAddSymbol = true
         }
         .task { await directory.refreshIfStale() }
+        .onReceive(NotificationCenter.default.publisher(for: .newScreenshot)) { _ in capturing = true }
+        .sheet(isPresented: $capturing) {
+            NewScreenshotSheet(presetSymbolID: { if case .symbol(let id) = selection { return id }; return nil }()) { ids in
+                if ids.count == 1, let id = ids.first {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editingShot = .init(id: id) }
+                }
+            }
+            .environmentObject(store)
+            .environmentObject(directory)
+        }
+        .sheet(item: $editingShot) { ref in
+            ChartShotEditor(shotID: ref.id).environmentObject(store)
+        }
         .alert("Something went wrong", isPresented: Binding(
             get: { store.lastError != nil },
             set: { if !$0 { store.lastError = nil } }
@@ -50,6 +66,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
+        case .screenshots?:
+            ScreenshotLibraryView { id in selection = .symbol(id) }
         case .timeline?:
             TimelineView { selection = $0 }
         case .news?:
@@ -87,6 +105,8 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selection) {
             Section("Journal") {
+                Label("Screenshots", systemImage: "photo.on.rectangle.angled")
+                    .tag(SidebarItem.screenshots)
                 Label("Timeline", systemImage: "calendar")
                     .tag(SidebarItem.timeline)
                 Label("News", systemImage: "newspaper")
@@ -163,7 +183,7 @@ struct SidebarView: View {
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { s in
             Button("Delete Symbol and All Its Notes", role: .destructive) {
-                if selection == .symbol(s.id) { selection = .timeline }
+                if selection == .symbol(s.id) { selection = .screenshots }
                 store.deleteSymbol(s.id)
             }
         } message: { _ in
@@ -201,14 +221,16 @@ struct SymbolRow: View {
                 }
             }
             Spacer(minLength: 4)
-            let n = store.observationCount(for: symbol.id)
-            if n > 0 {
-                Text("\(n)")
+            let shots = store.data.chartShots.reduce(0) { $0 + ($1.symbolID == symbol.id ? 1 : 0) }
+            if shots > 0 {
+                Label("\(shots)", systemImage: "photo")
+                    .labelStyle(.titleAndIcon)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
                     .background(.quaternary, in: Capsule())
+                    .help("\(shots) screenshot\(shots == 1 ? "" : "s")")
             }
         }
         .padding(.vertical, 1)

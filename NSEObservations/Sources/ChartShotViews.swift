@@ -21,6 +21,34 @@ enum ShotImport {
         return (img, values?.creationDate ?? values?.contentModificationDate ?? Date())
     }
 
+    /// Loads every dropped image, then calls back once on the main thread with all of them.
+    static func collect(_ providers: [NSItemProvider], completion: @escaping ([(image: NSImage, date: Date)]) -> Void) {
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var items: [(image: NSImage, date: Date)] = []
+        for p in providers {
+            group.enter()
+            if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                _ = p.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                    if let data, let url = URL(dataRepresentation: data, relativeTo: nil), let item = load(url) {
+                        lock.lock(); items.append(item); lock.unlock()
+                    }
+                    group.leave()
+                }
+            } else if p.canLoadObject(ofClass: NSImage.self) {
+                _ = p.loadObject(ofClass: NSImage.self) { obj, _ in
+                    if let img = obj as? NSImage {
+                        lock.lock(); items.append((img, Date())); lock.unlock()
+                    }
+                    group.leave()
+                }
+            } else {
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { completion(items) }
+    }
+
     static func handleDrop(_ providers: [NSItemProvider], add: @escaping ([(image: NSImage, date: Date)]) -> Void) {
         for p in providers {
             if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -274,7 +302,11 @@ struct ChartShotCard: View {
     @EnvironmentObject private var store: Store
     let shot: ChartShot
     var outcome: ObservationOutcome?
+    /// Show the stock name (used in the all-stocks library).
+    var showTicker = false
+    var showDay = false
     var open: () -> Void
+    @State private var confirmDelete = false
 
     var body: some View {
         Button(action: open) {
@@ -291,6 +323,12 @@ struct ChartShotCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 HStack(spacing: 6) {
+                    if showTicker, let sym = store.symbol(shot.symbolID) {
+                        Text(sym.ticker).font(.system(.callout, design: .rounded).weight(.bold))
+                    }
+                    if showDay {
+                        Text(TimeFmt.dayShort.string(from: shot.date)).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    }
                     Text(TimeFmt.time.string(from: shot.date)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     Text("· \(shot.timeframe.title)").font(.caption).foregroundStyle(.secondary)
                     if !shot.annotations.isEmpty {
@@ -314,12 +352,22 @@ struct ChartShotCard: View {
         }
         .buttonStyle(.plain)
         .help("Open to annotate")
+        .contextMenu {
+            Button("Open…", action: open)
+            Button("Delete Screenshot…", role: .destructive) { confirmDelete = true }
+        }
+        .confirmationDialog("Delete this screenshot?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { store.deleteChartShot(shot.id) }
+        }
     }
 }
 
 enum TimeFmt {
     static let time: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; f.timeZone = Calendar.ist.timeZone; return f
+    }()
+    static let dayShort: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE d MMM"; f.timeZone = Calendar.ist.timeZone; return f
     }()
 }
 

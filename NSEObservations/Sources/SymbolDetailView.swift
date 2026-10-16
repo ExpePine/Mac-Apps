@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum DetailTab: String, CaseIterable, Identifiable {
-    case notes = "Observations", shots = "Screenshots", news = "News", trades = "Trades", ai = "AI Analysis"
+    case shots = "Screenshots", notes = "Observations", news = "News", trades = "Trades", ai = "AI Analysis"
     var id: String { rawValue }
 }
 
@@ -42,7 +42,8 @@ struct SymbolDetailView: View {
     @State private var loadError: String?
     @State private var range: ChartRange = .notes
     @State private var style: ChartStyle = .line
-    @State private var tab: DetailTab = .notes
+    @State private var tab: DetailTab = .shots
+    @AppStorage("showPriceChart") private var showPriceChart = false
     @State private var sheet: ActiveSheet?
     @State private var aiBusy: AnalysisKind?
     @State private var aiError: String?
@@ -65,7 +66,6 @@ struct SymbolDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header(symbol)
                     stats
-                    chartCard
                     Picker("Section", selection: $tab) {
                         ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -81,6 +81,15 @@ struct SymbolDetailView: View {
                     case .news: newsSection
                     case .ai: aiSection(symbol)
                     }
+
+                    DisclosureGroup(isExpanded: $showPriceChart) {
+                        chartCard.padding(.top, 8)
+                    } label: {
+                        Label("Price chart (Yahoo Finance, daily)", systemImage: "chart.xyaxis.line")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 12)
                 }
                 .padding(24)
                 .frame(maxWidth: 1100, alignment: .leading)
@@ -95,10 +104,10 @@ struct SymbolDetailView: View {
             .navigationTitle(symbol.ticker)
             .toolbar {
                 ToolbarItemGroup {
-                    Button { Task { await load(force: true) } } label: {
-                        Label("Refresh Prices", systemImage: "arrow.clockwise")
+                    Button { NotificationCenter.default.post(name: .newScreenshot, object: nil) } label: {
+                        Label("New Screenshot", systemImage: "photo.badge.plus")
                     }
-                    .help("Refresh prices from Yahoo Finance")
+                    .help("New Screenshot for this stock (⌥⌘N)")
                     Button { sheet = .editSymbol } label: {
                         Label("Edit Symbol", systemImage: "info.circle")
                     }
@@ -184,8 +193,11 @@ struct SymbolDetailView: View {
                         .foregroundStyle(.tertiary)
                 } else if loading {
                     ProgressView().controlSize(.small)
-                } else if let loadError {
-                    InlineError(message: loadError).frame(maxWidth: 320)
+                } else if loadError != nil {
+                    Text("Price data unavailable")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .help(loadError ?? "")
                 }
             }
         }
@@ -195,22 +207,21 @@ struct SymbolDetailView: View {
 
     private var stats: some View {
         let last = candles.last?.close
-        let firstOutcome = firstNoteDate.flatMap { ObservationOutcome.compute(for: $0, candles: candles) }
         let lastNote = observations.first
-        let lastOutcome = lastNote.flatMap { ObservationOutcome.compute(for: $0.date, candles: candles) }
+        let shots = store.chartShots(for: symbolID)
+        let firstShotOutcome = shots.last.flatMap { ObservationOutcome.compute(for: $0.date, candles: candles) }
         let pos = store.position(for: symbolID)
 
         return HStack(spacing: 10) {
-            StatTile(title: "Since first note",
-                     value: Fmt.pct(firstOutcome?.sinceThen),
-                     detail: firstNoteDate.map { Fmt.day.string(from: $0) } ?? "No notes yet",
-                     tint: firstOutcome?.sinceThen.changeColor ?? .primary)
-            StatTile(title: "Since last note",
-                     value: Fmt.pct(lastOutcome?.sinceThen),
-                     detail: lastNote.map { "\($0.sentiment.title) · \(Fmt.day.string(from: $0.date))" } ?? "—",
-                     tint: lastOutcome?.sinceThen.changeColor ?? .primary)
+            StatTile(title: "Screenshots", value: "\(shots.count)",
+                     detail: shots.first.map { "Latest \(Fmt.day.string(from: $0.date))" } ?? "None yet")
+            StatTile(title: "Since first screenshot",
+                     value: Fmt.pct(firstShotOutcome?.sinceThen),
+                     detail: shots.last.map { Fmt.day.string(from: $0.date) } ?? "—",
+                     tint: firstShotOutcome?.sinceThen.changeColor ?? .primary)
             StatTile(title: "Observations", value: "\(observations.count)",
-                     detail: "\(trades.count) trade\(trades.count == 1 ? "" : "s")")
+                     detail: lastNote.map { "Last \($0.sentiment.title.lowercased()) · \(Fmt.day.string(from: $0.date))" }
+                        ?? "\(trades.count) trade\(trades.count == 1 ? "" : "s")")
             if let pos {
                 let pnl = last.map { ($0 - pos.avg) / pos.avg * 100 }
                 StatTile(title: "Position",
@@ -234,6 +245,9 @@ struct SymbolDetailView: View {
                     .labelsHidden()
                     .frame(maxWidth: 380)
                     Spacer()
+                    Button { Task { await load(force: true) } } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.borderless)
+                        .help("Refresh prices from Yahoo Finance")
                     Picker("Style", selection: $style) {
                         ForEach(ChartStyle.allCases) { Image(systemName: $0.systemImage).help($0.title).tag($0) }
                     }

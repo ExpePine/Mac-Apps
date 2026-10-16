@@ -3,6 +3,7 @@ import SwiftUI
 extension Notification.Name {
     static let newSymbol = Notification.Name("NSEObs.newSymbol")
     static let newObservation = Notification.Name("NSEObs.newObservation")
+    static let newScreenshot = Notification.Name("NSEObs.newScreenshot")
 }
 
 @main
@@ -22,6 +23,11 @@ struct NSEObservationsApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {
+                Button("New Screenshot…") {
+                    NotificationCenter.default.post(name: .newScreenshot, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+
                 Button("New Observation…") {
                     NotificationCenter.default.post(name: .newObservation, object: nil)
                 }
