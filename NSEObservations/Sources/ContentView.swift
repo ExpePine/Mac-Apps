@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum SidebarItem: Hashable {
+    case timeline
     case patterns
     case chat
     case symbol(UUID)
@@ -9,7 +10,7 @@ enum SidebarItem: Hashable {
 struct ContentView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var directory: SymbolDirectory
-    @State private var selection: SidebarItem? = .patterns
+    @State private var selection: SidebarItem? = .timeline
     @State private var search = ""
     @State private var showAddSymbol = false
 
@@ -43,6 +44,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
+        case .timeline?:
+            TimelineView { id in selection = .symbol(id) }
         case .patterns?:
             PatternsView()
         case .chat?:
@@ -74,6 +77,8 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selection) {
             Section("Journal") {
+                Label("Timeline", systemImage: "calendar")
+                    .tag(SidebarItem.timeline)
                 Label("Patterns", systemImage: "sparkles")
                     .tag(SidebarItem.patterns)
                 Label("Ask Your Notes", systemImage: "bubble.left.and.bubble.right")
@@ -144,7 +149,7 @@ struct SidebarView: View {
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             presenting: pendingDelete) { s in
             Button("Delete Symbol and All Its Notes", role: .destructive) {
-                if selection == .symbol(s.id) { selection = .patterns }
+                if selection == .symbol(s.id) { selection = .timeline }
                 store.deleteSymbol(s.id)
             }
         } message: { _ in

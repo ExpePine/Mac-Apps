@@ -189,7 +189,7 @@ struct ObservationEditor: View {
                 .font(.title2.weight(.semibold))
 
             Form {
-                DatePicker("Observed on", selection: $date, displayedComponents: .date)
+                DatePicker("Observed on", selection: $date, displayedComponents: [.date, .hourAndMinute])
                 Picker("Chart", selection: $timeframe) {
                     ForEach(ChartTimeframe.allCases) { Text($0.title).tag($0) }
                 }

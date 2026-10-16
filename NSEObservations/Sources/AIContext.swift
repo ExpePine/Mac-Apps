@@ -47,7 +47,7 @@ enum AIContext {
     """
 
     static func describe(_ o: Observation, outcome: ObservationOutcome?) -> String {
-        var line = "- [\(Fmt.isoDay.string(from: o.date))] \(o.timeframe.title) chart, \(o.sentiment.title)"
+        var line = "- [\(Fmt.isoDayTime.string(from: o.date)) IST] \(o.timeframe.title) chart, \(o.sentiment.title)"
         if !o.tags.isEmpty { line += ", tags: \(o.tags.joined(separator: ", "))" }
         if let p = o.notedPrice { line += ", noted price \(String(format: "%.2f", p))" }
         line += "\n  Note: \(o.text.replacingOccurrences(of: "\n", with: " "))"

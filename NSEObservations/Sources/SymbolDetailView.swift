@@ -435,7 +435,7 @@ struct ObservationCard: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(observation.sentiment.color.opacity(0.12), in: Capsule())
-                    Text(Fmt.day.string(from: observation.date))
+                    Text(Fmt.dayTime.string(from: observation.date))
                         .font(.subheadline.weight(.semibold))
                     Text("· \(observation.timeframe.title) chart")
                         .font(.subheadline)

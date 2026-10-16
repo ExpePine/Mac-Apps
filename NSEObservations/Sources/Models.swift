@@ -235,6 +235,19 @@ enum Fmt {
         return f
     }()
 
+    static let dayTime: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM yyyy, HH:mm"
+        return f
+    }()
+
+    static let isoDayTime: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.timeZone = TimeZone(identifier: "Asia/Kolkata")
+        return f
+    }()
+
     static let isoDay: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
