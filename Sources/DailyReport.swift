@@ -42,7 +42,18 @@ enum Groq {
         var errorDescription: String? { message }
     }
 
-    static func complete(apiKey: String, model: String, system: String, user: String) async throws -> String {
+    static func complete(apiKey: String, model: String, system: String, user: String,
+                         jsonMode: Bool = false) async throws -> String {
+        do {
+            return try await request(apiKey: apiKey, model: model, system: system, user: user, jsonMode: jsonMode)
+        } catch let f as Failure where jsonMode && f.message.contains("400") {
+            // Model may not support JSON mode — retry with the instruction in the prompt only.
+            return try await request(apiKey: apiKey, model: model, system: system, user: user, jsonMode: false)
+        }
+    }
+
+    private static func request(apiKey: String, model: String, system: String, user: String,
+                                jsonMode: Bool) async throws -> String {
         guard let url = URL(string: "https://api.groq.com/openai/v1/chat/completions") else {
             throw Failure(message: "Bad Groq URL")
         }
@@ -50,14 +61,15 @@ enum Groq {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
-            "temperature": 0.3,
+            "temperature": 0.2,
             "messages": [
                 ["role": "system", "content": system],
                 ["role": "user", "content": user],
             ],
         ]
+        if jsonMode { body["response_format"] = ["type": "json_object"] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -87,24 +99,47 @@ enum Mailer {
     }
 
     static func send(host: String, port: Int, username: String, password: String,
-                     to recipients: [String], subject: String, body: String) async throws {
+                     to recipients: [String], subject: String, body: String, html: String? = nil) async throws {
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
 
-        let headers = [
+        // base64 keeps every line under SMTP's 998-character limit.
+        func b64(_ s: String) -> String {
+            Data(s.utf8).base64EncodedString(options: [.lineLength76Characters,
+                                                       .endLineWithCarriageReturn, .endLineWithLineFeed])
+        }
+
+        var headers = [
             "From: Activity Logger <\(username)>",
             "To: \(recipients.joined(separator: ", "))",
             "Subject: \(subject)",
             "Date: \(dateFormatter.string(from: Date()))",
             "MIME-Version: 1.0",
-            "Content-Type: text/plain; charset=UTF-8",
-            "Content-Transfer-Encoding: 8bit",
         ]
-        let normalizedBody = body
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\n", with: "\r\n")
-        let message = headers.joined(separator: "\r\n") + "\r\n\r\n" + normalizedBody + "\r\n"
+        let content: String
+        if let html {
+            let boundary = "AL-\(UUID().uuidString)"
+            headers.append("Content-Type: multipart/alternative; boundary=\"\(boundary)\"")
+            content = [
+                "--\(boundary)",
+                "Content-Type: text/plain; charset=UTF-8",
+                "Content-Transfer-Encoding: base64",
+                "",
+                b64(body),
+                "--\(boundary)",
+                "Content-Type: text/html; charset=UTF-8",
+                "Content-Transfer-Encoding: base64",
+                "",
+                b64(html),
+                "--\(boundary)--",
+            ].joined(separator: "\r\n")
+        } else {
+            headers.append("Content-Type: text/plain; charset=UTF-8")
+            headers.append("Content-Transfer-Encoding: base64")
+            content = b64(body)
+        }
+        let message = headers.joined(separator: "\r\n") + "\r\n\r\n" + content + "\r\n"
 
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("mail-\(UUID().uuidString).eml")
         try Data(message.utf8).write(to: file)
@@ -230,60 +265,25 @@ final class ReportService: ObservableObject {
         let entries = store.entries(on: day).sorted { $0.periodStart < $1.periodStart }
         let dayUsage = settings.includeUsageInEmail ? usage.usage(for: day) : nil
         let hasUsage = (dayUsage?.activeSeconds ?? 0) >= 60
-        let usageText = hasUsage ? Self.usageText(dayUsage!) : ""
 
         if entries.isEmpty && !hasUsage && settings.reportSkipEmptyDays && !isTest {
             setStatus("No entries for \(dayText) - nothing to send.")
             return true
         }
 
-        let log = Self.logText(entries)
-        var summary: String
-        let apiKey = Keychain.get(Keychain.groqAPIKey)
-        if entries.isEmpty && !hasUsage {
-            summary = "No check-ins or computer activity were logged on this day."
-        } else if apiKey.isEmpty {
-            summary = "(Add a Groq API key in Daily email settings to get an AI summary.)"
-        } else {
-            do {
-                summary = try await Groq.complete(apiKey: apiKey, model: settings.groqModel,
-                                                  system: Self.systemPrompt,
-                                                  user: Self.userPrompt(dayText: dayText, entries: entries,
-                                                                        log: log, usageText: usageText))
-            } catch {
-                summary = "(AI summary unavailable: \(error.localizedDescription))"
-            }
-        }
-
-        var body = """
-        Good morning!
-
-        Here's what you did on \(dayText).
-
-        \(summary)
-
-        ------------------------------
-        CHECK-IN LOG
-        ------------------------------
-        \(log.isEmpty ? "(no entries)" : log)
-        """
-        if hasUsage {
-            body += """
-
-
-            ------------------------------
-            WEB & APP TIME (active, idle excluded)
-            ------------------------------
-            \(usageText)
-            """
-        }
-        body += "\n\n-- Sent by Activity Logger"
-        let subject = (isTest ? "[Test] " : "") + "Your activity summary - \(dayText)"
+        let recap = await RecapBuilder.build(dayText: dayText, entries: entries,
+                                             usage: hasUsage ? dayUsage : nil,
+                                             apiKey: Keychain.get(Keychain.groqAPIKey),
+                                             model: settings.groqModel)
+        let body = RecapRenderer.text(recap)
+        let html = RecapRenderer.html(recap)
+        let shortDay = day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        let subject = (isTest ? "[Test] " : "") + "Daily recap - \(shortDay)"
 
         do {
             try await Mailer.send(host: settings.smtpHost, port: settings.smtpPort,
                                   username: settings.smtpUsername, password: password,
-                                  to: recipients, subject: subject, body: body)
+                                  to: recipients, subject: subject, body: body, html: html)
             let time = Date().formatted(date: .abbreviated, time: .shortened)
             setStatus("\(isTest ? "Test sent" : "Sent") summary for \(dayText) to \(recipients.joined(separator: ", ")) - \(time)")
             return true
