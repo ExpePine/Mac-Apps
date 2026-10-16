@@ -43,3 +43,13 @@ jobs:
             --title "NSE Observations (build ${{ github.run_number }})" \
             --notes "Download NSEObservations.dmg below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch. Universal (Apple Silicon + Intel), macOS 13 or later." \
             --latest=false
+
+      - name: Update stable "nse-observations-latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nse-observations-latest --yes --cleanup-tag || true
+          gh release create nse-observations-latest dist/NSEObservations.dmg \
+            --title "NSE Observations (latest)" \
+            --notes "Always the newest NSE Observations build (currently build ${{ github.run_number }}). Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
