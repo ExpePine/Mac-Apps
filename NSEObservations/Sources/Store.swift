@@ -11,13 +11,23 @@ final class Store: ObservableObject {
 
     let fileURL: URL
 
-    init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory())
-        let dir = base.appendingPathComponent("NSEObservations", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        fileURL = dir.appendingPathComponent("observations.json")
-        load()
+    /// `fileURL`/`seed` are only used by screenshot mode, so sample data never touches your journal.
+    init(fileURL custom: URL? = nil, seed: AppData? = nil) {
+        if let custom {
+            fileURL = custom
+        } else {
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSHomeDirectory())
+            let dir = base.appendingPathComponent("NSEObservations", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            fileURL = dir.appendingPathComponent("observations.json")
+        }
+        if let seed {
+            data = seed
+            save()
+        } else {
+            load()
+        }
     }
 
     // MARK: Persistence

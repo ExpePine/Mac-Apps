@@ -8,6 +8,7 @@ struct SymbolEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     let existing: TrackedSymbol?
+    var initialQuery: String = ""
     var onSave: (TrackedSymbol) -> Void = { _ in }
 
     @State private var ticker = ""
@@ -123,6 +124,7 @@ struct SymbolEditor: View {
                 ticker = e.ticker; name = e.displayName; status = e.status
                 tags = e.tags.joined(separator: ", "); thesis = e.thesis
             } else {
+                ticker = initialQuery
                 tickerFocused = true
             }
         }

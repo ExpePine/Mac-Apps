@@ -7,6 +7,7 @@ extension Notification.Name {
 
 @main
 struct NSEObservationsApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = Store()
     @StateObject private var settings = AppSettings()
     @StateObject private var directory = SymbolDirectory()

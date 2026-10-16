@@ -74,6 +74,13 @@ actor MarketDataService {
     static let shared = MarketDataService()
 
     private var cache: [String: (fetched: Date, series: QuoteSeries)] = [:]
+    /// Symbols whose series was supplied locally (screenshot mode); never fetched from the network.
+    private var pinned: Set<String> = []
+
+    func inject(_ yahooSymbol: String, series: QuoteSeries) {
+        cache[yahooSymbol] = (Date(), series)
+        pinned.insert(yahooSymbol)
+    }
     private let ttl: TimeInterval = 15 * 60
 
     /// Cached series without a network call (used when building AI context).
@@ -81,6 +88,7 @@ actor MarketDataService {
 
     /// Daily candles from `from` until now. Cached for 15 minutes per symbol.
     func series(for yahooSymbol: String, from: Date, force: Bool = false) async throws -> QuoteSeries {
+        if pinned.contains(yahooSymbol), let hit = cache[yahooSymbol] { return hit.series }
         if !force, let hit = cache[yahooSymbol], Date().timeIntervalSince(hit.fetched) < ttl,
            let first = hit.series.candles.first, first.date <= from.addingTimeInterval(7 * 86_400) {
             return hit.series

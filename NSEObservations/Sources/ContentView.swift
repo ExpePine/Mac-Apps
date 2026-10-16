@@ -10,7 +10,11 @@ enum SidebarItem: Hashable {
 struct ContentView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var directory: SymbolDirectory
-    @State private var selection: SidebarItem? = .timeline
+    @State private var selection: SidebarItem?
+
+    init(initialSelection: SidebarItem? = .timeline) {
+        _selection = State(initialValue: initialSelection)
+    }
     @State private var search = ""
     @State private var showAddSymbol = false
 
