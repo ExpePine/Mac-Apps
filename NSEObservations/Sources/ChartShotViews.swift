@@ -118,14 +118,16 @@ struct AnnotationLabel: View {
         let label = Text(annotation.text.isEmpty ? "Text" : annotation.text)
             .font(.system(size: fontSize, weight: .semibold))
             .foregroundColor(textColor)
-        return label
+        // Background hugs the text; the outer frame only limits how wide a long label can grow before wrapping.
+        let boxed = label
             .multilineTextAlignment(.leading)
-            .frame(maxWidth: max(maxWidth, 40))
-            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, max(3, 6 * scale))
             .padding(.vertical, max(2, 3 * scale))
             .background(shape.fill(backdrop))
             .overlay(shape.stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).opacity(selected ? 1 : 0))
+        return boxed
+            .frame(maxWidth: max(maxWidth, 40))
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
