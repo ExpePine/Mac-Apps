@@ -443,14 +443,7 @@ struct SettingsView: View {
                     Text("Every version is saved as a .pine file inside the app. Pick a safe folder (for example in iCloud Drive or a backup disk) and each new version is also copied there automatically, organised as Script Name/v3_date.pine. Deleting a version in the app never deletes these files.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Section("Screenshots") {
-                    HStack {
-                        Text("Chart screenshots you attach are stored in the app's Attachments folder.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Show in Finder") { store.revealFolder(store.attachmentsFolder) }
-                    }
-                }
+                StorageSection()
                 Section("Prices") {
                     Text("Daily OHLC comes from Yahoo Finance's public chart endpoint using the .NS suffix (e.g. RELIANCE → RELIANCE.NS). It is unofficial and can change or rate-limit without notice. For indices, enter the Yahoo symbol directly, e.g. ^NSEI for Nifty 50.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -483,6 +476,67 @@ struct SettingsView: View {
             message = "Connected — \(settings.model) replied “\(reply.prefix(40))”."
         } catch {
             message = error.localizedDescription
+        }
+    }
+}
+
+
+// MARK: - Screenshot storage settings
+
+struct StorageSection: View {
+    @EnvironmentObject private var store: Store
+    @AppStorage("imageQuality") private var quality = ImageCompression.Quality.balanced.rawValue
+    @AppStorage("imageMaxPixels") private var maxPixels = 2560
+    @State private var usage: (bytes: Int64, files: Int)?
+    @State private var free: Int64?
+
+    var body: some View {
+        Section {
+            LabeledContent("Screenshots use") {
+                if let u = usage {
+                    Text("\(ImageCompression.format(u.bytes)) · \(u.files) image\(u.files == 1 ? "" : "s")")
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            if let free {
+                LabeledContent("Free on this Mac") { Text(ImageCompression.format(free)) }
+            }
+            Picker("Quality", selection: $quality) {
+                ForEach(ImageCompression.Quality.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Picker("Largest side", selection: $maxPixels) {
+                ForEach(ImageCompression.maxSizeOptions, id: \.self) { px in
+                    Text(px == 0 ? "Keep original size" : "\(px) px").tag(px)
+                }
+            }
+            HStack {
+                let legacy = store.legacyImageNames.count
+                Button(legacy > 0 ? "Compress \(legacy) older PNG image\(legacy == 1 ? "" : "s")" : "All images are compressed") {
+                    Task { await store.compressLegacyImages(); refresh() }
+                }
+                .disabled(legacy == 0)
+                if let status = store.compressionStatus {
+                    Text(status).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Show in Finder") { store.revealFolder(store.attachmentsFolder) }
+            }
+        } header: {
+            Text("Screenshot storage")
+        } footer: {
+            Text("New screenshots are saved as HEIC (JPEG on Macs that can't write HEIC) and scaled down to the largest side above — typically a fraction of the size of the original PNG. Your text labels are stored separately, so nothing is saved twice. Settings apply to images added from now on.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .task { refresh() }
+    }
+
+    private func refresh() {
+        let folder = store.attachmentsFolder
+        Task.detached(priority: .utility) {
+            let u = ImageCompression.folderSize(folder)
+            let f = ImageCompression.freeDiskSpace()
+            await MainActor.run { usage = u; free = f }
         }
     }
 }

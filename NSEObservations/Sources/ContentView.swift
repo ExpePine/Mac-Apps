@@ -38,6 +38,11 @@ struct ContentView: View {
             showAddSymbol = true
         }
         .task { await directory.refreshIfStale() }
+        .task {
+            // Convert screenshots saved as PNG by earlier versions (runs once; quick when there's nothing to do).
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await store.compressLegacyImages()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .newScreenshot)) { _ in capturing = true }
         .sheet(isPresented: $capturing) {
             NewScreenshotSheet(presetSymbolID: { if case .symbol(let id) = selection { return id }; return nil }()) { ids in

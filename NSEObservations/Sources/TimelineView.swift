@@ -555,7 +555,7 @@ private struct TimelineRow: View {
     }
 
     private var shotThumbnail: NSImage? {
-        if case .shot(let sh) = entry.kind { return store.image(sh.imageFile) }
+        if case .shot(let sh) = entry.kind { return store.thumbnail(sh.imageFile, maxPixel: 220) }
         return nil
     }
 

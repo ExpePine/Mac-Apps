@@ -68,7 +68,7 @@ struct ShotWorkspace: View {
                         Button { select(s.id) } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Group {
-                                    if let img = store.image(s.imageFile) {
+                                    if let img = store.thumbnail(s.imageFile, maxPixel: 300) {
                                         Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
                                     } else {
                                         Color.gray.opacity(0.3)

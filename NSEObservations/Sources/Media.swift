@@ -51,7 +51,7 @@ struct AttachmentEditorStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(existing, id: \.self) { name in
-                        thumb(store.image(name)) { existing.removeAll { $0 == name } }
+                        thumb(store.thumbnail(name, maxPixel: 240)) { existing.removeAll { $0 == name } }
                     }
                     ForEach(pending) { p in
                         thumb(p.image) { pending.removeAll { $0.id == p.id } }
@@ -157,7 +157,7 @@ struct AttachmentThumbnails: View {
                 ForEach(names, id: \.self) { name in
                     Button { viewing = ImageRef(id: name) } label: {
                         Group {
-                            if let img = store.image(name) {
+                            if let img = store.thumbnail(name, maxPixel: 320) {
                                 Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
                             } else {
                                 Image(systemName: "photo").foregroundStyle(.tertiary)

@@ -246,7 +246,7 @@ struct ObservationEditor: View {
         o.notedPrice = Double(price.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces))
         // Images: delete the ones you removed, save the new ones as PNG files.
         for removed in Set(o.imageFiles).subtracting(images) { store.deleteImage(removed) }
-        let added = pendingImages.compactMap { ImageIO.png(from: $0.image) }.compactMap { store.saveImage($0) }
+        let added = pendingImages.compactMap { store.saveImage($0.image) }
         let all = images + added
         o.attachments = all.isEmpty ? nil : all
         store.upsert(o)

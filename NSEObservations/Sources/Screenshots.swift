@@ -91,9 +91,9 @@ enum DemoData {
     """
 
     /// A simple candle chart drawn in code, standing in for a TradingView screenshot.
-    static func chartImage(_ all: [Candle], title: String = "RELIANCE · 1D · sample screenshot") -> NSImage {
-        let candles = Array(all.suffix(80))
-        let size = NSSize(width: 1200, height: 640)
+    static func chartImage(_ all: [Candle], title: String = "RELIANCE · 1D · sample screenshot",
+                           size: NSSize = NSSize(width: 1200, height: 640), count: Int = 80) -> NSImage {
+        let candles = Array(all.suffix(count))
         return NSImage(size: size, flipped: false) { rect in
             NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.12, alpha: 1).setFill()
             rect.fill()
@@ -280,8 +280,7 @@ enum ScreenshotRunner {
         // A sample chart screenshot attached to the newest RELIANCE note.
         var editorNote: Observation?
         if let candles = demo.series["RELIANCE.NS"]?.candles,
-           let png = ImageIO.png(from: DemoData.chartImage(candles)),
-           let name = store.saveImage(png),
+           let name = store.saveImage(DemoData.chartImage(candles)),
            var latest = store.observations(for: demo.featured).first {
             latest.attachments = [name]
             store.upsert(latest)
@@ -367,6 +366,22 @@ enum ScreenshotRunner {
         await snap(env(TagManagerSheet()), size: CGSize(width: 680, height: 480), name: "11-tag-manager", dir: dir)
         if let id = shotID {
             await snap(env(ChartShotEditor(shotID: id)), size: CGSize(width: 1200, height: 760), name: "13-annotate", dir: dir)
+        }
+        // Measure storage: a retina-sized chart (2880×1620, 250 candles, thin wicks and text) in each format.
+        if let c = demo.series["RELIANCE.NS"]?.candles {
+            let big = DemoData.chartImage(c, title: "RELIANCE · 1D · retina test", size: NSSize(width: 2880, height: 1620), count: 250)
+            if let cg = ImageCompression.cgImage(from: big) {
+                let png = ImageIO.png(from: big)?.count ?? 0
+                var parts = ["png \(ImageCompression.format(Int64(png))) (\(cg.width)x\(cg.height))"]
+                for q in ImageCompression.Quality.allCases {
+                    for px in [0, 2560, 1920] {
+                        if let out = ImageCompression.compress(cg, quality: q.value, maxPixels: px) {
+                            parts.append("\(q.rawValue)@\(px == 0 ? "orig" : String(px)) \(out.ext) \(ImageCompression.format(Int64(out.data.count)))")
+                        }
+                    }
+                }
+                print("COMPRESS " + parts.joined(separator: " | "))
+            }
         }
         print("SCREENSHOTS_DIR=\(dir.path)")
     }

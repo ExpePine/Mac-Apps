@@ -290,22 +290,41 @@ final class Store: ObservableObject {
 
     // MARK: Observation images
 
-    private static let thumbCache = NSCache<NSString, NSImage>()
+    /// Full-size images: only a handful are kept in memory at a time.
+    private static let fullCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>(); c.countLimit = 16; return c
+    }()
+    private static let thumbCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>(); c.countLimit = 400; return c
+    }()
 
     func imageURL(_ name: String) -> URL { attachmentsFolder.appendingPathComponent(name) }
 
     func image(_ name: String) -> NSImage? {
-        if let hit = Self.thumbCache.object(forKey: name as NSString) { return hit }
+        if let hit = Self.fullCache.object(forKey: name as NSString) { return hit }
         guard let img = NSImage(contentsOf: imageURL(name)) else { return nil }
-        Self.thumbCache.setObject(img, forKey: name as NSString)
+        Self.fullCache.setObject(img, forKey: name as NSString)
         return img
     }
 
-    /// Writes PNG data to the Attachments folder and returns the new file name.
-    func saveImage(_ png: Data) -> String? {
-        let name = "\(UUID().uuidString).png"
+    /// Small preview for lists and filmstrips (decoded at reduced size).
+    func thumbnail(_ name: String, maxPixel: Int = 420) -> NSImage? {
+        let key = "\(name)#\(maxPixel)" as NSString
+        if let hit = Self.thumbCache.object(forKey: key) { return hit }
+        guard let img = ImageCompression.thumbnail(at: imageURL(name), maxPixel: maxPixel) else { return nil }
+        Self.thumbCache.setObject(img, forKey: key)
+        return img
+    }
+
+    /// Compresses (HEIC, capped size) and writes an image to the Attachments folder; returns the file name.
+    func saveImage(_ image: NSImage) -> String? {
+        guard let out = ImageCompression.compress(image) else {
+            lastError = "Couldn't read that image."
+            return nil
+        }
+        let name = "\(UUID().uuidString).\(out.ext)"
         do {
-            try png.write(to: imageURL(name), options: .atomic)
+            try out.data.write(to: imageURL(name), options: .atomic)
             return name
         } catch {
             lastError = "Couldn't save image: \(error.localizedDescription)"
@@ -313,8 +332,56 @@ final class Store: ObservableObject {
         }
     }
 
+    // MARK: Converting older PNG screenshots
+
+    @Published private(set) var compressionStatus: String?
+    private var compressing = false
+
+    /// Image files still stored as PNG (from earlier versions of the app).
+    var legacyImageNames: [String] {
+        let names = data.chartShots.map(\.imageFile) + data.observations.flatMap(\.imageFiles)
+        return Array(Set(names.filter { $0.lowercased().hasSuffix(".png") }))
+    }
+
+    /// Re-encodes PNG screenshots with the current compression settings. Safe to run repeatedly.
+    func compressLegacyImages() async {
+        let names = legacyImageNames
+        guard !names.isEmpty, !compressing else { return }
+        compressing = true
+        defer { compressing = false }
+        var saved: Int64 = 0, done = 0
+        for name in names {
+            compressionStatus = "Compressing \(done + 1) of \(names.count)…"
+            let src = imageURL(name)
+            let quality = ImageCompression.quality.value, maxPx = ImageCompression.maxPixels
+            let result: (data: Data, ext: String)? = await Task.detached(priority: .utility) {
+                guard let cg = ImageCompression.cgImage(at: src) else { return nil }
+                return ImageCompression.compress(cg, quality: quality, maxPixels: maxPx)
+            }.value
+            guard let out = result else { continue }
+            let oldSize = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 } ?? 0
+            // Only replace when it actually saves space.
+            guard out.data.count < oldSize else { continue }
+            let newName = "\(UUID().uuidString).\(out.ext)"
+            do { try out.data.write(to: imageURL(newName), options: .atomic) } catch { continue }
+            for i in data.chartShots.indices where data.chartShots[i].imageFile == name {
+                data.chartShots[i].imageFile = newName
+            }
+            for i in data.observations.indices {
+                if let a = data.observations[i].attachments, a.contains(name) {
+                    data.observations[i].attachments = a.map { $0 == name ? newName : $0 }
+                }
+            }
+            save()
+            deleteImage(name)
+            saved += Int64(oldSize - out.data.count)
+            done += 1
+        }
+        compressionStatus = done == 0 ? nil : "Compressed \(done) image\(done == 1 ? "" : "s"), saved \(ImageCompression.format(saved))."
+    }
+
     func deleteImage(_ name: String) {
-        Self.thumbCache.removeObject(forKey: name as NSString)
+        Self.fullCache.removeObject(forKey: name as NSString)
         try? FileManager.default.removeItem(at: imageURL(name))
     }
 
@@ -358,7 +425,7 @@ final class Store: ObservableObject {
     func addChartShots(_ items: [(image: NSImage, date: Date)], symbolID: UUID) -> [UUID] {
         var ids: [UUID] = []
         for item in items.sorted(by: { $0.date < $1.date }) {
-            guard let png = ImageIO.png(from: item.image), let name = saveImage(png) else { continue }
+            guard let name = saveImage(item.image) else { continue }
             let shot = ChartShot(symbolID: symbolID, date: item.date, imageFile: name)
             data.chartShots.append(shot)
             ids.append(shot.id)
