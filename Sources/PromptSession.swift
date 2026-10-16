@@ -15,6 +15,9 @@ final class PromptSession: ObservableObject {
     @Published var errorMessage: String?
 
     var onFinish: (@MainActor (Entry) -> Void)?
+    var onStuck: (@MainActor () -> Void)?
+    /// Today's open goals, shown as a reminder in the window.
+    var goalTexts: [String] = []
 
     private let settings: SettingsStore
     private let store: EntryStore

@@ -9,6 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let windows: WindowManager
     let reports: ReportService
     let tracker: UsageTracker
+    let goals: GoalsStore
+    let stuckStore: StuckStore
+    let coach: CoachService
+    let nav = Navigator()
 
     /// The check-in that is waiting for an answer (if any).
     private var pendingPrompt: Prompt?
@@ -31,7 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         windows = WindowManager()
         let usage = UsageStore(baseDirectory: store.directory)
         tracker = UsageTracker(settings: settings, usage: usage)
-        reports = ReportService(settings: settings, store: store, usage: usage)
+        goals = GoalsStore(directory: store.directory)
+        stuckStore = StuckStore(directory: store.directory)
+        coach = CoachService(settings: settings, store: store, goals: goals, usage: usage, stuck: stuckStore)
+        reports = ReportService(settings: settings, store: store, usage: usage, goals: goals)
         super.init()
 
         scheduler.onPrompt = { [weak self] start, end in
@@ -60,6 +67,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                                    intentIdentifiers: [], options: [])
         ])
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+
+        // Morning goals: check shortly after launch, then every 10 minutes.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            while !Task.isCancelled {
+                self?.maybeAskForGoals()
+                try? await Task.sleep(nanoseconds: 600_000_000_000)
+            }
+        }
+    }
+
+    // MARK: - Main window & goals
+
+    func showMain(_ section: MainSection) {
+        nav.section = section
+        windows.showMain(app: self, nav: nav)
+    }
+
+    /// Opens Goals once per day (from 5 am) if today's goals are empty.
+    private func maybeAskForGoals() {
+        guard settings.askGoalsMorning, goals.activeToday.isEmpty else { return }
+        let now = Date()
+        guard Calendar.current.component(.hour, from: now) >= 5 else { return }
+        let key = GoalsStore.dayKey(now)
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: "goalsAskedDay") != key else { return }
+        // Don't ask while the user is away (idle > 5 min).
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        guard idle < 300 else { return }
+        defaults.set(key, forKey: "goalsAskedDay")
+        showMain(.goals)
     }
 
     // MARK: - Check-in flow
@@ -98,13 +136,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         openSession(for: prompt)
     }
 
-    func showHistory() {
-        windows.showHistory(store: store, settings: settings)
-    }
+    func showHistory() { showMain(.history) }
 
-    func showEmailSettings() {
-        windows.showEmailSettings(settings: settings, reports: reports, tracker: tracker)
-    }
+    func showEmailSettings() { showMain(.settings) }
 
     func applicationWillTerminate(_ notification: Notification) {
         tracker.flush()
@@ -116,7 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         let session = PromptSession(prompt: prompt, settings: settings, store: store)
+        session.goalTexts = goals.activeToday.filter { !$0.done }.map(\.text)
         session.onFinish = { [weak self] entry in self?.resolve(entry) }
+        session.onStuck = { [weak self] in self?.showMain(.stuck) }
         activeSession = session
         windows.showPrompt(session)
     }
@@ -130,6 +166,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         removeNotification(entry.id)
         activeSession = nil
         windows.closePrompt()
+        reviewAgainstGoals(entry)
+    }
+
+    /// Ask the coach whether this check-in served today's goals; if not, ask why.
+    private func reviewAgainstGoals(_ entry: Entry) {
+        guard entry.status == .completed || entry.status == .quickReply || entry.status == .autoSaved else {
+            return
+        }
+        Task { [weak self] in
+            guard let self, let alignment = await self.coach.review(entry), !alignment.aligned else { return }
+            let latest = self.store.entries.first { $0.id == entry.id } ?? entry
+            let model = DeviationModel(entry: latest, alignment: alignment,
+                                       goals: self.goals.activeToday.map(\.text), coach: self.coach)
+            self.windows.showDeviation(model)
+        }
     }
 
     // MARK: - Notifications

@@ -31,6 +31,13 @@ struct PromptView: View {
                 Text(session.prompt.rangeText)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                if !session.goalTexts.isEmpty {
+                    Label(session.goalTexts.joined(separator: " · "), systemImage: "target")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(session.goalTexts.joined(separator: "\n"))
+                }
             }
             Spacer()
             CountdownRing(remaining: session.remaining, total: session.totalSeconds)
@@ -87,6 +94,8 @@ struct PromptView: View {
         HStack {
             Button("Skip") { session.finish(.skipped) }
             Button("+1 min") { session.extend() }
+            Button { session.onStuck?() } label: { Label("Stuck?", systemImage: "lifepreserver") }
+                .help("Get help with what's blocking you")
             Spacer()
             Text("⌘↩").font(.caption).foregroundStyle(.tertiary)
             Button("Save") { session.finish(.completed) }

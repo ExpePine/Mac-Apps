@@ -42,37 +42,39 @@ enum Groq {
         var errorDescription: String? { message }
     }
 
+    /// Single-turn helper.
     static func complete(apiKey: String, model: String, system: String, user: String,
                          jsonMode: Bool = false) async throws -> String {
+        try await chat(apiKey: apiKey, model: model,
+                       messages: [["role": "system", "content": system], ["role": "user", "content": user]],
+                       jsonMode: jsonMode)
+    }
+
+    /// Multi-turn chat. `messages` use roles system / user / assistant.
+    static func chat(apiKey: String, model: String, messages: [[String: String]],
+                     jsonMode: Bool = false) async throws -> String {
         do {
-            return try await request(apiKey: apiKey, model: model, system: system, user: user, jsonMode: jsonMode)
+            return try await send(apiKey: apiKey, model: model, messages: messages, jsonMode: jsonMode)
         } catch let f as Failure where jsonMode && f.message.contains("400") {
-            // Model may not support JSON mode — retry with the instruction in the prompt only.
-            return try await request(apiKey: apiKey, model: model, system: system, user: user, jsonMode: false)
+            // Model may not support JSON mode; the prompt still asks for JSON.
+            return try await send(apiKey: apiKey, model: model, messages: messages, jsonMode: false)
         }
     }
 
-    private static func request(apiKey: String, model: String, system: String, user: String,
-                                jsonMode: Bool) async throws -> String {
+    private static func send(apiKey: String, model: String, messages: [[String: String]],
+                             jsonMode: Bool) async throws -> String {
         guard let url = URL(string: "https://api.groq.com/openai/v1/chat/completions") else {
             throw Failure(message: "Bad Groq URL")
         }
-        var request = URLRequest(url: url, timeoutInterval: 90)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = [
-            "model": model,
-            "temperature": 0.2,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": user],
-            ],
-        ]
+        var urlRequest = URLRequest(url: url, timeoutInterval: 90)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: Any] = ["model": model, "temperature": 0.2, "messages": messages]
         if jsonMode { body["response_format"] = ["type": "json_object"] }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
 
@@ -84,7 +86,7 @@ enum Groq {
               let message = choices.first?["message"] as? [String: Any],
               let content = message["content"] as? String,
               !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw Failure(message: "Groq returned an empty summary")
+            throw Failure(message: "Groq returned an empty answer")
         }
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -194,6 +196,7 @@ final class ReportService: ObservableObject {
     private let settings: SettingsStore
     private let store: EntryStore
     private let usage: UsageStore
+    private let goals: GoalsStore
     private let defaults = UserDefaults.standard
     private var loop: Task<Void, Never>?
     private var nextRetry: Date?
@@ -203,10 +206,11 @@ final class ReportService: ObservableObject {
         static let lastStatus = "reportLastStatus"
     }
 
-    init(settings: SettingsStore, store: EntryStore, usage: UsageStore) {
+    init(settings: SettingsStore, store: EntryStore, usage: UsageStore, goals: GoalsStore) {
         self.settings = settings
         self.store = store
         self.usage = usage
+        self.goals = goals
         lastStatus = UserDefaults.standard.string(forKey: Keys.lastStatus) ?? "No summary sent yet."
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -273,6 +277,7 @@ final class ReportService: ObservableObject {
 
         let recap = await RecapBuilder.build(dayText: dayText, entries: entries,
                                              usage: hasUsage ? dayUsage : nil,
+                                             goals: goals.goals(on: day),
                                              apiKey: Keychain.get(Keychain.groqAPIKey),
                                              model: settings.groqModel)
         let body = RecapRenderer.text(recap)

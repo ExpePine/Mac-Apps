@@ -72,6 +72,16 @@ struct EmailSettingsView: View {
             }
 
             Section {
+                Toggle("Ask for today's goals each morning", isOn: $settings.askGoalsMorning)
+                Toggle("Compare each check-in with my goals", isOn: $settings.coachChecksEnabled)
+            } header: {
+                Text("Coach")
+            } footer: {
+                Text("When a check-in looks off-plan, you'll be asked what happened. Uses your Groq API key below.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Track active time on websites and apps", isOn: $settings.trackUsage)
                 Toggle("Include it in the daily email", isOn: $settings.includeUsageInEmail)
                 Stepper("Idle after \(settings.idleMinutes) min without keyboard/mouse",
@@ -129,6 +139,6 @@ struct EmailSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 760)
+        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
     }
 }

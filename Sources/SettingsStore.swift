@@ -23,6 +23,8 @@ final class SettingsStore: ObservableObject {
         static let idleMinutes = "idleMinutes"
         static let excludedDomains = "excludedDomains"
         static let includeUsageInEmail = "includeUsageInEmail"
+        static let coachChecks = "coachChecksEnabled"
+        static let askGoalsMorning = "askGoalsMorning"
     }
 
     static let intervalPresets = [15, 20, 30, 40, 60]
@@ -67,6 +69,12 @@ final class SettingsStore: ObservableObject {
     @Published var excludedDomains: String { didSet { defaults.set(excludedDomains, forKey: Keys.excludedDomains) } }
     @Published var includeUsageInEmail: Bool { didSet { defaults.set(includeUsageInEmail, forKey: Keys.includeUsageInEmail) } }
 
+    // MARK: Coach
+    /// Compare each check-in with today's goals and ask about deviations.
+    @Published var coachChecksEnabled: Bool { didSet { defaults.set(coachChecksEnabled, forKey: Keys.coachChecks) } }
+    /// Open the Goals screen the first time you're at the Mac each day.
+    @Published var askGoalsMorning: Bool { didSet { defaults.set(askGoalsMorning, forKey: Keys.askGoalsMorning) } }
+
     init() {
         defaults.register(defaults: [
             Keys.interval: 20,
@@ -88,6 +96,8 @@ final class SettingsStore: ObservableObject {
             Keys.idleMinutes: 2,
             Keys.excludedDomains: "",
             Keys.includeUsageInEmail: true,
+            Keys.coachChecks: true,
+            Keys.askGoalsMorning: true,
         ])
         intervalMinutes = defaults.integer(forKey: Keys.interval)
         entryWindowMinutes = defaults.integer(forKey: Keys.window)
@@ -108,6 +118,8 @@ final class SettingsStore: ObservableObject {
         idleMinutes = max(1, defaults.integer(forKey: Keys.idleMinutes))
         excludedDomains = defaults.string(forKey: Keys.excludedDomains) ?? ""
         includeUsageInEmail = defaults.bool(forKey: Keys.includeUsageInEmail)
+        coachChecksEnabled = defaults.bool(forKey: Keys.coachChecks)
+        askGoalsMorning = defaults.bool(forKey: Keys.askGoalsMorning)
     }
 }
 

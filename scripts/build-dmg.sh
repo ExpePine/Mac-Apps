@@ -20,7 +20,14 @@ xcodebuild \
   CODE_SIGN_IDENTITY="-" \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM="" \
-  build | tail -n 20
+  build > build.log 2>&1 || {
+    echo "Build failed. Compiler errors:"
+    grep -E "error:" build.log | sort -u | head -60 | while IFS= read -r line; do
+      echo "::error::${line}"
+    done
+    exit 1
+  }
+tail -n 5 build.log
 
 APP="$BUILD_DIR/Build/Products/Release/$NAME.app"
 [ -d "$APP" ] || { echo "Build failed: $APP not found"; exit 1; }

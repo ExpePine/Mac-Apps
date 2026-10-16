@@ -7,6 +7,7 @@ struct MenuContentView: View {
     @ObservedObject var scheduler: Scheduler
     @ObservedObject var store: EntryStore
     @ObservedObject var tracker: UsageTracker
+    @ObservedObject var goals: GoalsStore
 
     @State private var launchAtLogin = LoginItem.isEnabled
     @State private var loginError: String?
@@ -20,11 +21,34 @@ struct MenuContentView: View {
                 } label: { Label("Log now", systemImage: "square.and.pencil") }
                     .buttonStyle(.borderedProminent)
                 Button {
+                    app.showMain(.stuck)
+                } label: { Label("I'm Stuck", systemImage: "lifepreserver") }
+                Button {
                     scheduler.isPaused ? scheduler.resume() : scheduler.pause()
                 } label: {
-                    Label(scheduler.isPaused ? "Resume" : "Pause",
-                          systemImage: scheduler.isPaused ? "play.fill" : "pause.fill")
+                    Image(systemName: scheduler.isPaused ? "play.fill" : "pause.fill")
                 }
+                .help(scheduler.isPaused ? "Resume check-ins" : "Pause check-ins")
+            }
+
+            Button {
+                app.showMain(.goals)
+            } label: {
+                HStack {
+                    Image(systemName: "target")
+                    let g = goals.activeToday
+                    Text(g.isEmpty ? "Set today's goals" : "Goals: \(g.filter(\.done).count) of \(g.count) done")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                app.showMain(.today)
+            } label: {
+                Label("Open Activity Logger", systemImage: "macwindow")
             }
 
             Divider()

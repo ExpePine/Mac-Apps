@@ -21,6 +21,8 @@ struct DailyRecap {
     var missed = 0
     var usage: DayUsage?
     var aiNote: String?         // shown small if the AI step failed / no key
+    var goals: [Goal] = []
+    var onPlanPercent: Int?     // share of checked check-ins that served a goal
 
     var successCount: Int { timeline.filter { $0.success == true }.count }
 }
@@ -33,7 +35,7 @@ enum RecapBuilder {
         var solved: String?
     }
 
-    static func build(dayText: String, entries: [Entry], usage: DayUsage?,
+    static func build(dayText: String, entries: [Entry], usage: DayUsage?, goals: [Goal] = [],
                       apiKey: String, model: String) async -> DailyRecap {
         let answered = entries.filter { $0.status != .missed && $0.status != .skipped }
         let useful = answered.filter { !text(of: $0).isEmpty }
@@ -41,6 +43,12 @@ enum RecapBuilder {
         recap.answered = answered.count
         recap.missed = entries.filter { $0.status == .missed }.count
         recap.usage = usage
+        recap.goals = goals
+        let checked = answered.filter { $0.goalAligned != nil }
+        if !checked.isEmpty {
+            recap.onPlanPercent = Int((Double(checked.filter { $0.goalAligned == true }.count)
+                                       / Double(checked.count) * 100).rounded())
+        }
 
         var labels: [UUID: Label] = [:]
         var headline = ""
@@ -238,6 +246,21 @@ enum RecapRenderer {
         </tr></table></td></tr>
         """
 
+        // Goals
+        if !r.goals.isEmpty {
+            let done = r.goals.filter(\.done).count
+            var title = "Goals · \(done) of \(r.goals.count) done"
+            if let p = r.onPlanPercent { title += " · \(p)% of check-ins on plan" }
+            h += section(title)
+            h += "<tr><td style=\"padding:0 24px 8px 24px;\">"
+            for g in r.goals {
+                let mark = g.done ? "<span style=\"color:#16A34A;\">●</span>" : "<span style=\"color:#D1D5DB;\">○</span>"
+                let style = g.done ? "color:#6B7280;" : ""
+                h += "<div style=\"font-size:14px;padding:3px 0;\(style)\">\(mark)&nbsp; \(esc(g.text))</div>"
+            }
+            h += "</td></tr>"
+        }
+
         // Categories
         if !r.categories.isEmpty {
             let total = max(1, r.categories.reduce(0) { $0 + $1.minutes })
@@ -332,6 +355,10 @@ enum RecapRenderer {
         var t = ["Daily recap - \(r.dayText)", r.headline, ""]
         let active = r.usage.map { durationText($0.activeSeconds) } ?? "-"
         t.append("Active: \(active)   Check-ins: \(r.answered)   Successes: \(r.successCount)")
+        if !r.goals.isEmpty {
+            t += ["", "GOALS" + (r.onPlanPercent.map { " (\($0)% of check-ins on plan)" } ?? "")]
+                + r.goals.map { "  \($0.done ? "✓" : "○") \($0.text)" }
+        }
         if !r.categories.isEmpty {
             t += ["", "WHERE YOUR TIME WENT"] + r.categories.map { "  \(mins($0.minutes))  \($0.name)" }
         }

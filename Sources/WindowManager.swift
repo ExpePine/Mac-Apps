@@ -1,15 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// Owns the floating check-in window and the History window.
+/// Owns the floating check-in window, the main window and the deviation panel.
 @MainActor
 final class WindowManager: NSObject, NSWindowDelegate {
     private var promptWindow: NSWindow?
-    private var historyWindow: NSWindow?
-    private var emailWindow: NSWindow?
+    private var mainWindow: NSWindow?
+    private var deviationWindow: NSWindow?
+    private var deviationModel: DeviationModel?
 
     /// Called when the user closes the check-in window with the red ✕.
     var onPromptClosedByUser: (@MainActor () -> Void)?
+
+    // MARK: Check-in window
 
     func showPrompt(_ session: PromptSession) {
         closePrompt()
@@ -36,38 +39,55 @@ final class WindowManager: NSObject, NSWindowDelegate {
         window?.close()
     }
 
-    func showHistory(store: EntryStore, settings: SettingsStore) {
-        if let historyWindow {
-            bringToFront(historyWindow)
-            return
+    // MARK: Main window (sidebar: Today, Goals, Insights, Stuck, History, Settings)
+
+    func showMain(app: AppDelegate, nav: Navigator) {
+        if mainWindow == nil {
+            let host = NSHostingController(rootView: MainWindowView(app: app, nav: nav))
+            let window = NSWindow(contentViewController: host)
+            window.title = "Activity Logger"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.toolbarStyle = .unified
+            window.setContentSize(NSSize(width: 1000, height: 700))
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.setFrameAutosaveName("ActivityLoggerMain")
+            if !window.setFrameUsingName("ActivityLoggerMain") { window.center() }
+            mainWindow = window
         }
-        let host = NSHostingController(rootView: HistoryView(store: store, settings: settings))
+        // Show in the Dock and ⌘-Tab while the main window is open.
+        NSApp.setActivationPolicy(.regular)
+        if let mainWindow { bringToFront(mainWindow) }
+    }
+
+    // MARK: Deviation panel
+
+    func showDeviation(_ model: DeviationModel) {
+        deviationWindow?.close()
+        model.onClose = { [weak self] in self?.closeDeviation() }
+        let host = NSHostingController(rootView: DeviationView(model: model))
         let window = NSWindow(contentViewController: host)
-        window.title = "Activity History"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 760, height: 620))
+        window.title = "Check-in review"
+        window.styleMask = [.titled, .closable]
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
-        historyWindow = window
+        deviationWindow = window
+        deviationModel = model
         bringToFront(window)
     }
 
-    func showEmailSettings(settings: SettingsStore, reports: ReportService, tracker: UsageTracker) {
-        if let emailWindow {
-            bringToFront(emailWindow)
-            return
-        }
-        let host = NSHostingController(rootView: EmailSettingsView(settings: settings, reports: reports, tracker: tracker))
-        let window = NSWindow(contentViewController: host)
-        window.title = "Daily Email & Tracking"
-        window.styleMask = [.titled, .closable]
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        window.center()
-        emailWindow = window
-        bringToFront(window)
+    private func closeDeviation() {
+        let window = deviationWindow
+        deviationWindow = nil
+        deviationModel = nil
+        window?.close()
     }
+
+    // MARK: Helpers
 
     private func bringToFront(_ window: NSWindow) {
         if #available(macOS 14.0, *) {
@@ -83,10 +103,12 @@ final class WindowManager: NSObject, NSWindowDelegate {
         if window === promptWindow {
             promptWindow = nil
             onPromptClosedByUser?()
-        } else if window === historyWindow {
-            historyWindow = nil
-        } else if window === emailWindow {
-            emailWindow = nil
+        } else if window === mainWindow {
+            mainWindow = nil
+            NSApp.setActivationPolicy(.accessory)   // back to menu-bar only
+        } else if window === deviationWindow {
+            deviationWindow = nil
+            deviationModel = nil
         }
     }
 }

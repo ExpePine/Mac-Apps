@@ -44,6 +44,14 @@ struct Entry: Identifiable, Codable, Equatable {
     var status: Status
     var transcriptPending: Bool
 
+    // Coach: goal alignment for this check-in
+    var goalAligned: Bool? = nil          // nil = not checked
+    var alignedGoal: String? = nil
+    var deviationNote: String? = nil      // why the coach thinks it's off-plan
+    var explanation: String? = nil        // what the user said happened
+    var explanationAccepted: Bool? = nil
+    var coachFeedback: String? = nil
+
     init(prompt: Prompt,
          text: String,
          status: Status,
