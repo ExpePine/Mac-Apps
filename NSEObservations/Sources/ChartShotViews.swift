@@ -103,25 +103,29 @@ struct AnnotationLabel: View {
     var selected = false
     var maxWidth: CGFloat = 400
 
+    private var corner: CGFloat { max(3, 5 * scale) }
+    private var fontSize: CGFloat { max(8, CGFloat(annotation.size) * scale) }
+    private var backdrop: Color {
+        guard annotation.background else { return .clear }
+        return annotation.colorName == "black" ? Color.white.opacity(0.8) : Color.black.opacity(0.6)
+    }
+    private var textColor: Color {
+        annotation.text.isEmpty ? annotation.color.opacity(0.6) : annotation.color
+    }
+
     var body: some View {
-        Text(annotation.text.isEmpty ? "Text" : annotation.text)
-            .font(.system(size: max(8, annotation.size * scale), weight: .semibold))
-            .foregroundStyle(annotation.color.opacity(annotation.text.isEmpty ? 0.6 : 1))
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        let label = Text(annotation.text.isEmpty ? "Text" : annotation.text)
+            .font(.system(size: fontSize, weight: .semibold))
+            .foregroundColor(textColor)
+        return label
             .multilineTextAlignment(.leading)
             .frame(maxWidth: max(maxWidth, 40))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, max(3, 6 * scale))
             .padding(.vertical, max(2, 3 * scale))
-            .background(annotation.background ? Color.black.opacity(annotation.colorName == "black" ? 0 : 0.6) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: max(3, 5 * scale), style: .continuous))
-            .background(annotation.background && annotation.colorName == "black" ? Color.white.opacity(0.8) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: max(3, 5 * scale), style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: max(3, 5 * scale), style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                    .foregroundStyle(Color.accentColor)
-                    .opacity(selected ? 1 : 0)
-            )
+            .background(shape.fill(backdrop))
+            .overlay(shape.stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).opacity(selected ? 1 : 0))
     }
 }
 
