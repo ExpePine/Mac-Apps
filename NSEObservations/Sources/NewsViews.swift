@@ -201,7 +201,7 @@ struct NewsListView: View {
     }
 
     private static let monthFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"; return f
+        let f = DateFormatter(); f.dateFormat = "MMMM yyyy"; f.timeZone = Calendar.ist.timeZone; return f
     }()
 
     var body: some View {

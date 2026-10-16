@@ -14,7 +14,7 @@ struct PineScriptsView: View {
     var body: some View {
         HStack(spacing: 0) {
             scriptList
-                .frame(width: 260)
+                .frame(width: 210)
             Divider()
             Group {
                 if let id = selectedID, store.script(id) != nil {
@@ -196,11 +196,12 @@ struct ScriptDetail: View {
                     .listStyle(.inset)
                     .frame(minHeight: 220)
                 }
-                .padding(16)
-                .frame(width: 330)
+                .padding(14)
+                .frame(width: 280)
 
                 Divider()
                 codePane(s)
+                    .frame(minWidth: 380, maxWidth: .infinity)
             }
             .sheet(item: $newVersion) { req in
                 NewVersionSheet(scriptID: scriptID, initialCode: req.code, initialNote: req.note) { id in
@@ -288,13 +289,14 @@ struct ScriptDetail: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("v\(v.number)\(v.id == s.latest?.id ? " · latest" : "")").font(.headline)
-                        Text("\(Fmt.dayTime.string(from: v.date))\(v.note.isEmpty ? "" : " — \(v.note)")")
+                        Text("\(Fmt.dayTime.string(from: v.date))\(previous.map { " · vs v\($0.number)" } ?? "")\(v.note.isEmpty ? "" : " — \(v.note)")")
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    Spacer()
+                    .layoutPriority(1)
+                    Spacer(minLength: 8)
                     if previous != nil {
                         Picker("View", selection: $showDiff) {
-                            Text("Changes vs v\(previous?.number ?? 0)").tag(true)
+                            Text("Changes").tag(true)
                             Text("Full code").tag(false)
                         }
                         .pickerStyle(.segmented)
@@ -306,7 +308,7 @@ struct ScriptDetail: View {
                         NSPasteboard.general.setString(v.code, forType: .string)
                         copied = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                    } label: { Label(copied ? "Copied" : "Copy Code", systemImage: copied ? "checkmark" : "doc.on.doc") }
+                    } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
                     .help("Copy to paste into TradingView's Pine Editor")
                     Button { store.exportScriptVersion(v, scriptName: s.name) } label: { Image(systemName: "square.and.arrow.up") }
                         .help("Export as .pine file")
@@ -432,7 +434,10 @@ struct CodeView: View {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     HStack(spacing: 10) {
                         Text("\(i + 1)").foregroundStyle(.tertiary).frame(width: 38, alignment: .trailing)
-                        Text(line.isEmpty ? " " : line).textSelection(.enabled)
+                        Text(line.isEmpty ? " " : line)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .textSelection(.enabled)
                     }
                     .font(.system(size: 12, design: .monospaced))
                     .padding(.vertical, 1)
@@ -482,7 +487,10 @@ struct DiffView: View {
         }()
         return HStack(spacing: 8) {
             Text(mark).foregroundStyle(color == .clear ? Color.secondary : color).frame(width: 14)
-            Text(text.isEmpty ? " " : text).textSelection(.enabled)
+            Text(text.isEmpty ? " " : text)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .textSelection(.enabled)
             Spacer(minLength: 0)
         }
         .font(.system(size: 12, design: .monospaced))
