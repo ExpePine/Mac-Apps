@@ -4,13 +4,15 @@ import SwiftUI
 // MARK: - Symbols
 
 enum SymbolStatus: String, Codable, CaseIterable, Identifiable {
-    case holding, watching, exited, archived
+    case holding, watching, observationTG, observationOPN, exited, archived
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .holding: return "Holding"
         case .watching: return "Watching"
+        case .observationTG: return "Observation / TG"
+        case .observationOPN: return "Observation / OPN"
         case .exited: return "Exited"
         case .archived: return "Archived"
         }
@@ -20,6 +22,8 @@ enum SymbolStatus: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .holding: return "briefcase.fill"
         case .watching: return "eye.fill"
+        case .observationTG: return "binoculars.fill"
+        case .observationOPN: return "magnifyingglass.circle.fill"
         case .exited: return "arrow.uturn.left.circle.fill"
         case .archived: return "archivebox.fill"
         }
@@ -29,6 +33,8 @@ enum SymbolStatus: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .holding: return .green
         case .watching: return .blue
+        case .observationTG: return .purple
+        case .observationOPN: return .teal
         case .exited: return .orange
         case .archived: return .secondary
         }

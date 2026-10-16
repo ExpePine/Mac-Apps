@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum Scope: String, CaseIterable, Identifiable {
-    case all = "All", holding = "Holding", watching = "Watching", exited = "Exited"
+    case all = "All", holding = "Holding", watching = "Watching", tg = "Obs / TG", opn = "Obs / OPN", exited = "Exited"
     var id: String { rawValue }
 
     func includes(_ s: TrackedSymbol) -> Bool {
@@ -9,6 +9,8 @@ private enum Scope: String, CaseIterable, Identifiable {
         case .all: return s.status != .archived
         case .holding: return s.status == .holding
         case .watching: return s.status == .watching
+        case .tg: return s.status == .observationTG
+        case .opn: return s.status == .observationOPN
         case .exited: return s.status == .exited
         }
     }
@@ -53,7 +55,7 @@ struct PatternsView: View {
                                 ForEach(Scope.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .pickerStyle(.segmented)
-                            .frame(maxWidth: 360)
+                            .fixedSize()
                             Toggle("Include what price did after each note", isOn: $includePrices)
                         }
                         HStack {
