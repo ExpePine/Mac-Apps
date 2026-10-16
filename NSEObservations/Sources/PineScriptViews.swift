@@ -429,7 +429,7 @@ struct CodeView: View {
     let code: String
     var body: some View {
         let lines = LineDiff.lines(code)
-        ScrollView([.vertical, .horizontal]) {
+        TopLeadingScroll {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     HStack(spacing: 10) {
@@ -456,7 +456,7 @@ struct DiffView: View {
     var body: some View {
         if let diff = LineDiff.compute(LineDiff.lines(old), LineDiff.lines(new)) {
             let changed = diff.contains { if case .same = $0 { return false } else { return true } }
-            ScrollView([.vertical, .horizontal]) {
+            TopLeadingScroll {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if !changed {
                         Text("No changes from the previous version.").foregroundStyle(.secondary).padding(8)
@@ -497,5 +497,19 @@ struct DiffView: View {
         .padding(.vertical, 1)
         .padding(.horizontal, 4)
         .background(color.opacity(0.12))
+    }
+}
+
+/// Two-way scroll view whose content starts at the top-left instead of being centred when short.
+struct TopLeadingScroll<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView([.vertical, .horizontal]) {
+                content
+                    .frame(minWidth: geo.size.width, minHeight: geo.size.height, alignment: .topLeading)
+            }
+        }
     }
 }
