@@ -231,7 +231,7 @@ struct HistoryView: View {
                             }
                             if let cur = current {
                                 RuleMark(x: .value("Today", cur.date))
-                                    .foregroundStyle(.secondary.opacity(0.4))
+                                    .foregroundStyle(Color.secondary.opacity(0.4))
                             }
                         }
                         .chartXAxis {

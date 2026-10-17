@@ -407,14 +407,13 @@ final class ScreenerViewModel: ObservableObject {
         let day = HistoryStore.dayKey(dataDay(of: table))
         guard changed || !HistoryStore.exists(day) else { return }
         let keep = max(5, settings.historyKeepDays)
-        Task.detached(priority: .utility) { [weak self] in
-            try? HistoryStore.save(csv: raw, day: day, keepDays: keep)
-            let days = HistoryStore.days()
-            let bytes = HistoryStore.totalBytes()
-            await MainActor.run {
-                self?.historyDays = days
-                self?.historyBytes = bytes
-            }
+        Task { [weak self] in
+            let info = await Task.detached(priority: .utility) { () -> ([String], Int) in
+                try? HistoryStore.save(csv: raw, day: day, keepDays: keep)
+                return (HistoryStore.days(), HistoryStore.totalBytes())
+            }.value
+            self?.historyDays = info.0
+            self?.historyBytes = info.1
         }
     }
 
