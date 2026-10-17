@@ -20,18 +20,48 @@ struct SheetRow: Identifiable {
 }
 
 struct SheetTable {
-    var headers: [String] = []
+    var headers: [String] = []           // names shown everywhere (your real names, if set)
+    var originalHeaders: [String] = []   // names exactly as in the Google Sheet
     var rows: [SheetRow] = []
     private var lookup: [String: Int] = [:]
 
     init() {}
 
-    init(headers: [String], rows: [SheetRow]) {
+    init(headers: [String], rows: [SheetRow], originalHeaders: [String]? = nil) {
         self.headers = headers
         self.rows = rows
+        self.originalHeaders = originalHeaders ?? headers
         for (i, h) in headers.enumerated() where lookup[Self.normalize(h)] == nil {
             lookup[Self.normalize(h)] = i
         }
+        // The sheet's own names keep working too (e.g. in an old formula).
+        for (i, h) in self.originalHeaders.enumerated() where lookup[Self.normalize(h)] == nil {
+            lookup[Self.normalize(h)] = i
+        }
+    }
+
+    /// Same data with your real column names applied. Blank or clashing names fall back to the sheet's name.
+    func renamed(with aliases: [String: String]) -> SheetTable {
+        var used = Set<String>()
+        var display: [String] = []
+        // Columns you renamed claim their names first; the rest keep the sheet name unless it's taken.
+        let wanted = originalHeaders.map { orig -> String in
+            let a = (aliases[orig] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return a.isEmpty ? orig : a
+        }
+        let renamedFirst = originalHeaders.indices.sorted { a, b in
+            (wanted[a] != originalHeaders[a] ? 0 : 1, a) < (wanted[b] != originalHeaders[b] ? 0 : 1, b)
+        }
+        var result = Array(repeating: "", count: originalHeaders.count)
+        for i in renamedFirst {
+            var name = wanted[i]
+            if used.contains(Self.normalize(name)) { name = originalHeaders[i] }
+            if used.contains(Self.normalize(name)) { name = "\(originalHeaders[i]) (\(i + 1))" }
+            used.insert(Self.normalize(name))
+            result[i] = name
+        }
+        display = result
+        return SheetTable(headers: display, rows: rows, originalHeaders: originalHeaders)
     }
 
     static func normalize(_ s: String) -> String {
@@ -192,6 +222,7 @@ struct AppSettings: Codable {
     var filterSortDescending = true
     var filterGroup = FilterGroup(conditions: [FilterCondition(column: "D_Trigger", op: .hasValue)])
     var cellRules: [CellRule] = []
+    var columnAliases: [String: String] = [:]   // sheet column name -> your real name
 
     // Alerts
     var email = EmailSettings()
@@ -218,6 +249,7 @@ struct AppSettings: Codable {
         filterSortDescending = v(.filterSortDescending, d.filterSortDescending)
         filterGroup     = v(.filterGroup, FilterGroup(conditions: [FilterCondition(column: triggerColumn, op: .hasValue)]))
         cellRules       = v(.cellRules, d.cellRules)
+        columnAliases   = v(.columnAliases, d.columnAliases)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

@@ -43,6 +43,10 @@ Setup, done once:
 | **Filter** | toolbar button or ⇧⌘1 | Hide or show the conditions pane with ⌥⌘S to give the colored table the full window. Only the columns you choose (**Columns…**: tick them and drag to reorder), sorted by `D_Trigger` or any column, with **advanced filters** and per-column cell colors |
 | **Alerts & Email** | toolbar button or ⇧⌘2 | Email setup, the MV2 check, buy triggers (using the same advanced filters) and an alert history |
 
+### Column names
+
+Columns with placeholder names such as `var 1` … `var 10` can be given real names under **Column names**, in the Data Import toolbar or via **Rename…** on the Filter screen. The new names are used everywhere: both tables, pickers, filters, formulas, cell colors, the MV2 check, buy triggers and emails. Existing filters and formulas switch to the new names automatically, and the sheet's original names still work in formulas. Hover over a column header to see its name in the sheet.
+
 ### Advanced filters
 
 - **Groups:** *All of (AND)*, *Any of (OR)*, *None of (NOT)*. You can nest groups inside groups, for example `CLOSE > EMA_20 AND (RSI_14 > 70 OR Vol Ratio > 3)`.

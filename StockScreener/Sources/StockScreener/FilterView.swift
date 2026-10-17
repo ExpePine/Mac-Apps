@@ -24,6 +24,7 @@ struct FilterView: View {
                         Divider()
                     }
                     SheetTableView(headers: vm.headers,
+                                   originalHeaders: vm.table.originalHeaders,
                                    columns: vm.filterColumnIndices,
                                    rows: vm.filterRows,
                                    version: vm.filterVersion,
@@ -158,6 +159,7 @@ struct FilterView: View {
 struct FilterSidebar: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Binding var showColumns: Bool
+    @State private var showNames = false
 
     var body: some View {
         Form {
@@ -165,6 +167,8 @@ struct FilterSidebar: View {
                 HStack {
                     Text("\(vm.filterColumnIndices.count) visible columns")
                     Spacer()
+                    Button("Rename…") { showNames = true }
+                        .help("Give columns like var 1 … var 10 their real names")
                     Button("Choose columns…") { showColumns = true }
                 }
                 ColumnPicker(title: "Sort by", selection: $vm.settings.filterSortColumn)
@@ -237,6 +241,9 @@ struct FilterSidebar: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $showNames) {
+            ColumnNamesEditor().environmentObject(vm)
+        }
     }
 
     private var defaultColorColumn: String {

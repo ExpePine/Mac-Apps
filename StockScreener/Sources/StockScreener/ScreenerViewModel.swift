@@ -39,6 +39,7 @@ final class ScreenerViewModel: ObservableObject {
 
     // Data
     @Published private(set) var table = SheetTable()
+    private var rawTable = SheetTable()          // as downloaded, before your column names
     @Published private(set) var isLoading = false
     @Published private(set) var freshness: FreshnessState
     @Published private(set) var lastFetchFailed = false
@@ -159,7 +160,9 @@ final class ScreenerViewModel: ObservableObject {
         }
     }
 
-    private func setTable(_ newTable: SheetTable) {
+    private func setTable(_ downloaded: SheetTable) {
+        rawTable = downloaded
+        let newTable = downloaded.renamed(with: settings.columnAliases)
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = CellPainter(settings.cellRules, table: newTable)
@@ -192,6 +195,10 @@ final class ScreenerViewModel: ObservableObject {
     // MARK: React to settings edits
 
     private func settingsChanged(from old: AppSettings) {
+        if old.columnAliases != settings.columnAliases {
+            setTable(rawTable)                            // re-apply names, then re-filter everything
+            return
+        }
         if old.filterGroup != settings.filterGroup {
             scheduleFilterRecompute(delayMs: 300)        // wait for typing to pause
         } else if old.filterSortColumn != settings.filterSortColumn
@@ -282,6 +289,37 @@ final class ScreenerViewModel: ObservableObject {
             if Task.isCancelled { return }
             self?.triggerMatchCounts = counts
         }
+    }
+
+    // MARK: Column names
+
+    /// Sheet column names, exactly as in Google Sheets.
+    var sheetColumnNames: [String] { rawTable.headers }
+
+    /// Saves your real column names and updates every filter, formula, color rule and trigger to use them.
+    func applyColumnNames(_ aliases: [String: String]) {
+        var cleaned: [String: String] = [:]
+        for (orig, name) in aliases {
+            let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !n.isEmpty && n != orig { cleaned[orig] = n }
+        }
+        let before = table
+        let after = rawTable.renamed(with: cleaned)
+
+        var pairs: [(old: String, new: String)] = []
+        for i in after.headers.indices {
+            if i < before.headers.count, before.headers[i] != after.headers[i] {
+                pairs.append((before.headers[i], after.headers[i]))
+            }
+            // References still using the sheet's own name also move to the new name.
+            if after.originalHeaders[i] != after.headers[i] {
+                pairs.append((after.originalHeaders[i], after.headers[i]))
+            }
+        }
+
+        var s = ColumnRenamer.rename(settings, pairs: pairs)
+        s.columnAliases = cleaned
+        settings = s          // didSet re-applies names and re-filters
     }
 
     // MARK: Filter screen columns

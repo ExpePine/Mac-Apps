@@ -161,4 +161,40 @@ final class FilterTests: XCTestCase {
         XCTAssertEqual(DayMatcher.matchesToday(monthCell: "Oct", dayCell: "Fri", today: friday), true)
         XCTAssertNil(DayMatcher.matchesToday(monthCell: "", dayCell: "", today: friday))
     }
+
+    // MARK: Column names
+
+    func testRenamedTableKeepsBothNames() throws {
+        let csv = "SYMBOL,var 1,var 2\nAAA,5,10\nBBB,15,3"
+        let raw = try SheetService.parse(Data(csv.utf8)).table
+        let t = raw.renamed(with: ["var 1": "RSI", "var 2": "Vol Ratio"])
+        XCTAssertEqual(t.headers, ["SYMBOL", "RSI", "Vol Ratio"])
+        XCTAssertEqual(t.index(of: "rsi"), 1)
+        XCTAssertEqual(t.index(of: "var 1"), 1)          // old name still resolves
+        XCTAssertEqual(try formula("RSI > 10", t), ["BBB"])
+        XCTAssertEqual(try formula("[Vol Ratio] > 5", t), ["AAA"])
+    }
+
+    func testRenameClashFallsBack() throws {
+        let csv = "SYMBOL,var 1,var 2\nAAA,5,10"
+        let raw = try SheetService.parse(Data(csv.utf8)).table
+        let t = raw.renamed(with: ["var 1": "X", "var 2": "x"])
+        XCTAssertEqual(Set(t.headers).count, 3)            // names stay unique
+    }
+
+    func testRenameRewritesSettingsAndFormulas() {
+        var s = AppSettings()
+        s.filterGroup = FilterGroup(conditions: [
+            FilterCondition(column: "var 1", op: .greaterThan, value: "60"),
+            FilterCondition(column: "CLOSE", op: .greaterThan, target: .column, otherColumn: "var 2"),
+            FilterCondition(kind: .formula, formula: "[var 1] > 60 AND var_3 < 2 AND SECTOR = 'var 1' AND abs(var_3) > 0"),
+        ])
+        s.cellRules = [CellRule(condition: Rule(column: "var 2", op: .lessThan, value: "0"), shade: .red)]
+        let out = ColumnRenamer.rename(s, pairs: [("var 1", "RSI_14"), ("var 2", "EMA 20"), ("var_3", "ATR")])
+        XCTAssertEqual(out.filterGroup.conditions[0].column, "RSI_14")
+        XCTAssertEqual(out.filterGroup.conditions[1].otherColumn, "EMA 20")
+        XCTAssertEqual(out.filterGroup.conditions[2].formula,
+                       "RSI_14 > 60 AND ATR < 2 AND SECTOR = 'var 1' AND abs(ATR) > 0")
+        XCTAssertEqual(out.cellRules[0].condition.column, "EMA 20")
+    }
 }

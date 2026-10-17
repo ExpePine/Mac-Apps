@@ -5,6 +5,7 @@ import AppKit
 /// and reuses them while scrolling, so thousands of rows stay smooth.
 struct SheetTableView: NSViewRepresentable {
     let headers: [String]
+    var originalHeaders: [String] = []
     let columns: [Int]                      // which sheet columns to show, in order
     let rows: [SheetRow]
     let version: Int                        // bump to force a reload
@@ -49,6 +50,7 @@ struct SheetTableView: NSViewRepresentable {
 
         // Rebuild columns only when the column set changes.
         let signature = columns.map { "\($0):\($0 < headers.count ? headers[$0] : "")" }.joined(separator: "|")
+            + "#" + originalHeaders.joined(separator: "|")
         if signature != c.columnSignature {
             c.columnSignature = signature
             for col in table.tableColumns.reversed() { table.removeTableColumn(col) }
@@ -56,7 +58,9 @@ struct SheetTableView: NSViewRepresentable {
                 let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("c\(index)"))
                 column.width = index == 0 ? 150 : 110
                 column.minWidth = 40
-                column.headerToolTip = headers[index]
+                let original = index < originalHeaders.count ? originalHeaders[index] : headers[index]
+                column.headerToolTip = original == headers[index]
+                    ? headers[index] : "\(headers[index])  (sheet column: \(original))"
                 table.addTableColumn(column)
             }
         }

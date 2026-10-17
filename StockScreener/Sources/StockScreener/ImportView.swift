@@ -5,6 +5,7 @@ struct ImportView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var showSettings = false
+    @State private var showColumnNames = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,6 +16,7 @@ struct ImportView: View {
                 Divider()
                 if vm.hasData {
                     SheetTableView(headers: vm.headers,
+                                   originalHeaders: vm.table.originalHeaders,
                                    columns: Array(vm.headers.indices),
                                    rows: vm.importRows,
                                    version: vm.importVersion,
@@ -63,6 +65,14 @@ struct ImportView: View {
                 .help("MV2 check, buy triggers and email (⇧⌘2)")
 
                 Button {
+                    showColumnNames = true
+                } label: {
+                    Label("Column names", systemImage: "character.cursor.ibeam")
+                }
+                .disabled(!vm.hasData)
+                .help("Give columns like var 1 … var 10 their real names")
+
+                Button {
                     showSettings = true
                 } label: {
                     Label("Sheet settings", systemImage: "gearshape")
@@ -72,6 +82,9 @@ struct ImportView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(vm)
+        }
+        .sheet(isPresented: $showColumnNames) {
+            ColumnNamesEditor().environmentObject(vm)
         }
         .task {
             LoginItem.enableOnFirstLaunch()
