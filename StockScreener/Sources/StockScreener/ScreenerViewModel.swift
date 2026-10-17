@@ -190,9 +190,21 @@ final class ScreenerViewModel: ObservableObject {
             let result = try await SheetService.fetch(from: url)
             let now = Date()
             let src = SheetService.describe(settings.sheetLink)
-            lastFetchInfo = FetchInfo(sourceKind: src.kind, tab: src.tab,
-                                      cacheAgeSeconds: result.ageSeconds, lastModified: result.lastModified)
             let contentChanged = result.hash != freshness.dataHash
+            var info = FetchInfo(sourceKind: src.kind, tab: src.tab,
+                                 cacheAgeSeconds: result.ageSeconds, lastModified: result.lastModified)
+            info.fetchedAt = now
+            info.urlUsed = result.urlUsed.absoluteString
+            info.endpoint = result.endpoint
+            info.httpStatus = result.httpStatus
+            info.bytes = result.bytes
+            info.rowCount = result.table.rows.count
+            info.columnCount = result.table.headers.count
+            info.firstRowSample = result.table.rows.first.map { row in
+                row.cells.prefix(12).filter { !$0.isEmpty }.prefix(8).joined(separator: " · ")
+            } ?? ""
+            info.changed = contentChanged
+            lastFetchInfo = info
             if contentChanged {
                 freshness.dataHash = result.hash
                 freshness.lastChangedAt = now

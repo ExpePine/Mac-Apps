@@ -214,4 +214,11 @@ final class FilterTests: XCTestCase {
         XCTAssertEqual(NumberParser.parse("−0.04"), -0.04)
         XCTAssertEqual(NumberParser.parse("208,441"), 208441)
     }
+
+    func testPastedExportLinkUsesLiveEndpoint() throws {
+        let link = "https://docs.google.com/spreadsheets/d/ABCDEFGHIJKLMNOPQRSTUVWXYZ/export?format=csv&gid=2066787251"
+        let url = try XCTUnwrap(SheetService.csvURL(from: link))
+        XCTAssertTrue(url.absoluteString.contains("/gviz/tq"), url.absoluteString)
+        XCTAssertTrue(url.absoluteString.contains("gid=2066787251"))
+    }
 }

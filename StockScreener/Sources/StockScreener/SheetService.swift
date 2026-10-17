@@ -24,6 +24,16 @@ struct FetchInfo: Equatable {
     var tab: String              // e.g. "tab gid 123", "first tab"
     var cacheAgeSeconds: Int?    // Age header: >0 means a cache answered
     var lastModified: Date?
+    // Diagnostics shown in "Download details"
+    var fetchedAt = Date()
+    var urlUsed = ""             // without the cache-busting parameter
+    var endpoint = ""            // "live (query endpoint)", "export (fallback)", "published copy"
+    var httpStatus = 0
+    var bytes = 0
+    var rowCount = 0
+    var columnCount = 0
+    var firstRowSample = ""
+    var changed = false
 }
 
 enum SheetService {
@@ -56,11 +66,6 @@ enum SheetService {
         let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
 
-        // Already a CSV link
-        if s.contains("output=csv") || s.contains("format=csv") || s.contains("tqx=out:csv") {
-            return URL(string: s)
-        }
-
         // "Publish to web" link: /spreadsheets/d/e/<pubId>/pubhtml?...
         if s.contains("/spreadsheets/d/e/") {
             guard var comps = URLComponents(string: s) else { return nil }
@@ -72,7 +77,8 @@ enum SheetService {
             return comps.url
         }
 
-        // Normal link: /spreadsheets/d/<id>/edit#gid=<gid>
+        // Any normal Google Sheets link — share/edit link, or an export / CSV link pasted earlier —
+        // is always read through the live endpoint.
         if let r = s.range(of: "/spreadsheets/d/") {
             let id = s[r.upperBound...].prefix { $0 != "/" && $0 != "?" && $0 != "#" }
             guard !id.isEmpty else { return nil }
@@ -81,6 +87,11 @@ enum SheetService {
                 gid = String(s[g].dropFirst(4))
             }
             return exportURL(id: String(id), gid: gid)
+        }
+
+        // Some other CSV link
+        if s.contains("output=csv") || s.contains("format=csv") || s.contains("tqx=out:csv") {
+            return URL(string: s)
         }
 
         // Bare sheet ID
@@ -122,7 +133,23 @@ enum SheetService {
         return comps.url ?? url
     }
 
-    static func fetch(from url: URL) async throws -> (table: SheetTable, hash: String, ageSeconds: Int?, lastModified: Date?) {
+    struct FetchResult {
+        let table: SheetTable
+        let hash: String
+        let ageSeconds: Int?
+        let lastModified: Date?
+        let urlUsed: URL
+        let httpStatus: Int
+        let bytes: Int
+        var endpoint: String {
+            if urlUsed.path.hasSuffix("/gviz/tq") { return "live (query endpoint)" }
+            if urlUsed.path.hasSuffix("/export") { return "export (fallback — may be an older copy)" }
+            if urlUsed.path.contains("/d/e/") { return "published copy (refreshed by Google every few minutes)" }
+            return "custom CSV link"
+        }
+    }
+
+    static func fetch(from url: URL) async throws -> FetchResult {
         do {
             return try await fetchOnce(url)
         } catch {
@@ -134,7 +161,7 @@ enum SheetService {
         }
     }
 
-    private static func fetchOnce(_ url: URL) async throws -> (table: SheetTable, hash: String, ageSeconds: Int?, lastModified: Date?) {
+    private static func fetchOnce(_ url: URL) async throws -> FetchResult {
         var request = URLRequest(url: cacheBusted(url),
                                  cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
                                  timeoutInterval: 60)
@@ -158,7 +185,9 @@ enum SheetService {
         let parsed = try await Task.detached(priority: .userInitiated) {
             try SheetService.parse(data)
         }.value
-        return (parsed.table, parsed.hash, age, modified)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        return FetchResult(table: parsed.table, hash: parsed.hash, ageSeconds: age, lastModified: modified,
+                           urlUsed: url, httpStatus: status, bytes: data.count)
     }
 
     static func parse(_ data: Data) throws -> (table: SheetTable, hash: String) {

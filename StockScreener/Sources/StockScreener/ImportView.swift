@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// "Data Import" screen: import button, data status, quick search and the full sheet.
 struct ImportView: View {
@@ -147,7 +148,7 @@ struct ImportView: View {
                 Text("\(vm.importRows.count) of \(vm.rows.count) rows match \"\(vm.importSearch)\"")
             }
             Spacer()
-            Text("Click a column header to sort · Auto-import every \(vm.settings.refreshMinutes) min")
+            Text("Click a column header to sort · Auto-import every \(vm.settings.refreshMinutes) min · v\(AppInfo.version)")
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -188,6 +189,7 @@ struct FreshnessBar: View {
                         .lineLimit(2)
                         .frame(maxWidth: 360, alignment: .trailing)
                 }
+                DownloadDetailsButton()
                 if vm.isLoading {
                     ProgressView().controlSize(.small)
                     Text("Importing…").font(.caption).foregroundStyle(.secondary)
@@ -221,5 +223,80 @@ struct FreshnessBar: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+// MARK: - Download details (to see exactly what was fetched)
+
+enum AppInfo {
+    static var version: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        return b.isEmpty ? v : "\(v) (\(b))"
+    }
+}
+
+struct DownloadDetailsButton: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @State private var show = false
+
+    var body: some View {
+        Button {
+            show.toggle()
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(.borderless)
+        .help("Download details")
+        .popover(isPresented: $show, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Download details").font(.headline)
+                row("App version", AppInfo.version)
+                if let info = vm.lastFetchInfo {
+                    row("Downloaded at", info.fetchedAt.formatted(date: .abbreviated, time: .standard))
+                    row("Source", info.endpoint)
+                    row("Tab", info.tab)
+                    row("Result", info.changed ? "new content" : "same content as before")
+                    row("HTTP status", "\(info.httpStatus)")
+                    row("Size", ByteCountFormatter.string(fromByteCount: Int64(info.bytes), countStyle: .file))
+                    row("Rows × columns", "\(info.rowCount) × \(info.columnCount)")
+                    if let age = info.cacheAgeSeconds, age > 0 { row("Google cache age", "\(age) s") }
+                    row("First row", info.firstRowSample)
+                    row("URL", info.urlUsed)
+                } else {
+                    Text("Nothing downloaded since the app started. Click Re-import now.")
+                        .foregroundStyle(.secondary)
+                }
+                if let error = vm.errorMessage {
+                    row("Last error", error)
+                }
+                HStack {
+                    Spacer()
+                    Button("Copy details") { copy() }
+                }
+            }
+            .padding(14)
+            .frame(width: 520)
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
+            Text(value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.callout)
+    }
+
+    private func copy() {
+        var lines = ["App version: \(AppInfo.version)"]
+        if let i = vm.lastFetchInfo {
+            lines += ["Downloaded at: \(i.fetchedAt)", "Source: \(i.endpoint)", "Tab: \(i.tab)",
+                      "Result: \(i.changed ? "new" : "same")", "HTTP: \(i.httpStatus)", "Bytes: \(i.bytes)",
+                      "Rows x cols: \(i.rowCount) x \(i.columnCount)", "First row: \(i.firstRowSample)", "URL: \(i.urlUsed)"]
+        }
+        if let e = vm.errorMessage { lines.append("Error: \(e)") }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
     }
 }
