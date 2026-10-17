@@ -80,10 +80,10 @@ private struct MV2CheckTab: View {
                 Toggle("Email me when MV2 is not updated", isOn: $vm.settings.mv2.isEnabled)
                 ColumnPicker(title: "Month column", selection: $vm.settings.mv2.monthColumn)
                 ColumnPicker(title: "Day column", selection: $vm.settings.mv2.dayColumn)
-                Toggle("Skip weekends", isOn: $vm.settings.mv2.skipWeekends)
+                LabeledContent("Days", value: "Emails Monday–Friday only")
                 TextField("Email subject", text: $vm.settings.mv2.subject)
             } footer: {
-                Text("Runs each time new data arrives in the sheet. On weekends (when skipped) Friday's date counts as current. If no row's \(vm.settings.mv2.monthColumn) and \(vm.settings.mv2.dayColumn) match today's date, it emails \"\(vm.settings.mv2.subject)\" — at most once a day. Months can be 10 or Oct; days can be 17 or Sat.")
+                Text("Runs each time new data arrives in the sheet. It counts how many rows have \(vm.settings.mv2.monthColumn) / \(vm.settings.mv2.dayColumn) that don't match today's date. If any don't, it emails \"\(vm.settings.mv2.subject)\" with the count and examples, at most once a day and only Monday–Friday (no email on Sat/Sun). Months can be 10 or Oct; days can be 17 or Sat.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

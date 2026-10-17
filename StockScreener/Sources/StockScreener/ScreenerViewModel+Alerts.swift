@@ -13,22 +13,24 @@ struct MV2Status {
     enum State { case ok, notUpdated, unknown }
     let state: State
     let text: String
+    var mismatched = 0            // rows whose month/day are not the expected date
+    var checked = 0               // rows with a readable month/day
+    var examples: [String] = []   // a few of the mismatched stocks, with what they say
 }
 
 extension ScreenerViewModel {
 
-    /// The date MV2 should carry: today, or the previous Friday on weekends when weekends are skipped.
+    /// The date MV2 should carry: today on Mon–Fri; on Sat/Sun, the previous Friday.
     func mv2ExpectedDate(today: Date = Date()) -> Date {
         let cal = Calendar.current
         var day = today
-        if settings.mv2.skipWeekends {
-            while cal.isDateInWeekend(day) {
-                day = cal.date(byAdding: .day, value: -1, to: day) ?? day
-            }
+        while cal.isDateInWeekend(day) {
+            day = cal.date(byAdding: .day, value: -1, to: day) ?? day
         }
         return day
     }
 
+    /// Counts every row whose month/day don't match the expected date.
     func mv2Status(today realToday: Date = Date()) -> MV2Status {
         let today = mv2ExpectedDate(today: realToday)
         let isWeekendFallback = !Calendar.current.isDate(today, inSameDayAs: realToday)
@@ -41,27 +43,42 @@ extension ScreenerViewModel {
                              text: "Columns \(cfg.monthColumn) / \(cfg.dayColumn) not found in the sheet")
         }
         let todayText = today.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-        var otherDay: String?
+        let label = labelIndex
+        var matched = 0, mismatched = 0
+        var seen: [String: Int] = [:]        // what the wrong rows say -> how many
+        var examples: [String] = []
 
         for row in rows {
             let m = row.text(monthCol), d = row.text(dayCol)
             switch DayMatcher.matchesToday(monthCell: m, dayCell: d, today: today) {
             case true?:
-                let when = isWeekendFallback ? "the last weekday, \(todayText) (weekend)" : "today"
-                return MV2Status(state: .ok,
-                                 text: "MV2 is dated \(when) (\(DayMatcher.describe(monthCell: m, dayCell: d)))")
+                matched += 1
             case false?:
-                if otherDay == nil { otherDay = DayMatcher.describe(monthCell: m, dayCell: d) }
+                mismatched += 1
+                let said = DayMatcher.describe(monthCell: m, dayCell: d)
+                seen[said, default: 0] += 1
+                if examples.count < 15 {
+                    let name = label.map { row.text($0) } ?? "row \(row.id + 1)"
+                    examples.append("\(name): \(said)")
+                }
             case nil:
                 continue
             }
         }
+        let checked = matched + mismatched
         let monthName = headers[monthCol], dayName = headers[dayCol]
-        if let otherDay {
-            return MV2Status(state: .notUpdated,
-                             text: "MV2 not updated: \(monthName)/\(dayName) say \(otherDay), expected \(todayText)")
+        guard checked > 0 else {
+            return MV2Status(state: .unknown, text: "Couldn't read dates in \(monthName) / \(dayName)")
         }
-        return MV2Status(state: .unknown, text: "Couldn't read dates in \(monthName) / \(dayName)")
+        let when = isWeekendFallback ? "the last weekday, \(todayText)" : "today, \(todayText)"
+        if mismatched == 0 {
+            return MV2Status(state: .ok, text: "MV2 is up to date: all \(checked) rows are dated \(when)",
+                             mismatched: 0, checked: checked)
+        }
+        let saying = seen.sorted { $0.value > $1.value }.prefix(3).map { "\($0.value)× \($0.key)" }.joined(separator: ", ")
+        return MV2Status(state: .notUpdated,
+                         text: "MV2 not updated: \(mismatched) of \(checked) rows have \(monthName)/\(dayName) not matching \(when) (\(saying))",
+                         mismatched: mismatched, checked: checked, examples: examples)
     }
 }
 
@@ -118,27 +135,35 @@ extension ScreenerViewModel {
 
     // MV2
 
-    /// force = "Check now" button: ignores weekends and the once-a-day limit.
+    /// Emails only on Monday–Friday. force = "Check now" button: ignores the once-a-day limit.
     func checkMV2(force: Bool) async {
         rollAlertDayIfNeeded()
         let cfg = settings.mv2
         guard cfg.isEnabled || force else { return }
-        if !force && cfg.skipWeekends && Calendar.current.isDateInWeekend(Date()) { return }
 
         let status = mv2Status()
         guard status.state == .notUpdated else {
             addLog("MV2 check", status.text, success: status.state == .ok)
             return
         }
+        if Calendar.current.isDateInWeekend(Date()) {
+            if force { addLog("MV2 check", status.text + " — no email on Sat/Sun", success: false) }
+            return
+        }
         guard force || !alertState.mv2Alerted else { return }
 
-        let body = """
+        var body = """
         \(status.text)
 
-        The MV2 sheet was refreshed, but its \(cfg.monthColumn) / \(cfg.dayColumn) values don't match today's date.
-        Checked at \(Date().formatted(date: .abbreviated, time: .shortened)) by Stock Screener on your Mac.
+        \(status.mismatched) of \(status.checked) rows in the MV2 sheet have \(cfg.monthColumn) / \(cfg.dayColumn) values that don't match today's date.
         """
-        if await sendEmail(subject: cfg.subject, body: body, recipients: "", logTitle: "MV2 alert"), !force {
+        if !status.examples.isEmpty {
+            body += "\n\nFor example:\n" + status.examples.map { "• \($0)" }.joined(separator: "\n")
+            if status.mismatched > status.examples.count { body += "\n…and \(status.mismatched - status.examples.count) more" }
+        }
+        body += "\n\nChecked at \(Date().formatted(date: .abbreviated, time: .shortened)) by Stock Screener on your Mac."
+        let subject = "\(cfg.subject) (\(status.mismatched) of \(status.checked) rows)"
+        if await sendEmail(subject: subject, body: body, recipients: "", logTitle: "MV2 alert"), !force {
             alertState.mv2Alerted = true
         }
     }

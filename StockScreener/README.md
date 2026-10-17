@@ -134,6 +134,9 @@ Set up a sending account in **Alerts & Email → Email**. For Gmail, use `smtp.g
 
 Emails go out only while the app is running, which is why Open at login is on.
 
+### MV2 not updated email
+The app checks each time new data arrives. It counts how many rows have D_MONTH / D_DAY that don't match today, and if any don't, it emails "MV2 not updated (x of y rows)" with examples. It sends at most one email a day, and **only Monday–Friday**.
+
 ### "Is the data updated?"
 
 A bar above the table shows the state of the data:
