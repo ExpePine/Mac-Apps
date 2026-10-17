@@ -197,4 +197,21 @@ final class FilterTests: XCTestCase {
                        "RSI_14 > 60 AND ATR < 2 AND SECTOR = 'var 1' AND abs(ATR) > 0")
         XCTAssertEqual(out.cellRules[0].condition.column, "EMA 20")
     }
+
+    // MARK: Sheet links
+
+    func testLiveCSVURL() throws {
+        let link = "https://docs.google.com/spreadsheets/d/ABCDEFGHIJKLMNOPQRSTUVWXYZ/edit?pli=1&gid=2066787251#gid=2066787251"
+        let url = try XCTUnwrap(SheetService.csvURL(from: link))
+        XCTAssertTrue(url.absoluteString.contains("/gviz/tq"))
+        XCTAssertTrue(url.absoluteString.contains("tqx=out:csv"))
+        XCTAssertTrue(url.absoluteString.contains("gid=2066787251"))
+        let fallback = try XCTUnwrap(SheetService.fallbackExportURL(for: url))
+        XCTAssertTrue(fallback.absoluteString.contains("/export?format=csv&gid=2066787251"))
+    }
+
+    func testUnicodeMinusAndThousands() {
+        XCTAssertEqual(NumberParser.parse("−0.04"), -0.04)
+        XCTAssertEqual(NumberParser.parse("208,441"), 208441)
+    }
 }

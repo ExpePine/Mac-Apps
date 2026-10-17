@@ -90,12 +90,27 @@ enum SheetService {
         return nil
     }
 
+    /// Live CSV through Google's query endpoint. Google's plain `export?format=csv` link was found to
+    /// keep serving an old snapshot for a long time, while this endpoint returns the sheet as it is now.
     private static func exportURL(id: String, gid: String?) -> URL? {
-        var comps = URLComponents(string: "https://docs.google.com/spreadsheets/d/\(id)/export")
-        var items = [URLQueryItem(name: "format", value: "csv")]
+        var comps = URLComponents(string: "https://docs.google.com/spreadsheets/d/\(id)/gviz/tq")
+        var items = [URLQueryItem(name: "tqx", value: "out:csv"),
+                     URLQueryItem(name: "headers", value: "1")]     // exactly one header row
         if let gid { items.append(URLQueryItem(name: "gid", value: gid)) }
         comps?.queryItems = items
         return comps?.url
+    }
+
+    /// The classic export link for the same sheet/tab, used only if the live endpoint fails.
+    static func fallbackExportURL(for url: URL) -> URL? {
+        guard url.path.hasSuffix("/gviz/tq"),
+              var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        let gid = comps.queryItems?.first { $0.name == "gid" }?.value
+        comps.path = comps.path.replacingOccurrences(of: "/gviz/tq", with: "/export")
+        var items = [URLQueryItem(name: "format", value: "csv")]
+        if let gid { items.append(URLQueryItem(name: "gid", value: gid)) }
+        comps.queryItems = items
+        return comps.url
     }
 
     /// Adds a unique parameter so no cache between here and Google can answer with an old copy.
@@ -108,6 +123,18 @@ enum SheetService {
     }
 
     static func fetch(from url: URL) async throws -> (table: SheetTable, hash: String, ageSeconds: Int?, lastModified: Date?) {
+        do {
+            return try await fetchOnce(url)
+        } catch {
+            // If the live endpoint fails (e.g. Google changes it), fall back to the classic export link.
+            if let fallback = fallbackExportURL(for: url) {
+                return try await fetchOnce(fallback)
+            }
+            throw error
+        }
+    }
+
+    private static func fetchOnce(_ url: URL) async throws -> (table: SheetTable, hash: String, ageSeconds: Int?, lastModified: Date?) {
         var request = URLRequest(url: cacheBusted(url),
                                  cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
                                  timeoutInterval: 60)
