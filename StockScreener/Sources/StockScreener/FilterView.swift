@@ -5,11 +5,15 @@ struct FilterView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var showColumns = false
+    @AppStorage("filterConditionsVisible") private var conditionsVisible = true
+    @State private var visibility: NavigationSplitViewVisibility = .all
+
+    private var isCollapsed: Bool { visibility == .detailOnly }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $visibility) {
             FilterSidebar(showColumns: $showColumns)
-                .navigationSplitViewColumnWidth(min: 380, ideal: 440, max: 620)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 440, max: 620)
         } detail: {
             VStack(spacing: 0) {
                 if !vm.hasData {
@@ -42,7 +46,21 @@ struct FilterView: View {
             }
         }
         .navigationTitle("Filter")
+        .hidingSystemSidebarToggle()
+        .onAppear { visibility = conditionsVisible ? .all : .detailOnly }
+        .onChange(of: visibility) { newValue in conditionsVisible = newValue != .detailOnly }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        visibility = isCollapsed ? .all : .detailOnly
+                    }
+                } label: {
+                    Label(isCollapsed ? "Show conditions" : "Hide conditions", systemImage: "sidebar.left")
+                }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .help(isCollapsed ? "Show the conditions pane (⌥⌘S)" : "Hide the conditions pane to see the full table (⌥⌘S)")
+            }
             ToolbarItemGroup {
                 Button {
                     showColumns = true
@@ -112,6 +130,17 @@ struct FilterView: View {
             if vm.isFiltering { ProgressView().controlSize(.small) }
             Text("\(vm.filterRows.count) of \(vm.rows.count) rows")
                 .fontWeight(.medium)
+            if isCollapsed {
+                let summary = ScreenerViewModel.describe(vm.settings.filterGroup)
+                Text(summary.isEmpty ? "No filter" : "Filter: \(summary)")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(summary)
+                Button("Edit") {
+                    withAnimation(.easeInOut(duration: 0.2)) { visibility = .all }
+                }
+                .buttonStyle(.link)
+            }
             Text("\(vm.filterColumnIndices.count) columns")
             Text("\(vm.settings.filterGroup.activeCount) conditions")
             Spacer()
@@ -305,5 +334,17 @@ struct ColumnChooser: View {
     private var filteredHeaders: [String] {
         let q = search.trimmingCharacters(in: .whitespaces)
         return q.isEmpty ? vm.headers : vm.headers.filter { $0.localizedCaseInsensitiveContains(q) }
+    }
+}
+
+extension View {
+    /// macOS 14+ adds its own sidebar button; we use ours (with a clearer label), so hide the system one.
+    @ViewBuilder
+    func hidingSystemSidebarToggle() -> some View {
+        if #available(macOS 14.0, *) {
+            self.toolbar(removing: .sidebarToggle)
+        } else {
+            self
+        }
     }
 }

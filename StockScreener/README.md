@@ -40,7 +40,7 @@ Setup, done once:
 | Screen | Open with | What it does |
 |---|---|---|
 | **Data Import** | opens at launch | **Import data** button, import status (freshness and MV2 date), search across all columns, and the full sheet. Click a header to sort. |
-| **Filter** | toolbar button or ⇧⌘1 | Only the columns you choose (**Columns…**: tick them and drag to reorder), sorted by `D_Trigger` or any column, with **advanced filters** and per-column cell colors |
+| **Filter** | toolbar button or ⇧⌘1 | Hide or show the conditions pane with ⌥⌘S to give the colored table the full window. Only the columns you choose (**Columns…**: tick them and drag to reorder), sorted by `D_Trigger` or any column, with **advanced filters** and per-column cell colors |
 | **Alerts & Email** | toolbar button or ⇧⌘2 | Email setup, the MV2 check, buy triggers (using the same advanced filters) and an alert history |
 
 ### Advanced filters
