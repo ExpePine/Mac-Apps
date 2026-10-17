@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.raj.TabCop</string>
+    <key>CFBundleName</key>
+    <string>TabCop</string>
+    <key>CFBundleDisplayName</key>
+    <string>TabCop</string>
+    <key>CFBundleExecutable</key>
+    <string>TabCop</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>TabCop counts your open Chrome and Safari tabs so it can remind you to focus. It does not read page contents.</string>
+</dict>
+</plist>

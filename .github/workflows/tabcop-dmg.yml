@@ -1,0 +1,52 @@
+name: TabCop DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "TabCop/**"
+      - ".github/workflows/tabcop-dmg.yml"
+  workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: TabCop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app and DMG
+        run: |
+          chmod +x scripts/build-dmg.sh
+          ./scripts/build-dmg.sh "1.0.${{ github.run_number }}" "${{ github.run_number }}"
+
+      - name: Upload DMG (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: TabCop-dmg
+          path: TabCop/dist/TabCop.dmg
+
+      - name: Publish Release with DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="tabcop-build-${{ github.run_number }}"
+          gh release create "$TAG" dist/TabCop.dmg \
+            --title "TabCop (build ${{ github.run_number }})" \
+            --notes "Download TabCop.dmg below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch. Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
+
+      - name: Update stable "tabcop-latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete tabcop-latest --yes --cleanup-tag || true
+          gh release create tabcop-latest dist/TabCop.dmg \
+            --title "TabCop (latest)" \
+            --notes "Always the newest TabCop build (currently build ${{ github.run_number }}). Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
