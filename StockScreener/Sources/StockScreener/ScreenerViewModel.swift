@@ -117,6 +117,7 @@ final class ScreenerViewModel: ObservableObject {
             errorMessage = nil
             lastFetchFailed = false
             if let col = sortColumn, !headers.contains(col) { sortColumn = nil }
+            adoptColumnSpelling()
 
             // Alerts run only after the sheet's data has actually been updated.
             if contentChanged {
@@ -125,6 +126,25 @@ final class ScreenerViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription   // keep showing the last good data
             lastFetchFailed = true
+        }
+    }
+
+    /// If a configured column matches the sheet only by letter case (D_Trigger vs D_TRIGGER),
+    /// switch the setting to the sheet's exact spelling so pickers show it selected.
+    private func adoptColumnSpelling() {
+        func fix(_ name: String) -> String {
+            let target = name.trimmingCharacters(in: .whitespaces).lowercased()
+            guard !target.isEmpty, !headers.contains(name) else { return name }
+            return headers.first { $0.trimmingCharacters(in: .whitespaces).lowercased() == target } ?? name
+        }
+        var s = settings
+        s.triggerColumn = fix(s.triggerColumn)
+        s.labelColumn = fix(s.labelColumn)
+        s.mv2.monthColumn = fix(s.mv2.monthColumn)
+        s.mv2.dayColumn = fix(s.mv2.dayColumn)
+        if s.triggerColumn != settings.triggerColumn || s.labelColumn != settings.labelColumn
+            || s.mv2 != settings.mv2 {
+            settings = s
         }
     }
 

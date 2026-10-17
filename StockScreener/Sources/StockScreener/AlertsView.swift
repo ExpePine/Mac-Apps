@@ -83,7 +83,7 @@ private struct MV2CheckTab: View {
                 Toggle("Skip weekends", isOn: $vm.settings.mv2.skipWeekends)
                 TextField("Email subject", text: $vm.settings.mv2.subject)
             } footer: {
-                Text("Runs each time new data arrives in the sheet. If no row's \(vm.settings.mv2.monthColumn) and \(vm.settings.mv2.dayColumn) match today's date, it emails \"\(vm.settings.mv2.subject)\" — at most once a day. Months can be 10 or Oct; days can be 17 or Sat.")
+                Text("Runs each time new data arrives in the sheet. On weekends (when skipped) Friday's date counts as current. If no row's \(vm.settings.mv2.monthColumn) and \(vm.settings.mv2.dayColumn) match today's date, it emails \"\(vm.settings.mv2.subject)\" — at most once a day. Months can be 10 or Oct; days can be 17 or Sat.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

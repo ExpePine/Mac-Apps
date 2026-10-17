@@ -92,7 +92,21 @@ struct MV2Status {
 
 extension ScreenerViewModel {
 
-    func mv2Status(today: Date = Date()) -> MV2Status {
+    /// The date MV2 should carry: today, or the previous Friday on weekends when weekends are skipped.
+    func mv2ExpectedDate(today: Date = Date()) -> Date {
+        let cal = Calendar.current
+        var day = today
+        if settings.mv2.skipWeekends {
+            while cal.isDateInWeekend(day) {
+                day = cal.date(byAdding: .day, value: -1, to: day) ?? day
+            }
+        }
+        return day
+    }
+
+    func mv2Status(today realToday: Date = Date()) -> MV2Status {
+        let today = mv2ExpectedDate(today: realToday)
+        let isWeekendFallback = !Calendar.current.isDate(today, inSameDayAs: realToday)
         let cfg = settings.mv2
         guard !rows.isEmpty else {
             return MV2Status(state: .unknown, text: "No data downloaded yet")
@@ -108,8 +122,9 @@ extension ScreenerViewModel {
             let m = row.values[monthCol] ?? "", d = row.values[dayCol] ?? ""
             switch DayMatcher.matchesToday(monthCell: m, dayCell: d, today: today) {
             case true?:
+                let when = isWeekendFallback ? "the last weekday, \(todayText) (weekend)" : "today"
                 return MV2Status(state: .ok,
-                                 text: "MV2 is dated today (\(DayMatcher.describe(monthCell: m, dayCell: d)))")
+                                 text: "MV2 is dated \(when) (\(DayMatcher.describe(monthCell: m, dayCell: d)))")
             case false?:
                 if otherDay == nil { otherDay = DayMatcher.describe(monthCell: m, dayCell: d) }
             case nil:
@@ -118,7 +133,7 @@ extension ScreenerViewModel {
         }
         if let otherDay {
             return MV2Status(state: .notUpdated,
-                             text: "MV2 not updated: \(monthCol)/\(dayCol) say \(otherDay), today is \(todayText)")
+                             text: "MV2 not updated: \(monthCol)/\(dayCol) say \(otherDay), expected \(todayText)")
         }
         return MV2Status(state: .unknown, text: "Couldn't read dates in \(monthCol) / \(dayCol)")
     }
