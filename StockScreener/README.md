@@ -35,6 +35,27 @@ Setup, done once:
 3. In the app, click **Add sheet link…**, paste the link, and choose the refresh interval. The link is stored only on your Mac and is never in this repo.
 4. Add **filters** (only show rows that match) and **highlights** (color rows that match) in the sidebar.
 
+## Windows
+
+| Window | Open with | What it does |
+|---|---|---|
+| **Data** | opens at launch | The whole sheet: search, sort, filter and highlight rows, plus the freshness / MV2 status bar |
+| **Active Filter** | toolbar button or ⇧⌘1 | `D_Trigger` and every column after it, sorted by `D_Trigger`, with its own filter conditions and per-column cell colors |
+| **Alerts & Email** | toolbar button or ⇧⌘2 | Email setup, the MV2 check, buy triggers and an alert history |
+
+### Cell colors (Active Filter)
+
+Each rule colors one column's cells, for example `Change % > 2 → Green` and `Change % < -2 → Red`, and anything else stays neutral. The **Add green-above / red-below pair** button creates both rules at once. There are 12 shades to choose from: light green, green, dark green, teal, light red, red, dark red, orange, yellow, blue, purple and grey. If several rules for a column match, the first one wins.
+
+### Email alerts
+
+Set up a sending account in **Alerts & Email → Email**. For Gmail, use `smtp.gmail.com`, port 465, and an **App Password**, which requires 2-Step Verification; your normal password won't work. Then click **Send test email**. The password is stored in the macOS Keychain.
+
+- **MV2 not updated:** every time new data arrives, the app checks `D_month` / `D_day`. If no row matches today's date, it emails **"MV2 not updated"**, at most once a day, skipping weekends by default.
+- **Buy triggers:** you choose conditions across any columns, combined with AND or OR. When new data arrives, each stock that meets them is emailed once per day per trigger. You can create several triggers, each with its own recipients.
+
+Emails go out only while the app is running, which is why Open at login is on.
+
 ### "Is the data updated?"
 
 A bar above the table shows the state of the data:

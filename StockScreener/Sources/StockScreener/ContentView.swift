@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
     @State private var showSettings = false
 
     var body: some View {
@@ -21,9 +22,24 @@ struct ContentView: View {
                 }
             }
         }
+        .navigationTitle("Data")
         .searchable(text: $vm.searchText, placement: .toolbar, prompt: "Search symbol, sector…")
         .toolbar {
             ToolbarItemGroup {
+                Button {
+                    openWindow(id: "active-filter")
+                } label: {
+                    Label("Active Filter", systemImage: "line.3.horizontal.decrease.circle.fill")
+                }
+                .help("Open the Active Filter window (⇧⌘1)")
+
+                Button {
+                    openWindow(id: "alerts")
+                } label: {
+                    Label("Alerts & Email", systemImage: "bell.badge")
+                }
+                .help("MV2 check, buy triggers and email (⇧⌘2)")
+
                 Toggle(isOn: $vm.showOnlyHighlighted) {
                     Label("Only highlighted", systemImage: "line.3.horizontal.decrease.circle")
                 }
@@ -110,6 +126,7 @@ struct FreshnessBar: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                    mv2Line(vm.mv2Status(today: context.date))
                 }
                 Spacer()
                 if vm.isLoading {
@@ -119,6 +136,25 @@ struct FreshnessBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(info.level.color.opacity(0.12))
+        }
+    }
+}
+
+extension FreshnessBar {
+    @ViewBuilder
+    func mv2Line(_ status: MV2Status) -> some View {
+        switch status.state {
+        case .ok:
+            Label(status.text, systemImage: "checkmark.seal.fill")
+                .font(.caption).foregroundStyle(.green)
+        case .notUpdated:
+            Label(status.text, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+        case .unknown:
+            if !vm.rows.isEmpty {
+                Label(status.text, systemImage: "questionmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }

@@ -38,6 +38,8 @@ final class ScreenerViewModel: ObservableObject {
     @Published private(set) var freshness: FreshnessState
     @Published private(set) var lastFetchFailed = false
     @Published var errorMessage: String?
+    @Published var alertState: AlertState { didSet { Persistence.saveAlertState(alertState) } }
+    @Published var isSendingEmail = false
 
     @Published var searchText = ""
     @Published var sortColumn: String?
@@ -49,6 +51,7 @@ final class ScreenerViewModel: ObservableObject {
     init() {
         settings = Persistence.load()
         freshness = Persistence.loadFreshness()
+        alertState = Persistence.loadAlertState()
     }
 
     // MARK: Data source
@@ -101,7 +104,8 @@ final class ScreenerViewModel: ObservableObject {
         do {
             let result = try await SheetService.fetch(from: url)
             let now = Date()
-            if result.hash != freshness.dataHash {
+            let contentChanged = result.hash != freshness.dataHash
+            if contentChanged {
                 freshness.dataHash = result.hash
                 freshness.lastChangedAt = now
             }
@@ -113,6 +117,11 @@ final class ScreenerViewModel: ObservableObject {
             errorMessage = nil
             lastFetchFailed = false
             if let col = sortColumn, !headers.contains(col) { sortColumn = nil }
+
+            // Alerts run only after the sheet's data has actually been updated.
+            if contentChanged {
+                await runAlertChecks()
+            }
         } catch {
             errorMessage = error.localizedDescription   // keep showing the last good data
             lastFetchFailed = true
