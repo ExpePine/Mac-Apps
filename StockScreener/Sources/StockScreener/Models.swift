@@ -226,6 +226,10 @@ struct AppSettings: Codable {
     var frozenColumns = 1                       // columns pinned on the left of both tables
     var historyKeepDays = 45                    // daily snapshots kept for the animation
     var historyColumns: [String] = []           // columns shown in the animation; empty = Filter columns
+    var tgThreshold = 7.0                       // Top Gainers: change% above this
+    var nnGainThreshold = 30                    // monthly gainer: % gain within the window
+    var nnWindowDays = 21                       // ~1 month of trading days
+    var nnFeatures: [String] = []               // model inputs; empty = Filter screen's numeric columns
 
     // Alerts
     var email = EmailSettings()
@@ -256,6 +260,10 @@ struct AppSettings: Codable {
         frozenColumns   = v(.frozenColumns, d.frozenColumns)
         historyKeepDays = v(.historyKeepDays, d.historyKeepDays)
         historyColumns  = v(.historyColumns, d.historyColumns)
+        tgThreshold     = v(.tgThreshold, d.tgThreshold)
+        nnGainThreshold = v(.nnGainThreshold, d.nnGainThreshold)
+        nnWindowDays    = v(.nnWindowDays, d.nnWindowDays)
+        nnFeatures      = v(.nnFeatures, d.nnFeatures)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

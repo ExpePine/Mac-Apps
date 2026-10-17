@@ -79,6 +79,20 @@ The first column on the Filter screen is **E**:
 
 Click a stock's **E** to add or edit its rules. Each rule uses advanced conditions and has **Email** and **Alert in app** checkboxes. Rules for *all* stocks are under **Rules** in the toolbar.
 
+### TG — Top Gainers (Filter screen)
+Click **TG** to show only stocks that rose more than 7% that day (the threshold is a setting), with the same filters and colors. It works on live data and on any day in the 30-day replay. The change% comes from Yahoo Finance prices when they've been fetched (in the N window). Otherwise it comes from the sheet's change% column. A small orange line on top shows the day, the count, and the **total Safety_limit** of those stocks.
+
+### N — Neural Net
+**N** (⇧⌘4) opens the pattern lab:
+1. **Fetch Yahoo prices** downloads about a year of daily closes for every stock and keeps a compressed copy on your Mac.
+2. **Learn patterns** marks each stock that gained at least 30% within 21 trading days as a *monthly top gainer*. You can change both numbers. It then lists every combination of 1–3 Filter-column values that gainers share more often than other stocks, with hit rate and lift. Any combination can become a filter (**Filter**) or an Email/Alert rule (**Alert**).
+3. A small neural net (inputs → 16 → 8 → 1) learns the same columns. It is tested on 20% of stocks it never saw (AUC, gainers in its top 20), and it adds an **NN_score** column (0–100) that you can sort, filter, color or alert on.
+
+*Descriptive* mode uses today's values for stocks that already ran up, so it describes gainers but can't predict them. Once the app holds a snapshot from about 21 trading days ago, it switches to *Predictive* mode and learns from values **before** the move. Yahoo's chart endpoint is unofficial and can rate-limit or change without notice. None of this is financial advice.
+
+### What changed since yesterday
+When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
+
 ### Alerts browser
 
 **Alerts** (⇧⌘3, the bell button) lists every alert that has fired: when it fired, the stock, the rule, whether it was an alert or an email, and the values at that moment. You can search, filter by period (today / 7 days / 30 days / all), type and rule, and click an alert to see its details. The toolbar shows how many alerts are new.

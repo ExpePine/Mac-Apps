@@ -31,5 +31,12 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 680, minHeight: 600)
         }
         .keyboardShortcut("2", modifiers: [.command, .shift])
+
+        Window("Neural Net", id: "nn") {
+            NeuralNetView()
+                .environmentObject(vm)
+                .frame(minWidth: 980, minHeight: 600)
+        }
+        .keyboardShortcut("4", modifiers: [.command, .shift])
     }
 }

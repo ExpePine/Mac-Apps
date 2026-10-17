@@ -67,6 +67,23 @@ final class ScreenerViewModel: ObservableObject {
     var timelinePlayTask: Task<Void, Never>?
     var timelineLoadTask: Task<Void, Never>?
 
+    // Yahoo prices, Top Gainers, neural net, change flash
+    @Published var priceBook: PriceBook = PriceStore.load()
+    @Published var isFetchingPrices = false
+    @Published var priceProgress: (Int, Int) = (0, 0)
+    @Published var priceError: String?
+    var priceTask: Task<Void, Never>?
+    @Published var tgMode = false
+    @Published var tgSummary: TGSummary?
+    @Published var isTraining = false
+    @Published var nnStatus: String?
+    @Published var nnError: String?
+    @Published var nnReport: NNReport?
+    @Published var nnScores: [String: Double] = [:]
+    @Published var flashSpec: FlashSpec?
+    @Published var flashSummary: String?
+    var flashToken = 0
+
     // E column: per-row status on the Filter screen
     @Published private(set) var eStatus: [Int: EState] = [:]
 
@@ -277,9 +294,23 @@ final class ScreenerViewModel: ObservableObject {
         }
     }
 
+    /// Rebuilds the table from the last download (e.g. after new NN scores).
+    func setTableKeepingRaw() { setTable(rawTable) }
+
+    /// Adds the neural net's NN_score column (0–100) when a model has been trained.
+    private func withScores(_ t: SheetTable) -> SheetTable {
+        guard !nnScores.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let rows = t.rows.map { row -> SheetRow in
+            let score = nnScores[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
+            return SheetRow(id: row.id, cells: row.cells + [score.map { String(format: "%.1f", $0) } ?? ""],
+                            numbers: row.numbers + [score])
+        }
+        return SheetTable(headers: t.headers + ["NN_score"], rows: rows, originalHeaders: t.originalHeaders + ["NN_score"])
+    }
+
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = downloaded.renamed(with: settings.columnAliases)
+        let newTable = withScores(downloaded.renamed(with: settings.columnAliases))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = CellPainter(settings.cellRules, table: newTable)
@@ -324,6 +355,9 @@ final class ScreenerViewModel: ObservableObject {
                     || old.filterSortDescending != settings.filterSortDescending {
             scheduleFilterRecompute(delayMs: 0)
         }
+        if old.tgThreshold != settings.tgThreshold && tgMode {
+            scheduleFilterRecompute(delayMs: 200)
+        }
         if old.cellRules != settings.cellRules {
             painter = CellPainter(settings.cellRules, table: table)
             filterVersion += 1                           // repaint
@@ -367,6 +401,10 @@ final class ScreenerViewModel: ObservableObject {
         let group = settings.filterGroup
         let rules = settings.buyTriggers.filter { $0.isEnabled }
         let labelCol = labelIndex
+        let tg = tgMode ? tgChanges(for: table, day: displayedDayKey) : nil
+        let tgMin = settings.tgThreshold
+        let tgDay = displayedDayKey
+        let safetyCol = table.index(of: "Safety_limit") ?? table.index(of: "safety limit")
         let sortColumn = table.index(of: settings.filterSortColumn)
         let descending = settings.filterSortDescending
         filterTask = Task { [weak self] in
@@ -378,12 +416,21 @@ final class ScreenerViewModel: ObservableObject {
             let compiledRules = Self.compileRules(rules, table: table)
             let (result, status) = await Task.detached(priority: .userInitiated) { () -> ([SheetRow], [Int: EState]) in
                 var rows = predicate.map { table.rows.filter($0) } ?? table.rows
+                if let tg { rows = rows.filter { (tg[$0.id]?.0 ?? -.infinity) > tgMin } }
                 if let c = sortColumn { rows = Sorter.sort(rows, column: c, descending: descending) }
                 let status = Self.eStatuses(rows: rows, rules: compiledRules, labelColumn: labelCol)
                 return (rows, status)
             }.value
             if Task.isCancelled { return }
             guard let self else { return }
+            if let tg {
+                let yahoo = result.filter { tg[$0.id]?.1 == true }.count
+                let safety = safetyCol.map { c in result.reduce(0.0) { $0 + ($1.number(c) ?? 0) } }
+                self.tgSummary = TGSummary(day: tgDay, count: result.count, safetySum: safety,
+                                           fromYahoo: yahoo, fromSheet: result.count - yahoo)
+            } else {
+                self.tgSummary = nil
+            }
             self.filterRows = result
             self.eStatus = status
             self.filterIssues = issues

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuartzCore
 
 /// A native macOS table (NSTableView). It only creates views for the rows and columns on screen
 /// and reuses them while scrolling, so thousands of rows stay smooth.
@@ -27,6 +28,8 @@ struct SheetTableView: NSViewRepresentable {
     /// When set, an "E" column is shown first: its color per row, and the panel it opens when clicked.
     var eColor: ((SheetRow) -> NSColor)? = nil
     var ePanel: ((SheetRow) -> AnyView)? = nil
+    /// Cells to flash briefly ("what changed since the previous day").
+    var flash: FlashSpec? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -122,7 +125,9 @@ struct SheetTableView: NSViewRepresentable {
         left.headerView?.needsDisplay = true
         right.headerView?.needsDisplay = true
 
-        if version != c.renderedVersion || rows.count != right.numberOfRows {
+        let flashToken = flash?.token ?? 0
+        if version != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken {
+            c.flashToken = flashToken
             c.renderedVersion = version
             left.reloadData()
             right.reloadData()
@@ -138,6 +143,7 @@ struct SheetTableView: NSViewRepresentable {
         var leftWidth: NSLayoutConstraint?
         var columnSignature = ""
         var renderedVersion = -1
+        var flashToken = 0
         private var syncing = false
         private var observers: [NSObjectProtocol] = []
         private let cellID = NSUserInterfaceItemIdentifier("SheetCell")
@@ -297,6 +303,12 @@ struct SheetTableView: NSViewRepresentable {
                            alignRight: isNumber,
                            bold: index == parent.emphasizedColumn || tableView === leftTable,
                            background: parent.painter?.color(for: data, column: index))
+            if let flash = parent.flash, flash.isActive, let kind = flash.kind(row: data.id, column: index) {
+                let remaining = flash.duration - Date().timeIntervalSince(flash.started)
+                cell.flash(FlashSpec.color(kind), duration: remaining)
+            } else {
+                cell.clearFlash()
+            }
             return cell
         }
 
@@ -347,6 +359,42 @@ final class SheetCellView: NSTableCellView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private var flashLayer: CALayer?
+
+    /// Glows `color` and fades out over `duration` seconds.
+    func flash(_ color: NSColor, duration: Double) {
+        guard duration > 0.05, let layer else { return }
+        let glow = flashLayer ?? {
+            let l = CALayer()
+            l.cornerRadius = 3
+            layer.addSublayer(l)
+            flashLayer = l
+            return l
+        }()
+        glow.frame = bounds.insetBy(dx: 1, dy: 1)
+        glow.backgroundColor = color.withAlphaComponent(0.75).cgColor
+        glow.borderColor = color.cgColor
+        glow.borderWidth = 1.5
+        glow.removeAllAnimations()
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1.0
+        fade.toValue = 0.0
+        fade.duration = duration
+        fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        glow.opacity = 0
+        glow.add(fade, forKey: "fade")
+    }
+
+    func clearFlash() {
+        flashLayer?.removeAllAnimations()
+        flashLayer?.opacity = 0
+    }
+
+    override func layout() {
+        super.layout()
+        flashLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
+    }
 
     func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?) {
         label.stringValue = text

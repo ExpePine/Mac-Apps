@@ -7,6 +7,7 @@ struct FilterView: View {
     @State private var showColumns = false
     @AppStorage("filterConditionsVisible") private var conditionsVisible = true
     @State private var visibility: NavigationSplitViewVisibility = .all
+    @State private var flashedDay: String?
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
@@ -21,6 +22,8 @@ struct FilterView: View {
                 if !vm.hasData {
                     placeholder
                 } else {
+                    if vm.tgMode { TGStrip() }
+                    if let note = vm.flashSummary { FlashToast(text: note) }
                     if !vm.filterIssues.isEmpty {
                         issuesBanner
                         Divider()
@@ -52,7 +55,8 @@ struct FilterView: View {
                                    eColor: { row in (vm.eStatus[row.id] ?? .none).nsColor },
                                    ePanel: { row in
                                        AnyView(StockRulesView(stock: vm.stockName(row), row: row).environmentObject(vm))
-                                   })
+                                   },
+                                   flash: vm.flashSpec)
                     if vm.showTimeline {
                         Divider()
                         TimelineBar()
@@ -64,7 +68,12 @@ struct FilterView: View {
         }
         .navigationTitle("Filter")
         .hidingSystemSidebarToggle()
-        .onAppear { visibility = conditionsVisible ? .all : .detailOnly }
+        .onAppear {
+            visibility = conditionsVisible ? .all : .detailOnly
+            flashedDay = nil
+            flashIfNewDay()
+        }
+        .onChange(of: vm.filterVersion) { _ in flashIfNewDay() }
         .onChange(of: visibility) { newValue in conditionsVisible = newValue != .detailOnly }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -85,6 +94,24 @@ struct FilterView: View {
                     Label("Rules", systemImage: "envelope.badge")
                 }
                 .help("All Email / Alert rules (per-stock rules are on each row's E button)")
+                Button {
+                    vm.toggleTG()
+                } label: {
+                    Text("TG").font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundStyle(vm.tgMode ? Color.white : Color.green)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(vm.tgMode ? Color.green : Color.green.opacity(0.12)))
+                }
+                .help("Top Gainers: only stocks up more than \(String(format: "%g", vm.settings.tgThreshold))% that day (same filters and colors). Uses Yahoo prices, else the sheet's change% column.")
+                Button {
+                    openWindow(id: "nn")
+                } label: {
+                    Text("N").font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color.purple)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.purple.opacity(0.12)))
+                }
+                .help("Neural Net: filter-value combinations shared by monthly top gainers (≥ \(vm.settings.nnGainThreshold)% in a month)")
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()
@@ -115,6 +142,15 @@ struct FilterView: View {
         .sheet(isPresented: $vm.showRulesEditor) {
             EmailRulesSheet().environmentObject(vm)
         }
+    }
+
+    /// Flash what changed since the previous stored day, once per data day while this window is open.
+    private func flashIfNewDay() {
+        guard vm.hasData, vm.timelineIndex == nil, !vm.filterRows.isEmpty else { return }
+        let key = HistoryStore.dayKey(vm.dataDay(of: vm.table))
+        guard flashedDay != key else { return }
+        flashedDay = key
+        vm.flashChangesSincePreviousDay()
     }
 
     private var placeholder: some View {
@@ -380,6 +416,69 @@ extension View {
             self.toolbar(removing: .sidebarToggle)
         } else {
             self
+        }
+    }
+}
+
+
+/// Small orange line on top while TG is on: the day, how many top gainers, and their total Safety_limit.
+struct TGStrip: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("TG").font(.caption.bold()).foregroundStyle(.green)
+            if let s = vm.tgSummary {
+                Text("\(s.day) · \(s.count) stocks > \(String(format: "%g", vm.settings.tgThreshold))%")
+                if let sum = s.safetySum {
+                    Text("Σ Safety_limit \(sum.formatted(.number.precision(.fractionLength(0...2))))")
+                        .fontWeight(.semibold)
+                } else {
+                    Text("no Safety_limit column")
+                }
+                Spacer()
+                Text(source(s)).foregroundStyle(.secondary)
+            } else {
+                Text("Working out top gainers…")
+                Spacer()
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 10).padding(.vertical, 3)
+        .background(Color.orange.opacity(0.07))
+    }
+
+    private func source(_ s: TGSummary) -> String {
+        if s.fromYahoo > 0 && s.fromSheet == 0 { return "change% from Yahoo" }
+        if s.fromYahoo == 0 { return vm.priceBook.series.isEmpty ? "change% from the sheet (fetch Yahoo prices in N)" : "change% from the sheet" }
+        return "change%: \(s.fromYahoo) Yahoo, \(s.fromSheet) sheet"
+    }
+}
+
+/// "Since yesterday" note shown while the changed cells flash.
+struct FlashToast: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+            Text(text)
+            Spacer()
+            HStack(spacing: 6) {
+                swatch(.systemGreen, "up"); swatch(.systemRed, "down"); swatch(.systemBlue, "new")
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Color.accentColor.opacity(0.10))
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private func swatch(_ c: NSColor, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            RoundedRectangle(cornerRadius: 2).fill(Color(nsColor: c).opacity(0.6)).frame(width: 10, height: 10)
+            Text(label).foregroundStyle(.secondary)
         }
     }
 }
