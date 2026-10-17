@@ -141,6 +141,7 @@ enum SheetService {
         let urlUsed: URL
         let httpStatus: Int
         let bytes: Int
+        let raw: Data
         var endpoint: String {
             if urlUsed.path.hasSuffix("/gviz/tq") { return "live (query endpoint)" }
             if urlUsed.path.hasSuffix("/export") { return "export (fallback — may be an older copy)" }
@@ -187,7 +188,23 @@ enum SheetService {
         }.value
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         return FetchResult(table: parsed.table, hash: parsed.hash, ageSeconds: age, lastModified: modified,
-                           urlUsed: url, httpStatus: status, bytes: data.count)
+                           urlUsed: url, httpStatus: status, bytes: data.count, raw: data)
+    }
+
+    /// Trims, fills blank names ("Column 7") and de-duplicates header names.
+    static func cleanHeaders(_ headerRow: [String]) -> [String] {
+        var seen: [String: Int] = [:]
+        return headerRow.enumerated().map { index, raw in
+            var name = raw.trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { name = "Column \(index + 1)" }
+            if let n = seen[name] {
+                seen[name] = n + 1
+                name = "\(name) (\(n + 1))"
+            } else {
+                seen[name] = 1
+            }
+            return name
+        }
     }
 
     static func parse(_ data: Data) throws -> (table: SheetTable, hash: String) {
@@ -201,19 +218,7 @@ enum SheetService {
         let csv = CSVParser.parse(text)
         guard let headerRow = csv.first else { throw SheetError.empty }
 
-        // Clean + de-duplicate headers
-        var seen: [String: Int] = [:]
-        let headers: [String] = headerRow.enumerated().map { index, raw in
-            var name = raw.trimmingCharacters(in: .whitespaces)
-            if name.isEmpty { name = "Column \(index + 1)" }
-            if let n = seen[name] {
-                seen[name] = n + 1
-                name = "\(name) (\(n + 1))"
-            } else {
-                seen[name] = 1
-            }
-            return name
-        }
+        let headers = cleanHeaders(headerRow)
 
         var rows: [SheetRow] = []
         rows.reserveCapacity(max(0, csv.count - 1))

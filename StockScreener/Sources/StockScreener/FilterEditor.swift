@@ -333,3 +333,42 @@ struct ShadePicker: View {
         .padding(.vertical, 2)
     }
 }
+
+// MARK: - Table view options
+
+/// "Freeze columns" menu used by both tables. The header row is always fixed.
+struct FreezeMenu: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+
+    var body: some View {
+        Menu {
+            Picker("Freeze columns", selection: $vm.settings.frozenColumns) {
+                Text("No frozen columns").tag(0)
+                Text("Freeze 1st column").tag(1)
+                Text("Freeze first 2 columns").tag(2)
+                Text("Freeze first 3 columns").tag(3)
+            }
+            .pickerStyle(.inline)
+            Text("The header row always stays fixed.")
+        } label: {
+            Label("Freeze", systemImage: "rectangle.lefthalf.inset.filled")
+        }
+        .help("Keep the first column(s) visible while scrolling sideways")
+    }
+}
+
+/// Opens the animation for the selected stock.
+struct AnimateButton: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button {
+            openWindow(id: "history")
+        } label: {
+            Label("Animate", systemImage: "play.circle")
+        }
+        .help(vm.selectedStock.map { "Animate \($0) over the last 30 days (⇧⌘3). Tip: double-click a row." }
+              ?? "Select a row, then animate that stock over the last 30 days (⇧⌘3)")
+    }
+}

@@ -43,6 +43,20 @@ Setup, done once:
 | **Filter** | toolbar button or ⇧⌘1 | Hide or show the conditions pane with ⌥⌘S to give the colored table the full window. Only the columns you choose (**Columns…**: tick them and drag to reorder), sorted by `D_Trigger` or any column, with **advanced filters** and per-column cell colors |
 | **Alerts & Email** | toolbar button or ⇧⌘2 | Email setup, the MV2 check, buy triggers (using the same advanced filters) and an alert history |
 
+### Frozen columns
+
+Use the **Freeze** menu on the Data Import or Filter screen to keep the first 1, 2 or 3 columns visible while you scroll sideways. The header row always stays fixed.
+
+### Stock history animation
+
+Select a stock in either table and click **▶ Animate**, double-click its row, or press ⇧⌘3. The animation plays that stock day by day over the last 30 stored days:
+- a card showing each value on that day, colored by your cell rules, with ▲/▼ changes from the previous day
+- a small chart for every numeric column, with a marker on the current day
+
+You can play, pause, step through the days, change the speed, and choose which columns to show.
+
+**How history is stored:** after each import, the app saves one snapshot per trading day, dated from `D_MONTH`/`D_DAY`. Each snapshot is compressed with Apple's LZFSE format and stored in `~/Library/Application Support/StockScreener/History/`. By default 45 days are kept; you can change this at the bottom of the history window. The sheet itself only holds today's data, so history builds up from the day you install this version.
+
 ### Column names
 
 Columns with placeholder names such as `var 1` … `var 10` can be given real names under **Column names**, in the Data Import toolbar or via **Rename…** on the Filter screen. The new names are used everywhere: both tables, pickers, filters, formulas, cell colors, the MV2 check, buy triggers and emails. Existing filters and formulas switch to the new names automatically, and the sheet's original names still work in formulas. Hover over a column header to see its name in the sheet.

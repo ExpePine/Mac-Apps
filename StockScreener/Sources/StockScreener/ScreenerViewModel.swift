@@ -45,6 +45,11 @@ final class ScreenerViewModel: ObservableObject {
     @Published private(set) var freshness: FreshnessState
     @Published private(set) var lastFetchFailed = false
     @Published private(set) var lastFetchInfo: FetchInfo?
+
+    // History / animation
+    @Published var selectedStock: String?        // stock picked in a table (for the animation)
+    @Published private(set) var historyDays: [String] = HistoryStore.days()
+    @Published private(set) var historyBytes: Int = HistoryStore.totalBytes()
     @Published var errorMessage: String?
 
     // Alerts
@@ -227,6 +232,8 @@ final class ScreenerViewModel: ObservableObject {
                 adoptColumnSpelling()
             }
 
+            saveSnapshotIfNeeded(raw: result.raw, table: result.table, changed: contentChanged)
+
             // Alerts run only after the sheet's data has actually been updated.
             if contentChanged {
                 await runAlertChecks()
@@ -367,6 +374,77 @@ final class ScreenerViewModel: ObservableObject {
             if Task.isCancelled { return }
             self?.triggerMatchCounts = counts
         }
+    }
+
+    // MARK: Daily history (for the animation)
+
+    /// The trading day the data belongs to: from D_MONTH / D_DAY if readable, otherwise today.
+    func dataDay(of table: SheetTable, now: Date = Date()) -> Date {
+        let cal = Calendar.current
+        guard let mi = table.index(of: settings.mv2.monthColumn), let di = table.index(of: settings.mv2.dayColumn) else {
+            return now
+        }
+        var counts: [String: Int] = [:]
+        for row in table.rows.prefix(500) {
+            guard let m = row.number(mi), let d = row.number(di),
+                  (1...12).contains(Int(m)), (1...31).contains(Int(d)) else { continue }
+            counts["\(Int(m))-\(Int(d))", default: 0] += 1
+        }
+        guard let top = counts.max(by: { $0.value < $1.value })?.key else { return now }
+        let parts = top.split(separator: "-").compactMap { Int($0) }
+        var comps = cal.dateComponents([.year], from: now)
+        comps.month = parts[0]; comps.day = parts[1]
+        guard var date = cal.date(from: comps) else { return now }
+        // December data read in January belongs to last year.
+        if date > now.addingTimeInterval(2 * 86400) {
+            comps.year = (comps.year ?? 0) - 1
+            date = cal.date(from: comps) ?? date
+        }
+        return date
+    }
+
+    private func saveSnapshotIfNeeded(raw: Data, table: SheetTable, changed: Bool) {
+        let day = HistoryStore.dayKey(dataDay(of: table))
+        guard changed || !HistoryStore.exists(day) else { return }
+        let keep = max(5, settings.historyKeepDays)
+        Task.detached(priority: .utility) { [weak self] in
+            try? HistoryStore.save(csv: raw, day: day, keepDays: keep)
+            let days = HistoryStore.days()
+            let bytes = HistoryStore.totalBytes()
+            await MainActor.run {
+                self?.historyDays = days
+                self?.historyBytes = bytes
+            }
+        }
+    }
+
+    func refreshHistoryInfo() {
+        historyDays = HistoryStore.days()
+        historyBytes = HistoryStore.totalBytes()
+    }
+
+    /// Loads one stock's stored days (background).
+    func loadHistory(for symbol: String) async -> [HistoryStore.Point] {
+        let labelOriginal: String = {
+            guard let i = labelIndex, i < table.originalHeaders.count else { return "" }
+            return table.originalHeaders[i]
+        }()
+        let originals = table.originalHeaders
+        return await Task.detached(priority: .userInitiated) {
+            HistoryStore.series(symbol: symbol, labelOriginalHeader: labelOriginal, currentOriginalHeaders: originals)
+        }.value
+    }
+
+    /// All stock names in today's data (for the picker).
+    var allSymbols: [String] {
+        guard let i = labelIndex else { return [] }
+        return rows.map { $0.text(i).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    func selectStock(from row: SheetRow?) {
+        guard let row, let i = labelIndex else { return }
+        let name = row.text(i).trimmingCharacters(in: .whitespaces)
+        if !name.isEmpty { selectedStock = name }
     }
 
     // MARK: Column names

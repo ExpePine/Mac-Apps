@@ -221,4 +221,27 @@ final class FilterTests: XCTestCase {
         XCTAssertTrue(url.absoluteString.contains("/gviz/tq"), url.absoluteString)
         XCTAssertTrue(url.absoluteString.contains("gid=2066787251"))
     }
+
+    // MARK: History store
+
+    func testHistoryRoundTripCompressed() throws {
+        let day1 = "1999-01-04", day2 = "1999-01-05"
+        let csv1 = "Symbol,var 1,CLOSE\nAAA,5,100\nBBB,1,50\n"
+        let csv2 = "Symbol,CLOSE,var 1\nBBB,55,2\nAAA,110,7\n"      // columns and rows moved
+        try HistoryStore.save(csv: Data(csv1.utf8), day: day1, keepDays: 10_000)
+        try HistoryStore.save(csv: Data(csv2.utf8), day: day2, keepDays: 10_000)
+        defer {
+            for d in [day1, day2] {
+                try? FileManager.default.removeItem(at: HistoryStore.folder.appendingPathComponent("\(d).csv.lzfse"))
+            }
+        }
+        XCTAssertEqual(String(data: try XCTUnwrap(HistoryStore.load(day1)), encoding: .utf8), csv1)
+
+        let points = HistoryStore.series(symbol: "aaa", labelOriginalHeader: "Symbol",
+                                         currentOriginalHeaders: ["Symbol", "var 1", "CLOSE"])
+            .filter { $0.day.hasPrefix("1999") }
+        XCTAssertEqual(points.map(\.day), [day1, day2])
+        XCTAssertEqual(points.map { $0.row.number(2) }, [100, 110])     // CLOSE, matched by name
+        XCTAssertEqual(points.map { $0.row.number(1) }, [5, 7])
+    }
 }

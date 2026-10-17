@@ -32,6 +32,7 @@ struct FilterView: View {
                                    sortColumn: vm.table.index(of: vm.settings.filterSortColumn),
                                    sortDescending: vm.settings.filterSortDescending,
                                    painter: vm.painter,
+                                   frozenColumns: vm.settings.frozenColumns,
                                    onHeaderClick: { index in
                                        let name = vm.headers[index]
                                        if vm.table.index(of: vm.settings.filterSortColumn) == index {
@@ -40,6 +41,11 @@ struct FilterView: View {
                                            vm.settings.filterSortColumn = name
                                            vm.settings.filterSortDescending = true
                                        }
+                                   },
+                                   onSelectRow: { vm.selectStock(from: $0) },
+                                   onDoubleClickRow: { row in
+                                       vm.selectStock(from: row)
+                                       openWindow(id: "history")
                                    })
                     Divider()
                     statusBar
@@ -63,6 +69,8 @@ struct FilterView: View {
                 .help(isCollapsed ? "Show the conditions pane (⌥⌘S)" : "Hide the conditions pane to see the full table (⌥⌘S)")
             }
             ToolbarItemGroup {
+                AnimateButton()
+                FreezeMenu()
                 Button {
                     showColumns = true
                 } label: {

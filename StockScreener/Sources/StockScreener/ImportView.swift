@@ -23,6 +23,7 @@ struct ImportView: View {
                                    version: vm.importVersion,
                                    sortColumn: vm.importSortColumn,
                                    sortDescending: vm.importSortDescending,
+                                   frozenColumns: vm.settings.frozenColumns,
                                    onHeaderClick: { index in
                                        if vm.importSortColumn == index {
                                            vm.importSortDescending.toggle()
@@ -30,6 +31,11 @@ struct ImportView: View {
                                            vm.importSortColumn = index
                                            vm.importSortDescending = false
                                        }
+                                   },
+                                   onSelectRow: { vm.selectStock(from: $0) },
+                                   onDoubleClickRow: { row in
+                                       vm.selectStock(from: row)
+                                       openWindow(id: "history")
                                    })
                     Divider()
                     statusBar
@@ -42,6 +48,8 @@ struct ImportView: View {
         .searchable(text: $vm.importSearch, placement: .toolbar, prompt: "Search all columns…")
         .toolbar {
             ToolbarItemGroup {
+                AnimateButton()
+                FreezeMenu()
                 Button {
                     vm.importNow()
                 } label: {

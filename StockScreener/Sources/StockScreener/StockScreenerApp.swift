@@ -18,6 +18,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("1", modifiers: [.command, .shift])
 
+        Window("Stock History", id: "history") {
+            HistoryView()
+                .environmentObject(vm)
+                .frame(minWidth: 820, minHeight: 520)
+        }
+        .keyboardShortcut("3", modifiers: [.command, .shift])
+
         Window("Alerts & Email", id: "alerts") {
             AlertsView()
                 .environmentObject(vm)

@@ -223,6 +223,9 @@ struct AppSettings: Codable {
     var filterGroup = FilterGroup(conditions: [FilterCondition(column: "D_Trigger", op: .hasValue)])
     var cellRules: [CellRule] = []
     var columnAliases: [String: String] = [:]   // sheet column name -> your real name
+    var frozenColumns = 1                       // columns pinned on the left of both tables
+    var historyKeepDays = 45                    // daily snapshots kept for the animation
+    var historyColumns: [String] = []           // columns shown in the animation; empty = Filter columns
 
     // Alerts
     var email = EmailSettings()
@@ -250,6 +253,9 @@ struct AppSettings: Codable {
         filterGroup     = v(.filterGroup, FilterGroup(conditions: [FilterCondition(column: triggerColumn, op: .hasValue)]))
         cellRules       = v(.cellRules, d.cellRules)
         columnAliases   = v(.columnAliases, d.columnAliases)
+        frozenColumns   = v(.frozenColumns, d.frozenColumns)
+        historyKeepDays = v(.historyKeepDays, d.historyKeepDays)
+        historyColumns  = v(.historyColumns, d.historyColumns)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)
