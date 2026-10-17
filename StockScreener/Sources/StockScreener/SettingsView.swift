@@ -25,10 +25,20 @@ struct SettingsView: View {
 
             if !link.isEmpty {
                 if let url = SheetService.csvURL(from: link) {
+                    let src = SheetService.describe(link)
                     Text("Will fetch: \(url.absoluteString)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                    Text("Reads: \(src.kind), \(src.tab)\(src.tab == "first tab" ? " — the link has no #gid=…, so the left-most tab is used. Open the tab you want in the browser and copy the link from there." : "")")
+                        .font(.caption)
+                        .foregroundStyle(src.tab == "first tab" ? .orange : .secondary)
+                    if src.isPublished {
+                        Text("“Publish to web” copies are refreshed by Google on its own schedule and can show older values. For live data, use File ▸ Share ▸ “Anyone with the link · Viewer” and paste that link instead.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
                     Text("This doesn't look like a Google Sheets link.")
                         .font(.caption)

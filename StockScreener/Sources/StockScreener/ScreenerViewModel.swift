@@ -43,6 +43,7 @@ final class ScreenerViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var freshness: FreshnessState
     @Published private(set) var lastFetchFailed = false
+    @Published private(set) var lastFetchInfo: FetchInfo?
     @Published var errorMessage: String?
 
     // Alerts
@@ -133,6 +134,9 @@ final class ScreenerViewModel: ObservableObject {
         do {
             let result = try await SheetService.fetch(from: url)
             let now = Date()
+            let src = SheetService.describe(settings.sheetLink)
+            lastFetchInfo = FetchInfo(sourceKind: src.kind, tab: src.tab,
+                                      cacheAgeSeconds: result.ageSeconds, lastModified: result.lastModified)
             let contentChanged = result.hash != freshness.dataHash
             if contentChanged {
                 freshness.dataHash = result.hash
@@ -360,13 +364,21 @@ final class ScreenerViewModel: ObservableObject {
         }
 
         var parts = ["\(rows.count) rows × \(headers.count) columns",
-                     "new data seen \(changed.formatted(.relative(presentation: .named)))"]
+                     "data last changed \(changed.formatted(.relative(presentation: .named)))"]
         if let checked = freshness.lastCheckedAt {
             parts.append("last checked \(checked.formatted(date: .omitted, time: .shortened))")
         }
+        let src = SheetService.describe(settings.sheetLink)
+        parts.append("\(src.kind.lowercased()), \(src.tab)")
+        if let age = lastFetchInfo?.cacheAgeSeconds, age > 0 {
+            parts.append("Google served a cached copy \(age / 60 > 0 ? "\(age / 60) min" : "\(age) s") old")
+        }
 
         var level: FreshnessLevel = .fresh
-        var title = "Data imported and up to date"
+        var title = "Data imported"
+        if src.isPublished {
+            parts.append("published copies can lag the live sheet — use the normal share link for live data")
+        }
 
         if now.timeIntervalSince(changed) > Double(settings.staleAfterHours) * 3600 {
             level = .stale

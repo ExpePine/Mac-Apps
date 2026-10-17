@@ -18,7 +18,35 @@ enum SheetError: LocalizedError {
     }
 }
 
+/// Where the data comes from and how fresh Google said it was.
+struct FetchInfo: Equatable {
+    var sourceKind: String       // "Live sheet" or "Published copy"
+    var tab: String              // e.g. "tab gid 123", "first tab"
+    var cacheAgeSeconds: Int?    // Age header: >0 means a cache answered
+    var lastModified: Date?
+}
+
 enum SheetService {
+
+    /// Fresh connection with no local cache, so every fetch goes to Google.
+    private static let session: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.urlCache = nil
+        cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        cfg.timeoutIntervalForRequest = 60
+        return URLSession(configuration: cfg)
+    }()
+
+    /// Describes a link: live sheet vs "Publish to web" copy, and which tab.
+    static func describe(_ input: String) -> (kind: String, tab: String, isPublished: Bool) {
+        let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let published = s.contains("/spreadsheets/d/e/")
+        var tab = "first tab"
+        if let g = s.range(of: #"gid=\d+"#, options: .regularExpression) {
+            tab = "tab gid \(s[g].dropFirst(4))"
+        }
+        return (published ? "Published copy" : "Live sheet", tab, published)
+    }
 
     /// Converts whatever link the user pastes into a CSV download URL.
     /// Supports: normal share/edit links (keeps the gid = tab), "Publish to web" links,
@@ -69,19 +97,40 @@ enum SheetService {
         return comps?.url
     }
 
-    static func fetch(from url: URL) async throws -> (table: SheetTable, hash: String) {
-        let request = URLRequest(url: url,
-                                 cachePolicy: .reloadIgnoringLocalCacheData,
-                                 timeoutInterval: 60)
-        let (data, response) = try await URLSession.shared.data(for: request)
+    /// Adds a unique parameter so no cache between here and Google can answer with an old copy.
+    static func cacheBusted(_ url: URL) -> URL {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = (comps.queryItems ?? []).filter { $0.name != "_ts" }
+        items.append(URLQueryItem(name: "_ts", value: String(Int(Date().timeIntervalSince1970 * 1000))))
+        comps.queryItems = items
+        return comps.url ?? url
+    }
 
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw SheetError.http(http.statusCode)
+    static func fetch(from url: URL) async throws -> (table: SheetTable, hash: String, ageSeconds: Int?, lastModified: Date?) {
+        var request = URLRequest(url: cacheBusted(url),
+                                 cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+                                 timeoutInterval: 60)
+        request.setValue("no-cache, no-store, max-age=0", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        let (data, response) = try await session.data(for: request)
+
+        var age: Int?
+        var modified: Date?
+        if let http = response as? HTTPURLResponse {
+            guard (200..<300).contains(http.statusCode) else { throw SheetError.http(http.statusCode) }
+            age = (http.value(forHTTPHeaderField: "Age")).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            if let lm = http.value(forHTTPHeaderField: "Last-Modified") {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                modified = f.date(from: lm)
+            }
         }
         // Parse off the main thread so the windows stay responsive.
-        return try await Task.detached(priority: .userInitiated) {
+        let parsed = try await Task.detached(priority: .userInitiated) {
             try SheetService.parse(data)
         }.value
+        return (parsed.table, parsed.hash, age, modified)
     }
 
     static func parse(_ data: Data) throws -> (table: SheetTable, hash: String) {
