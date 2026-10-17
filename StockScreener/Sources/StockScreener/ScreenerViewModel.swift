@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 enum FreshnessLevel {
     case waiting, fresh, stale, offline
@@ -66,6 +67,11 @@ final class ScreenerViewModel: ObservableObject {
     private(set) var painter = CellPainter()
 
     private var refreshTask: Task<Void, Never>?
+    private var appNapActivity: NSObjectProtocol?
+    private var wakeObservers: [NSObjectProtocol] = []
+    @Published private(set) var lastAttemptAt: Date?
+    /// Result of the last "Import / Re-import now" click, shown next to the button.
+    @Published private(set) var manualResult: (text: String, isNew: Bool, at: Date)?
     private var importTask: Task<Void, Never>?
     private var filterTask: Task<Void, Never>?
     private var countsTask: Task<Void, Never>?
@@ -102,16 +108,64 @@ final class ScreenerViewModel: ObservableObject {
     }
 
     /// Fetches now, then again every `refreshMinutes`.
+    ///
+    /// Robust against macOS App Nap and sleep: instead of one long sleep (which macOS may postpone
+    /// for a background app), it wakes every 20 seconds and checks the wall clock.
     func startAutoRefresh() {
+        keepAwakeForChecks()
+        observeWakeAndActivation()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.refresh()
-                let seconds = UInt64(max(1, self.settings.refreshMinutes)) * 60
-                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                if self.isRefreshDue(now: Date()) {
+                    await self.refresh()
+                }
+                try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
             }
         }
+    }
+
+    /// When the next automatic check should happen.
+    var nextCheckDate: Date? {
+        guard !settings.sheetLink.isEmpty else { return nil }
+        let interval = TimeInterval(max(1, settings.refreshMinutes) * 60)
+        let last = max(lastAttemptAt ?? .distantPast, freshness.lastCheckedAt ?? .distantPast)
+        return last == .distantPast ? Date() : last.addingTimeInterval(interval)
+    }
+
+    private func isRefreshDue(now: Date) -> Bool {
+        guard let next = nextCheckDate else { return false }
+        return now >= next
+    }
+
+    /// Stops App Nap from throttling the timer while still letting the Mac sleep normally.
+    private func keepAwakeForChecks() {
+        guard appNapActivity == nil else { return }
+        appNapActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Checking the Google Sheet for new data")
+    }
+
+    /// Check right after the Mac wakes, and when you switch back to the app if the data is over a minute old.
+    private func observeWakeAndActivation() {
+        guard wakeObservers.isEmpty else { return }
+        let wake = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)   // let Wi-Fi reconnect
+                await self?.refresh()
+            }
+        }
+        let active = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let last = self.freshness.lastCheckedAt ?? .distantPast
+                if Date().timeIntervalSince(last) > 60 { await self.refresh() }
+            }
+        }
+        wakeObservers = [wake, active]
     }
 
     /// "Import data" button.
@@ -129,6 +183,7 @@ final class ScreenerViewModel: ObservableObject {
         guard !isLoading else { return }
 
         isLoading = true
+        lastAttemptAt = Date()
         defer { isLoading = false }
 
         do {
@@ -149,6 +204,12 @@ final class ScreenerViewModel: ObservableObject {
 
             // Only swap in the new table if something changed (or nothing is loaded yet):
             // re-filtering identical data every few minutes would just waste time.
+            if force {
+                let rowsNow = result.table.rows.count
+                manualResult = contentChanged
+                    ? ("Imported new data · \(rowsNow) rows at \(now.formatted(date: .omitted, time: .standard))", true, now)
+                    : ("Downloaded at \(now.formatted(date: .omitted, time: .standard)) — Google's copy is identical to what's shown (unchanged since \((freshness.lastChangedAt ?? now).formatted(date: .omitted, time: .shortened)))", false, now)
+            }
             if contentChanged || !hasData || force {
                 setTable(result.table)
                 adoptColumnSpelling()
@@ -161,6 +222,7 @@ final class ScreenerViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription   // keep showing the last good data
             lastFetchFailed = true
+            if force { manualResult = ("Import failed: \(error.localizedDescription)", false, Date()) }
         }
     }
 
@@ -367,6 +429,9 @@ final class ScreenerViewModel: ObservableObject {
                      "data last changed \(changed.formatted(.relative(presentation: .named)))"]
         if let checked = freshness.lastCheckedAt {
             parts.append("last checked \(checked.formatted(date: .omitted, time: .shortened))")
+        }
+        if let next = nextCheckDate {
+            parts.append(next <= now ? "checking now" : "next check \(next.formatted(date: .omitted, time: .shortened))")
         }
         let src = SheetService.describe(settings.sheetLink)
         parts.append("\(src.kind.lowercased()), \(src.tab)")

@@ -34,6 +34,7 @@ enum SheetService {
         cfg.urlCache = nil
         cfg.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 120   // a stuck download can't block later checks
         return URLSession(configuration: cfg)
     }()
 

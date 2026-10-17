@@ -164,7 +164,7 @@ struct FreshnessBar: View {
 
     var body: some View {
         // Re-evaluates every 30 s so "x minutes ago" and the stale check stay current.
-        TimelineView(.periodic(from: .now, by: 30)) { context in
+        TimelineView(.periodic(from: .now, by: 10)) { context in
             let info = vm.freshnessInfo(now: context.date)
 
             HStack(spacing: 10) {
@@ -181,6 +181,13 @@ struct FreshnessBar: View {
                     mv2Line(vm.mv2Status(today: context.date))
                 }
                 Spacer()
+                if let result = vm.manualResult, context.date.timeIntervalSince(result.at) < 120 {
+                    Label(result.text, systemImage: result.isNew ? "arrow.down.circle.fill" : "equal.circle")
+                        .font(.caption)
+                        .foregroundStyle(result.isNew ? .green : .secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: 360, alignment: .trailing)
+                }
                 if vm.isLoading {
                     ProgressView().controlSize(.small)
                     Text("Importing…").font(.caption).foregroundStyle(.secondary)
