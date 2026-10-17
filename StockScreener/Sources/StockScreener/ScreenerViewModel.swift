@@ -57,10 +57,10 @@ final class ScreenerViewModel: ObservableObject {
     @Published var selectedStock: String?        // stock picked in a table
     // Filter time slider: nil = live data; otherwise an index into timelineDays
     @Published var showTimeline = false
-    @Published private(set) var timelineDays: [String] = []
-    @Published private(set) var timelineIndex: Int?
-    @Published private(set) var timelineTable: SheetTable?
-    @Published private(set) var isTimelineLoading = false
+    @Published var timelineDays: [String] = []
+    @Published var timelineIndex: Int?
+    @Published var timelineTable: SheetTable?
+    @Published var isTimelineLoading = false
     @Published var isTimelinePlaying = false
     var timelineCache: [String: SheetTable] = [:]
     var timelineCacheOrder: [String] = []
