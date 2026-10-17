@@ -2,6 +2,13 @@ import SwiftUI
 
 // MARK: - MV2 date check
 
+struct InAppAlert: Identifiable {
+    var id: UUID { triggerID }
+    let triggerID: UUID
+    let name: String
+    let stocks: [String]
+}
+
 struct MV2Status {
     enum State { case ok, notUpdated, unknown }
     let state: State
@@ -82,9 +89,30 @@ extension ScreenerViewModel {
     func runAlertChecks() async {
         rollAlertDayIfNeeded()
         await checkMV2(force: false)
-        for trigger in settings.buyTriggers where trigger.isEnabled {
+        for trigger in settings.buyTriggers where trigger.isEnabled && trigger.sendEmail {
             await checkBuyTrigger(trigger, force: false)
         }
+    }
+
+    /// In-app alerts: which enabled rules are met right now, and by which stocks.
+    func computeInAppAlerts() -> [InAppAlert] {
+        settings.buyTriggers
+            .filter { $0.isEnabled && $0.alertInApp && $0.filter.activeCount > 0 }
+            .compactMap { t in
+                let matches = buyMatches(t)
+                guard !matches.isEmpty else { return nil }
+                return InAppAlert(triggerID: t.id, name: t.name, stocks: matches.map { rowKey($0) })
+            }
+    }
+
+    /// Shows the "Conditions met" pop-up (on launch) or banner (on new data).
+    func raiseInAppAlerts(asPopup: Bool) {
+        let alerts = computeInAppAlerts()
+        inAppAlerts = alerts
+        guard !alerts.isEmpty else { return }
+        if asPopup { showAlertsPopup = true } else { showAlertsBanner = true }
+        let summary = alerts.map { "\($0.name): \($0.stocks.count)" }.joined(separator: ", ")
+        addLog("In-app alert", summary, success: true)
     }
 
     // MV2

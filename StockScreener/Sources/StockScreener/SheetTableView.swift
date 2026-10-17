@@ -20,6 +20,10 @@ struct SheetTableView: NSViewRepresentable {
     var onHeaderClick: ((Int) -> Void)? = nil
     var onSelectRow: ((SheetRow?) -> Void)? = nil
     var onDoubleClickRow: ((SheetRow) -> Void)? = nil
+    /// When set, each header shows a small ▼ that opens this panel for the column.
+    var columnMenu: ((Int) -> AnyView)? = nil
+    /// Columns that have conditions or colors (their ▼ is highlighted).
+    var markedColumns: Set<Int> = []
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -97,12 +101,20 @@ struct SheetTableView: NSViewRepresentable {
                 var title = index < headers.count ? headers[index] : ""
                 if index == sortColumn { title += sortDescending ? "  ▼" : "  ▲" }
                 column.title = title
+                if let cell = column.headerCell as? MenuHeaderCell {
+                    cell.showsMenu = columnMenu != nil
+                    cell.isMarked = markedColumns.contains(index)
+                }
+                (table.headerView as? MenuHeaderView)?.menuEnabled = columnMenu != nil
                 let font: NSFont = index == emphasizedColumn || table === left
                     ? .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
                     : .systemFont(ofSize: NSFont.smallSystemFontSize)
                 column.headerCell.attributedStringValue = NSAttributedString(string: title, attributes: [.font: font])
             }
         }
+
+        left.headerView?.needsDisplay = true
+        right.headerView?.needsDisplay = true
 
         if version != c.renderedVersion || rows.count != right.numberOfRows {
             c.renderedVersion = version
@@ -138,7 +150,12 @@ struct SheetTableView: NSViewRepresentable {
             table.rowHeight = 22
             table.gridStyleMask = [.solidVerticalGridLineMask]
             table.gridColor = NSColor.separatorColor.withAlphaComponent(0.35)
-            table.headerView = NSTableHeaderView()
+            let header = MenuHeaderView()
+            header.onMenuClick = { [weak self, weak table] column, rect in
+                guard let self, let table else { return }
+                self.showColumnMenu(table: table, column: column, rect: rect)
+            }
+            table.headerView = header
             table.delegate = self
             table.dataSource = self
             table.target = self
@@ -150,6 +167,7 @@ struct SheetTableView: NSViewRepresentable {
             for col in table.tableColumns.reversed() { table.removeTableColumn(col) }
             for index in indices {
                 let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("c\(index)"))
+                column.headerCell = MenuHeaderCell(textCell: "")
                 column.width = index == 0 || table === leftTable ? 150 : 110
                 column.minWidth = 40
                 let name = parent.headers[index]
@@ -190,6 +208,22 @@ struct SheetTableView: NSViewRepresentable {
             target.scroll(to: origin)
             (target.superview as? NSScrollView)?.reflectScrolledClipView(target)
             syncing = false
+        }
+
+        private var popover: NSPopover?
+
+        func showColumnMenu(table: NSTableView, column: Int, rect: NSRect) {
+            guard let parent, let build = parent.columnMenu, column >= 0, column < table.tableColumns.count,
+                  let index = Self.columnIndex(table.tableColumns[column]), let header = table.headerView else { return }
+            popover?.close()
+            let hosting = NSHostingController(rootView: build(index))
+            hosting.sizingOptions = [.preferredContentSize]
+            let pop = NSPopover()
+            pop.contentViewController = hosting
+            pop.behavior = .transient
+            pop.animates = true
+            pop.show(relativeTo: rect, of: header, preferredEdge: .maxY)
+            popover = pop
         }
 
         static func columnIndex(_ column: NSTableColumn) -> Int? {
@@ -273,5 +307,49 @@ final class SheetCellView: NSTableCellView {
         label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: bold ? .semibold : .regular)
         toolTip = text.count > 14 ? text : nil
         layer?.backgroundColor = background?.cgColor
+    }
+}
+
+// MARK: - Header with a small ▼ menu button
+
+/// Clicking the right edge of a header (where ▼ is drawn) opens the column panel;
+/// clicking anywhere else behaves normally (sort).
+final class MenuHeaderView: NSTableHeaderView {
+    var menuEnabled = false
+    var onMenuClick: ((Int, NSRect) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let column = self.column(at: point)
+        if menuEnabled, column >= 0 {
+            let rect = headerRect(ofColumn: column)
+            if point.x >= rect.maxX - MenuHeaderCell.buttonWidth {
+                onMenuClick?(column, rect)
+                return
+            }
+        }
+        super.mouseDown(with: event)
+    }
+}
+
+final class MenuHeaderCell: NSTableHeaderCell {
+    static let buttonWidth: CGFloat = 20
+    var showsMenu = false
+    var isMarked = false
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        var textFrame = cellFrame
+        if showsMenu { textFrame.size.width -= Self.buttonWidth }
+        super.drawInterior(withFrame: textFrame, in: controlView)
+        guard showsMenu else { return }
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: isMarked ? 10 : 8, weight: isMarked ? .bold : .regular),
+            .foregroundColor: isMarked ? NSColor.controlAccentColor : NSColor.secondaryLabelColor,
+        ]
+        let arrow = NSAttributedString(string: "▼", attributes: attrs)
+        let size = arrow.size()
+        arrow.draw(at: NSPoint(x: cellFrame.maxX - Self.buttonWidth + (Self.buttonWidth - size.width) / 2,
+                               y: cellFrame.midY - size.height / 2))
     }
 }

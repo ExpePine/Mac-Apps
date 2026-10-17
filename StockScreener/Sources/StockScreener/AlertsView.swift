@@ -11,7 +11,7 @@ struct AlertsView: View {
             MV2CheckTab()
                 .tabItem { Label("MV2 check", systemImage: "calendar.badge.exclamationmark") }
             BuyTriggersTab()
-                .tabItem { Label("Buy triggers", systemImage: "bell.badge") }
+                .tabItem { Label("Email & alert rules", systemImage: "bell.badge") }
             AlertHistoryTab()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
         }
@@ -124,22 +124,30 @@ private struct MV2CheckTab: View {
 
 // MARK: - Buy triggers
 
-private struct BuyTriggersTab: View {
+struct BuyTriggersTab: View {
     @EnvironmentObject var vm: ScreenerViewModel
+    var showIntro = true
 
     var body: some View {
         Form {
-            Section {
-                Text("A buy trigger emails you when stocks meet its conditions. Combine any columns with AND / OR / NOT groups, compare one column with another (e.g. CLOSE > EMA_20 × 1.02), or write a formula. It's checked each time new data arrives; each stock is emailed at most once a day per trigger.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if showIntro {
+                Section {
+                    Text("Each rule watches for stocks that meet its conditions — combine any columns with AND / OR / NOT groups, compare one column with another (e.g. CLOSE > EMA_20 × 1.02), or write a formula. When it's met the app can **Email** you (each stock at most once a day) and/or **Alert** you in the app: a pop-up when the app opens and a banner whenever new data arrives.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if vm.settings.email.username.isEmpty {
+                        Label("Email isn't set up yet — add your Gmail and App Password in Alerts & Email → Email.",
+                              systemImage: "envelope.badge")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
             }
 
             ForEach($vm.settings.buyTriggers) { $trigger in
                 Section {
                     HStack {
                         Toggle("", isOn: $trigger.isEnabled).labelsHidden()
-                            .help("Turn this trigger on/off")
+                            .help("Turn this rule on/off")
                         TextField("Name", text: $trigger.name)
                             .textFieldStyle(.roundedBorder)
                             .font(.headline)
@@ -147,8 +155,14 @@ private struct BuyTriggersTab: View {
                             vm.settings.buyTriggers.removeAll { $0.id == trigger.id }
                         } label: { Image(systemName: "trash") }
                         .buttonStyle(.borderless)
-                        .help("Delete trigger")
+                        .help("Delete rule")
                     }
+
+                    HStack(spacing: 16) {
+                        Toggle(isOn: $trigger.sendEmail) { Label("Email", systemImage: "envelope") }
+                        Toggle(isOn: $trigger.alertInApp) { Label("Alert in app", systemImage: "bell") }
+                    }
+                    .toggleStyle(.checkbox)
 
                     FilterGroupEditor(group: $trigger.filter, columns: vm.headers, isRoot: true, onDelete: {})
 
@@ -157,8 +171,10 @@ private struct BuyTriggersTab: View {
                             .font(.caption).foregroundStyle(.orange)
                     }
 
-                    TextField("Send to (optional)", text: $trigger.recipients,
-                              prompt: Text("Uses the Email tab's addresses if empty"))
+                    if trigger.sendEmail {
+                        TextField("Send to (optional)", text: $trigger.recipients,
+                                  prompt: Text("Uses the Email tab's addresses if empty"))
+                    }
 
                     HStack {
                         let count = vm.triggerMatchCounts[trigger.id] ?? 0
@@ -167,13 +183,20 @@ private struct BuyTriggersTab: View {
                             .font(.caption)
                             .foregroundStyle(count > 0 ? .green : .secondary)
                         Spacer()
-                        Button("Check now") { Task { await vm.checkBuyTrigger(trigger, force: true) } }
-                            .disabled(vm.isSendingEmail || trigger.filter.activeCount == 0)
-                            .help("Emails every stock that matches right now")
+                        if trigger.alertInApp {
+                            Button("Alert now") { vm.raiseInAppAlerts(asPopup: true) }
+                                .disabled(trigger.filter.activeCount == 0)
+                                .help("Show the in-app alert for all rules that are met right now")
+                        }
+                        if trigger.sendEmail {
+                            Button("Email now") { Task { await vm.checkBuyTrigger(trigger, force: true) } }
+                                .disabled(vm.isSendingEmail || trigger.filter.activeCount == 0)
+                                .help("Emails every stock that matches right now")
+                        }
                     }
                 } header: {
                     HStack {
-                        Text(trigger.name.isEmpty ? "Buy trigger" : trigger.name)
+                        Text(trigger.name.isEmpty ? "Rule" : trigger.name)
                         Spacer()
                         FormulaHelpButton()
                     }
@@ -182,15 +205,137 @@ private struct BuyTriggersTab: View {
             }
 
             Section {
-                Button {
-                    vm.settings.buyTriggers.append(BuyTrigger(isEnabled: false,
-                                                              name: "Buy trigger \(vm.settings.buyTriggers.count + 1)"))
-                } label: {
-                    Label("Add another trigger", systemImage: "plus.circle")
+                HStack {
+                    Button {
+                        var t = BuyTrigger(isEnabled: true, name: "Rule \(vm.settings.buyTriggers.count + 1)")
+                        t.filter = vm.settings.filterGroup
+                        vm.settings.buyTriggers.append(t)
+                    } label: {
+                        Label("New rule from the Filter screen's conditions", systemImage: "square.and.arrow.down.on.square")
+                    }
+                    .help("Copies the conditions currently set on the Filter screen into a new rule")
+                    Spacer()
+                    Button {
+                        vm.settings.buyTriggers.append(BuyTrigger(isEnabled: true,
+                                                                  name: "Rule \(vm.settings.buyTriggers.count + 1)"))
+                    } label: {
+                        Label("Empty rule", systemImage: "plus.circle")
+                    }
                 }
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// The "E" sheet on the Filter screen.
+struct EmailRulesSheet: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Email & alert rules", systemImage: "envelope.badge")
+                    .font(.title2.bold())
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+            Divider()
+            BuyTriggersTab()
+        }
+        .frame(width: 640, height: 640)
+    }
+}
+
+/// Pop-up / list of rules that are met right now.
+struct ConditionsMetView: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Conditions met", systemImage: "bell.badge.fill")
+                .font(.title2.bold())
+                .foregroundStyle(.orange)
+            if vm.inAppAlerts.isEmpty {
+                Text("None of your rules are met right now.").foregroundStyle(.secondary)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(vm.inAppAlerts) { alert in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(alert.name) — \(alert.stocks.count) stock\(alert.stocks.count == 1 ? "" : "s")")
+                                .font(.headline)
+                            FlowList(items: alert.stocks) { stock in
+                                vm.selectedStock = stock
+                                openWindow(id: "history")
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 360)
+            Text("Click a stock to animate its history.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Edit rules…") {
+                    dismiss()
+                    openWindow(id: "filter")
+                    vm.showRulesEditor = true
+                }
+                Spacer()
+                Button("OK") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+}
+
+/// Wrapping row of small stock buttons.
+struct FlowList: View {
+    let items: [String]
+    let onTap: (String) -> Void
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 6)], alignment: .leading, spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                Button(item) { onTap(item) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+/// Banner shown when new data meets a rule.
+struct AlertsBanner: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+
+    var body: some View {
+        if vm.showAlertsBanner && !vm.inAppAlerts.isEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
+                Text(vm.inAppAlerts.map { "\($0.name): \($0.stocks.prefix(4).joined(separator: ", "))\($0.stocks.count > 4 ? " +\($0.stocks.count - 4)" : "")" }
+                        .joined(separator: "   ·   "))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer()
+                Button("View") { vm.showAlertsPopup = true }
+                Button { vm.showAlertsBanner = false } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+            }
+            .font(.callout)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.orange.opacity(0.14))
+        }
     }
 }
 

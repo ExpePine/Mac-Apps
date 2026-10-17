@@ -10,6 +10,7 @@ struct ImportView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            AlertsBanner()
             if vm.settings.sheetLink.isEmpty {
                 connectState
             } else {
@@ -94,6 +95,9 @@ struct ImportView: View {
         }
         .sheet(isPresented: $showColumnNames) {
             ColumnNamesEditor().environmentObject(vm)
+        }
+        .sheet(isPresented: $vm.showAlertsPopup) {
+            ConditionsMetView().environmentObject(vm)
         }
         .task {
             LoginItem.enableOnFirstLaunch()

@@ -16,6 +16,7 @@ struct FilterView: View {
                 .navigationSplitViewColumnWidth(min: 320, ideal: 440, max: 620)
         } detail: {
             VStack(spacing: 0) {
+                AlertsBanner()
                 if !vm.hasData {
                     placeholder
                 } else {
@@ -46,7 +47,11 @@ struct FilterView: View {
                                    onDoubleClickRow: { row in
                                        vm.selectStock(from: row)
                                        openWindow(id: "history")
-                                   })
+                                   },
+                                   columnMenu: { index in
+                                       AnyView(ColumnMenuView(column: index).environmentObject(vm))
+                                   },
+                                   markedColumns: vm.columnsWithRules)
                     Divider()
                     statusBar
                 }
@@ -69,6 +74,13 @@ struct FilterView: View {
                 .help(isCollapsed ? "Show the conditions pane (⌥⌘S)" : "Hide the conditions pane to see the full table (⌥⌘S)")
             }
             ToolbarItemGroup {
+                Button {
+                    vm.showRulesEditor = true
+                } label: {
+                    Label("E", systemImage: "envelope.badge")
+                        .labelStyle(.titleAndIcon)
+                }
+                .help("E — Email and/or alert me when conditions are met")
                 AnimateButton()
                 FreezeMenu()
                 Button {
@@ -94,6 +106,9 @@ struct FilterView: View {
         }
         .sheet(isPresented: $showColumns) {
             ColumnChooser().environmentObject(vm)
+        }
+        .sheet(isPresented: $vm.showRulesEditor) {
+            EmailRulesSheet().environmentObject(vm)
         }
     }
 

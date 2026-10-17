@@ -43,6 +43,23 @@ Setup, done once:
 | **Filter** | toolbar button or ⇧⌘1 | Hide or show the conditions pane with ⌥⌘S to give the colored table the full window. Only the columns you choose (**Columns…**: tick them and drag to reorder), sorted by `D_Trigger` or any column, with **advanced filters** and per-column cell colors |
 | **Alerts & Email** | toolbar button or ⇧⌘2 | Email setup, the MV2 check, buy triggers (using the same advanced filters) and an alert history |
 
+### Column ▼ menu (Filter screen)
+
+Each column header on the Filter screen has a small **▼** at its right edge. Clicking it opens a panel for that column with:
+- **Sort low → high / high → low**, applied straight away. Clicking the header name also still sorts.
+- **Conditions on this column**, using the full advanced builder: compare to a value, compare to another column × a factor, or use a formula. These conditions are combined with the rest of your filter.
+- **Cell colors** for that column.
+
+The ▼ is highlighted on columns that have conditions or colors.
+
+### "E" — Email & alert rules
+
+The **E** button on the Filter screen opens your rules. Each rule has advanced conditions and two checkboxes:
+- **Email**: matching stocks are emailed, each at most once a day.
+- **Alert in app**: a **"Conditions met"** pop-up appears when the app opens and loads data, and a banner appears whenever new data meets a rule. Click a stock in the pop-up to animate its history.
+
+**New rule from the Filter screen's conditions** turns what you've built on the Filter screen into a rule with one click.
+
 ### Frozen columns
 
 Use the **Freeze** menu on the Data Import or Filter screen to keep the first 1, 2 or 3 columns visible while you scroll sideways. The header row always stays fixed.

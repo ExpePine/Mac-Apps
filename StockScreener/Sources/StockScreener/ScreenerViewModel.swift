@@ -46,6 +46,13 @@ final class ScreenerViewModel: ObservableObject {
     @Published private(set) var lastFetchFailed = false
     @Published private(set) var lastFetchInfo: FetchInfo?
 
+    // In-app alerts ("E" rules)
+    @Published var inAppAlerts: [InAppAlert] = []
+    @Published var showAlertsPopup = false
+    @Published var showAlertsBanner = false
+    @Published var showRulesEditor = false        // the "E" sheet on the Filter screen
+    private var launchAlertDone = false
+
     // History / animation
     @Published var selectedStock: String?        // stock picked in a table (for the animation)
     @Published private(set) var historyDays: [String] = HistoryStore.days()
@@ -237,6 +244,13 @@ final class ScreenerViewModel: ObservableObject {
             // Alerts run only after the sheet's data has actually been updated.
             if contentChanged {
                 await runAlertChecks()
+            }
+            // In-app alert: once when the app opens (first data), then whenever new data arrives.
+            if !launchAlertDone {
+                launchAlertDone = true
+                raiseInAppAlerts(asPopup: true)
+            } else if contentChanged {
+                raiseInAppAlerts(asPopup: false)
             }
         } catch {
             errorMessage = error.localizedDescription   // keep showing the last good data

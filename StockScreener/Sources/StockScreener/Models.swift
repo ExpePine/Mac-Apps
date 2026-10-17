@@ -348,6 +348,8 @@ struct BuyTrigger: Identifiable, Codable, Equatable {
     var name = "Buy trigger"
     var filter = FilterGroup()
     var recipients = ""          // empty = use the email settings' recipients
+    var sendEmail = true         // email the matching stocks
+    var alertInApp = true        // pop up in the app when it opens / when new data meets the rule
 
     init(isEnabled: Bool = false, name: String = "Buy trigger") {
         self.isEnabled = isEnabled
@@ -355,7 +357,7 @@ struct BuyTrigger: Identifiable, Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, isEnabled, name, filter, recipients
+        case id, isEnabled, name, filter, recipients, sendEmail, alertInApp
         case conditions, matchMode   // older versions
     }
 
@@ -365,6 +367,8 @@ struct BuyTrigger: Identifiable, Codable, Equatable {
         isEnabled  = (try? c.decodeIfPresent(Bool.self, forKey: .isEnabled)) ?? false
         name       = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? "Buy trigger"
         recipients = (try? c.decodeIfPresent(String.self, forKey: .recipients)) ?? ""
+        sendEmail  = (try? c.decodeIfPresent(Bool.self, forKey: .sendEmail)) ?? true
+        alertInApp = (try? c.decodeIfPresent(Bool.self, forKey: .alertInApp)) ?? true
         if let f = try? c.decodeIfPresent(FilterGroup.self, forKey: .filter) {
             filter = f
         } else {
@@ -386,6 +390,8 @@ struct BuyTrigger: Identifiable, Codable, Equatable {
         try c.encode(name, forKey: .name)
         try c.encode(filter, forKey: .filter)
         try c.encode(recipients, forKey: .recipients)
+        try c.encode(sendEmail, forKey: .sendEmail)
+        try c.encode(alertInApp, forKey: .alertInApp)
     }
 }
 
