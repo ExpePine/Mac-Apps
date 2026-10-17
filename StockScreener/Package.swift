@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "StockScreener",
             path: "Sources/StockScreener"
+        ),
+        .testTarget(
+            name: "StockScreenerTests",
+            dependencies: ["StockScreener"],
+            path: "Tests/StockScreenerTests"
         )
     ]
 )

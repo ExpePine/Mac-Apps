@@ -130,7 +130,7 @@ private struct BuyTriggersTab: View {
     var body: some View {
         Form {
             Section {
-                Text("A buy trigger emails you when stocks meet all (or any) of its conditions across several columns. It's checked each time new data arrives; each stock is emailed at most once a day per trigger.")
+                Text("A buy trigger emails you when stocks meet its conditions. Combine any columns with AND / OR / NOT groups, compare one column with another (e.g. CLOSE > EMA_20 × 1.02), or write a formula. It's checked each time new data arrives; each stock is emailed at most once a day per trigger.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -150,35 +150,32 @@ private struct BuyTriggersTab: View {
                         .help("Delete trigger")
                     }
 
-                    Picker("Match", selection: $trigger.matchMode) {
-                        ForEach(MatchMode.allCases) { Text($0.rawValue).tag($0) }
-                    }
+                    FilterGroupEditor(group: $trigger.filter, columns: vm.headers, isRoot: true, onDelete: {})
 
-                    ForEach($trigger.conditions) { $rule in
-                        RuleRow(rule: $rule, columns: vm.headers, showColor: false) {
-                            $trigger.conditions.wrappedValue.removeAll { $0.id == rule.id }
-                        }
+                    ForEach(vm.triggerIssues(trigger), id: \.self) { issue in
+                        Label(issue, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
                     }
-                    Button {
-                        $trigger.conditions.wrappedValue.append(Rule(column: vm.headers.first ?? ""))
-                    } label: {
-                        Label("Add condition", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderless)
 
                     TextField("Send to (optional)", text: $trigger.recipients,
                               prompt: Text("Uses the Email tab's addresses if empty"))
 
                     HStack {
-                        let count = vm.buyMatches(trigger).count
-                        Text(trigger.conditions.isEmpty ? "Add at least one condition."
-                                                        : "\(count) stock\(count == 1 ? "" : "s") match right now")
+                        let count = vm.triggerMatchCounts[trigger.id] ?? 0
+                        Text(trigger.filter.activeCount == 0 ? "Add at least one condition."
+                                                             : "\(count) stock\(count == 1 ? "" : "s") match right now")
                             .font(.caption)
                             .foregroundStyle(count > 0 ? .green : .secondary)
                         Spacer()
                         Button("Check now") { Task { await vm.checkBuyTrigger(trigger, force: true) } }
-                            .disabled(vm.isSendingEmail || trigger.conditions.isEmpty)
+                            .disabled(vm.isSendingEmail || trigger.filter.activeCount == 0)
                             .help("Emails every stock that matches right now")
+                    }
+                } header: {
+                    HStack {
+                        Text(trigger.name.isEmpty ? "Buy trigger" : trigger.name)
+                        Spacer()
+                        FormulaHelpButton()
                     }
                 }
                 .opacity(trigger.isEnabled ? 1 : 0.6)
@@ -231,25 +228,6 @@ private struct AlertHistoryTab: View {
                     Button("Clear history") { vm.alertState.log.removeAll() }
                 }
             }
-        }
-    }
-}
-
-// MARK: - Shared
-
-/// Picker over the sheet's columns that keeps a typed name even if the column isn't in the data yet.
-struct ColumnPicker: View {
-    @EnvironmentObject var vm: ScreenerViewModel
-    let title: String
-    @Binding var selection: String
-
-    var body: some View {
-        Picker(title, selection: $selection) {
-            if !vm.headers.contains(selection) {
-                Text(selection.isEmpty ? "Choose…" : "\(selection)\(vm.resolveColumn(selection) == nil ? " (not found)" : "")")
-                    .tag(selection)
-            }
-            ForEach(vm.headers, id: \.self) { Text($0).tag($0) }
         }
     }
 }

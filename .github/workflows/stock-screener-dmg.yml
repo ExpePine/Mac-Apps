@@ -26,6 +26,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Run tests (filters, formulas, parsing)
+        run: swift test
+
       - name: Build app and DMG
         run: |
           chmod +x scripts/build-dmg.sh

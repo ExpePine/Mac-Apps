@@ -69,24 +69,31 @@ enum SheetService {
         return comps?.url
     }
 
-    static func fetch(from url: URL) async throws -> (headers: [String], rows: [SheetRow], hash: String) {
+    static func fetch(from url: URL) async throws -> (table: SheetTable, hash: String) {
         let request = URLRequest(url: url,
                                  cachePolicy: .reloadIgnoringLocalCacheData,
-                                 timeoutInterval: 30)
+                                 timeoutInterval: 60)
         let (data, response) = try await URLSession.shared.data(for: request)
 
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw SheetError.http(http.statusCode)
         }
+        // Parse off the main thread so the windows stay responsive.
+        return try await Task.detached(priority: .userInitiated) {
+            try SheetService.parse(data)
+        }.value
+    }
+
+    static func parse(_ data: Data) throws -> (table: SheetTable, hash: String) {
         guard let text = String(data: data, encoding: .utf8) else { throw SheetError.notCSV }
 
-        let start = text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(15).lowercased()
+        let start = text.prefix(200).trimmingCharacters(in: .whitespacesAndNewlines).prefix(15).lowercased()
         if start.hasPrefix("<!doctype html") || start.hasPrefix("<html") {
             throw SheetError.notCSV
         }
 
-        let table = CSVParser.parse(text)
-        guard let headerRow = table.first else { throw SheetError.empty }
+        let csv = CSVParser.parse(text)
+        guard let headerRow = csv.first else { throw SheetError.empty }
 
         // Clean + de-duplicate headers
         var seen: [String: Int] = [:]
@@ -103,16 +110,18 @@ enum SheetService {
         }
 
         var rows: [SheetRow] = []
-        for (i, cells) in table.dropFirst().enumerated() {
-            if cells.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) { continue }
-            var dict: [String: String] = [:]
-            for (j, header) in headers.enumerated() {
-                dict[header] = j < cells.count ? cells[j] : ""
-            }
-            rows.append(SheetRow(id: i, values: dict))
+        rows.reserveCapacity(max(0, csv.count - 1))
+        let width = headers.count
+        for (i, raw) in csv.dropFirst().enumerated() {
+            if raw.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) { continue }
+            var cells = raw
+            if cells.count < width { cells.append(contentsOf: repeatElement("", count: width - cells.count)) }
+            if cells.count > width { cells.removeLast(cells.count - width) }
+            rows.append(SheetRow(id: i, cells: cells, numbers: cells.map { NumberParser.parse($0) }))
         }
+
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        return (headers, rows, hash)
+        return (SheetTable(headers: headers, rows: rows), hash)
     }
 }
 
