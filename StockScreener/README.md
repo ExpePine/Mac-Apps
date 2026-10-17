@@ -64,15 +64,24 @@ The **E** button on the Filter screen opens your rules. Each rule has advanced c
 
 Use the **Freeze** menu on the Data Import or Filter screen to keep the first 1, 2 or 3 columns visible while you scroll sideways. The header row always stays fixed.
 
-### Stock history animation
+### Replay the last 30 days (Filter screen)
 
-Select a stock in either table and click **▶ Animate**, double-click its row, or press ⇧⌘3. The animation plays that stock day by day over the last 30 stored days:
-- a card showing each value on that day, colored by your cell rules, with ▲/▼ changes from the previous day
-- a small chart for every numeric column, with a marker on the current day
+Click **▶ Animate** to show a **time slider** under the Filter table. Press **Play** (or Space) and the whole Filter table replays day by day, from 30 stored days ago up to **Live**, with the same columns, filters, sort, colors and E statuses applied to each day's data. You can drag the slider to any day, step one day at a time, change the speed, or click **Live** to come back to today. While a past day is shown, an orange banner names the date.
 
-You can play, pause, step through the days, change the speed, and choose which columns to show.
+**How history is stored:** after each import, the app saves one snapshot per trading day, dated from `D_MONTH`/`D_DAY`. Each snapshot is compressed with Apple's LZFSE format and kept in `~/Library/Application Support/StockScreener/History/`, for 45 days by default. The sheet only holds today's data, so the replay fills up over time; 30 trading days takes about 6 weeks.
 
-**How history is stored:** after each import, the app saves one snapshot per trading day, dated from `D_MONTH`/`D_DAY`. Each snapshot is compressed with Apple's LZFSE format and stored in `~/Library/Application Support/StockScreener/History/`. By default 45 days are kept; you can change this at the bottom of the history window. The sheet itself only holds today's data, so history builds up from the day you install this version.
+### E column: Email / Alert per stock
+
+The first column on the Filter screen is **E**:
+- **Grey**: no rule for this stock.
+- **Orange**: a rule is set for this stock but isn't met right now.
+- **Green**: an Email / Alert rule is met for this stock.
+
+Click a stock's **E** to add or edit its rules. Each rule uses advanced conditions and has **Email** and **Alert in app** checkboxes. Rules for *all* stocks are under **Rules** in the toolbar.
+
+### Alerts browser
+
+**Alerts** (⇧⌘3, the bell button) lists every alert that has fired: when it fired, the stock, the rule, whether it was an alert or an email, and the values at that moment. You can search, filter by period (today / 7 days / 30 days / all), type and rule, and click an alert to see its details. The toolbar shows how many alerts are new.
 
 ### Column names
 

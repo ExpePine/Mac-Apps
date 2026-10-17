@@ -1,0 +1,39 @@
+import Foundation
+
+/// One alert that fired: a rule was met by a stock (and maybe emailed).
+struct AlertEvent: Identifiable, Codable, Equatable {
+    enum Kind: String, Codable { case alert, email }
+
+    var id = UUID()
+    var date = Date()
+    var kind: Kind
+    var ruleID: UUID
+    var ruleName: String
+    var stock: String
+    var dataDay: String          // trading day of the data (yyyy-MM-dd)
+    var values: [String]         // "COLUMN: value" for the columns the rule uses
+    var conditions: String       // the rule in words
+}
+
+/// Alert history, kept as JSON in Application Support (newest first, up to 5,000 events).
+enum AlertEventStore {
+    static let maxEvents = 5_000
+
+    private static var fileURL: URL {
+        HistoryStore.folder.deletingLastPathComponent().appendingPathComponent("alerts.json")
+    }
+
+    static func load() -> [AlertEvent] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let events = try? JSONDecoder().decode([AlertEvent].self, from: data) else { return [] }
+        return events
+    }
+
+    static func save(_ events: [AlertEvent]) {
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(Array(events.prefix(maxEvents))) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+}

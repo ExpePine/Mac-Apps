@@ -272,14 +272,15 @@ struct ConditionsMetView: View {
                                 .font(.headline)
                             FlowList(items: alert.stocks) { stock in
                                 vm.selectedStock = stock
-                                openWindow(id: "history")
+                                dismiss()
+                                openWindow(id: "alertlog")
                             }
                         }
                     }
                 }
             }
             .frame(maxHeight: 360)
-            Text("Click a stock to animate its history.")
+            Text("Click a stock to see it in the Alerts list.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Edit rules…") {

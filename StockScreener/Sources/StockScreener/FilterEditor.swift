@@ -357,18 +357,36 @@ struct FreezeMenu: View {
     }
 }
 
-/// Opens the animation for the selected stock.
+/// Shows the time slider on the Filter screen (replay the last 30 days).
 struct AnimateButton: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Button {
-            openWindow(id: "history")
+            if vm.showTimeline { vm.closeTimeline() } else { vm.openTimeline() }
+            openWindow(id: "filter")
         } label: {
-            Label("Animate", systemImage: "play.circle")
+            Label("Animate", systemImage: vm.showTimeline ? "play.circle.fill" : "play.circle")
         }
-        .help(vm.selectedStock.map { "Animate \($0) over the last 30 days (⇧⌘3). Tip: double-click a row." }
-              ?? "Select a row, then animate that stock over the last 30 days (⇧⌘3)")
+        .help("Replay the Filter table over the last 30 days with a time slider")
+    }
+}
+
+/// Opens the Alerts browser; shows how many alerts are new.
+struct AlertsButton: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button {
+            openWindow(id: "alertlog")
+        } label: {
+            let n = vm.unreadAlertCount
+            Label(n > 0 ? "Alerts (\(n))" : "Alerts", systemImage: n > 0 ? "bell.badge.fill" : "bell")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(n > 0 ? Color.orange : Color.primary)
+        }
+        .help("Browse alerts that have fired (⇧⌘3)")
     }
 }

@@ -101,6 +101,7 @@ extension ScreenerViewModel {
             .compactMap { t in
                 let matches = buyMatches(t)
                 guard !matches.isEmpty else { return nil }
+                recordAlertEvents(rule: t, rows: matches, kind: .alert)
                 return InAppAlert(triggerID: t.id, name: t.name, stocks: matches.map { rowKey($0) })
             }
     }
@@ -145,9 +146,9 @@ extension ScreenerViewModel {
     // Buy triggers
 
     func buyMatches(_ trigger: BuyTrigger) -> [SheetRow] {
-        var ignored: [String] = []
-        guard let predicate = FilterCompiler.compile(trigger.filter, table: table, issues: &ignored) else { return [] }
-        return rows.filter(predicate)
+        guard let rule = Self.compileRules([trigger], table: table).first, rule.predicate != nil else { return [] }
+        let label = labelIndex
+        return rows.filter { rule.matches($0, label) }
     }
 
     func triggerIssues(_ trigger: BuyTrigger) -> [String] {
@@ -226,6 +227,7 @@ extension ScreenerViewModel {
         """
 
         if await sendEmail(subject: subject, body: body, html: html, recipients: trigger.recipients, logTitle: trigger.name) {
+            recordAlertEvents(rule: trigger, rows: fresh, kind: .email)
             var sent = alertState.buySent[trigger.id.uuidString] ?? []
             for row in fresh where !sent.contains(rowKey(row)) { sent.append(rowKey(row)) }
             alertState.buySent[trigger.id.uuidString] = sent

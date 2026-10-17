@@ -17,6 +17,7 @@ struct FilterView: View {
         } detail: {
             VStack(spacing: 0) {
                 AlertsBanner()
+                PastDayBanner()
                 if !vm.hasData {
                     placeholder
                 } else {
@@ -44,14 +45,18 @@ struct FilterView: View {
                                        }
                                    },
                                    onSelectRow: { vm.selectStock(from: $0) },
-                                   onDoubleClickRow: { row in
-                                       vm.selectStock(from: row)
-                                       openWindow(id: "history")
-                                   },
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
-                                   markedColumns: vm.columnsWithRules)
+                                   markedColumns: vm.columnsWithRules,
+                                   eColor: { row in (vm.eStatus[row.id] ?? .none).nsColor },
+                                   ePanel: { row in
+                                       AnyView(StockRulesView(stock: vm.stockName(row), row: row).environmentObject(vm))
+                                   })
+                    if vm.showTimeline {
+                        Divider()
+                        TimelineBar()
+                    }
                     Divider()
                     statusBar
                 }
@@ -77,10 +82,10 @@ struct FilterView: View {
                 Button {
                     vm.showRulesEditor = true
                 } label: {
-                    Label("E", systemImage: "envelope.badge")
-                        .labelStyle(.titleAndIcon)
+                    Label("Rules", systemImage: "envelope.badge")
                 }
-                .help("E — Email and/or alert me when conditions are met")
+                .help("All Email / Alert rules (per-stock rules are on each row's E button)")
+                AlertsButton()
                 AnimateButton()
                 FreezeMenu()
                 Button {

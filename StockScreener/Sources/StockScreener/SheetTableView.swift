@@ -24,6 +24,9 @@ struct SheetTableView: NSViewRepresentable {
     var columnMenu: ((Int) -> AnyView)? = nil
     /// Columns that have conditions or colors (their ▼ is highlighted).
     var markedColumns: Set<Int> = []
+    /// When set, an "E" column is shown first: its color per row, and the panel it opens when clicked.
+    var eColor: ((SheetRow) -> NSColor)? = nil
+    var ePanel: ((SheetRow) -> AnyView)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -85,12 +88,15 @@ struct SheetTableView: NSViewRepresentable {
         let scrolling = Array(visible.dropFirst(frozenCount))
 
         // Rebuild columns only when the column set changes.
-        let signature = "\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
+        let signature = "E\(eColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
             + "#" + originalHeaders.joined(separator: "|")
         if signature != c.columnSignature {
             c.columnSignature = signature
             c.setColumns(frozen, on: left, parent: self)
             c.setColumns(scrolling, on: right, parent: self)
+            if eColor != nil {
+                c.addEColumn(to: frozen.isEmpty ? right : left)
+            }
             c.updateLeftWidth()
         }
 
@@ -159,6 +165,7 @@ struct SheetTableView: NSViewRepresentable {
             table.delegate = self
             table.dataSource = self
             table.target = self
+            table.action = #selector(clicked(_:))
             table.doubleAction = #selector(doubleClicked(_:))
             return table
         }
@@ -234,7 +241,47 @@ struct SheetTableView: NSViewRepresentable {
             parent?.rows.count ?? 0
         }
 
+        static let eID = NSUserInterfaceItemIdentifier("E")
+        private let eCellID = NSUserInterfaceItemIdentifier("ECell")
+
+        func addEColumn(to table: NSTableView) {
+            let column = NSTableColumn(identifier: Self.eID)
+            column.width = 30
+            column.minWidth = 30
+            column.maxWidth = 30
+            column.title = "E"
+            column.headerToolTip = "E — Email / Alert rules for this stock. Grey: none · Orange: rule set · Green: condition met"
+            column.headerCell.alignment = .center
+            table.addTableColumn(column)
+            table.moveColumn(table.numberOfColumns - 1, toColumn: 0)
+            updateLeftWidth()
+        }
+
+        @objc func clicked(_ sender: NSTableView) {
+            let row = sender.clickedRow, col = sender.clickedColumn
+            guard let parent, let build = parent.ePanel, row >= 0, row < parent.rows.count,
+                  col >= 0, col < sender.tableColumns.count,
+                  sender.tableColumns[col].identifier == Self.eID else { return }
+            popover?.close()
+            let hosting = NSHostingController(rootView: build(parent.rows[row]))
+            hosting.sizingOptions = [.preferredContentSize]
+            let pop = NSPopover()
+            pop.contentViewController = hosting
+            pop.behavior = .transient
+            pop.show(relativeTo: sender.frameOfCell(atColumn: col, row: row), of: sender, preferredEdge: .maxX)
+            popover = pop
+        }
+
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            if let tableColumn, tableColumn.identifier == Self.eID, let parent, row < parent.rows.count {
+                let cell = (tableView.makeView(withIdentifier: eCellID, owner: nil) as? ECellView) ?? {
+                    let v = ECellView()
+                    v.identifier = eCellID
+                    return v
+                }()
+                cell.configure(color: parent.eColor?(parent.rows[row]) ?? .clear)
+                return cell
+            }
             guard let parent, let tableColumn, let index = Self.columnIndex(tableColumn),
                   row < parent.rows.count else { return nil }
             let data = parent.rows[row]
@@ -351,5 +398,35 @@ final class MenuHeaderCell: NSTableHeaderCell {
         let size = arrow.size()
         arrow.draw(at: NSPoint(x: cellFrame.maxX - Self.buttonWidth + (Self.buttonWidth - size.width) / 2,
                                y: cellFrame.midY - size.height / 2))
+    }
+}
+
+/// The small "E" badge in the E column.
+final class ECellView: NSTableCellView {
+    private let badge = NSTextField(labelWithString: "E")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        badge.font = .systemFont(ofSize: 11, weight: .bold)
+        badge.alignment = .center
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = 4
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(badge)
+        NSLayoutConstraint.activate([
+            badge.centerXAnchor.constraint(equalTo: centerXAnchor),
+            badge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badge.widthAnchor.constraint(equalToConstant: 20),
+            badge.heightAnchor.constraint(equalToConstant: 16),
+        ])
+        toolTip = "Click to set Email / Alert rules for this stock"
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(color: NSColor) {
+        badge.layer?.backgroundColor = color.cgColor
+        let strong = color == .systemGreen || color == .systemOrange
+        badge.textColor = strong ? .white : .secondaryLabelColor
     }
 }

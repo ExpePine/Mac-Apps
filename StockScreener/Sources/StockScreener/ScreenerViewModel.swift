@@ -54,7 +54,25 @@ final class ScreenerViewModel: ObservableObject {
     private var launchAlertDone = false
 
     // History / animation
-    @Published var selectedStock: String?        // stock picked in a table (for the animation)
+    @Published var selectedStock: String?        // stock picked in a table
+    // Filter time slider: nil = live data; otherwise an index into timelineDays
+    @Published var showTimeline = false
+    @Published private(set) var timelineDays: [String] = []
+    @Published private(set) var timelineIndex: Int?
+    @Published private(set) var timelineTable: SheetTable?
+    @Published private(set) var isTimelineLoading = false
+    @Published var isTimelinePlaying = false
+    var timelineCache: [String: SheetTable] = [:]
+    var timelineCacheOrder: [String] = []
+    var timelinePlayTask: Task<Void, Never>?
+    var timelineLoadTask: Task<Void, Never>?
+
+    // E column: per-row status on the Filter screen
+    @Published private(set) var eStatus: [Int: EState] = [:]
+
+    // Alerts browser
+    @Published var alertEvents: [AlertEvent] = AlertEventStore.load()
+    @Published var alertsLastSeen: Date = (UserDefaults.standard.object(forKey: "StockScreener.alertsLastSeen") as? Date) ?? .distantPast
     @Published private(set) var historyDays: [String] = HistoryStore.days()
     @Published private(set) var historyBytes: Int = HistoryStore.totalBytes()
     @Published var errorMessage: String?
@@ -265,6 +283,8 @@ final class ScreenerViewModel: ObservableObject {
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = CellPainter(settings.cellRules, table: newTable)
+        clearTimelineCache()
+        if let i = timelineIndex { setTimelinePosition(i) }   // re-align the past day to the new columns
         scheduleImportRecompute(delayMs: 0)
         scheduleFilterRecompute(delayMs: 0)
         scheduleTriggerCounts(delayMs: 0)
@@ -308,8 +328,9 @@ final class ScreenerViewModel: ObservableObject {
             painter = CellPainter(settings.cellRules, table: table)
             filterVersion += 1                           // repaint
         }
-        if old.buyTriggers.map(\.filter) != settings.buyTriggers.map(\.filter) {
+        if old.buyTriggers != settings.buyTriggers {
             scheduleTriggerCounts(delayMs: 400)
+            scheduleFilterRecompute(delayMs: 300)        // refresh E column colors
         }
     }
 
@@ -340,10 +361,12 @@ final class ScreenerViewModel: ObservableObject {
         }
     }
 
-    private func scheduleFilterRecompute(delayMs: UInt64) {
+    func scheduleFilterRecompute(delayMs: UInt64) {
         filterTask?.cancel()
-        let table = self.table
+        let table = self.timelineTable ?? self.table      // a past day while the time slider is used
         let group = settings.filterGroup
+        let rules = settings.buyTriggers.filter { $0.isEnabled }
+        let labelCol = labelIndex
         let sortColumn = table.index(of: settings.filterSortColumn)
         let descending = settings.filterSortDescending
         filterTask = Task { [weak self] in
@@ -352,14 +375,17 @@ final class ScreenerViewModel: ObservableObject {
             self?.isFiltering = true
             var issues: [String] = []
             let predicate = FilterCompiler.compile(group, table: table, issues: &issues)
-            let result = await Task.detached(priority: .userInitiated) { () -> [SheetRow] in
+            let compiledRules = Self.compileRules(rules, table: table)
+            let (result, status) = await Task.detached(priority: .userInitiated) { () -> ([SheetRow], [Int: EState]) in
                 var rows = predicate.map { table.rows.filter($0) } ?? table.rows
                 if let c = sortColumn { rows = Sorter.sort(rows, column: c, descending: descending) }
-                return rows
+                let status = Self.eStatuses(rows: rows, rules: compiledRules, labelColumn: labelCol)
+                return (rows, status)
             }.value
             if Task.isCancelled { return }
             guard let self else { return }
             self.filterRows = result
+            self.eStatus = status
             self.filterIssues = issues
             self.filterVersion += 1
             self.isFiltering = false
@@ -373,15 +399,12 @@ final class ScreenerViewModel: ObservableObject {
         countsTask = Task { [weak self] in
             if delayMs > 0 { try? await Task.sleep(nanoseconds: delayMs * 1_000_000) }
             if Task.isCancelled { return }
-            var compiled: [(UUID, RowPredicate?)] = []
-            for t in triggers {
-                var ignored: [String] = []
-                compiled.append((t.id, FilterCompiler.compile(t.filter, table: table, issues: &ignored)))
-            }
+            let compiled = Self.compileRules(triggers, table: table)
+            let labelCol = self?.labelIndex
             let counts = await Task.detached(priority: .utility) { () -> [UUID: Int] in
                 var out: [UUID: Int] = [:]
-                for (id, p) in compiled {
-                    out[id] = p.map { pred in table.rows.reduce(0) { $0 + (pred($1) ? 1 : 0) } } ?? 0
+                for rule in compiled {
+                    out[rule.id] = table.rows.reduce(0) { $0 + (rule.matches($1, labelCol) ? 1 : 0) }
                 }
                 return out
             }.value

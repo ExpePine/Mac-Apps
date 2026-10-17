@@ -33,11 +33,7 @@ struct ImportView: View {
                                            vm.importSortDescending = false
                                        }
                                    },
-                                   onSelectRow: { vm.selectStock(from: $0) },
-                                   onDoubleClickRow: { row in
-                                       vm.selectStock(from: row)
-                                       openWindow(id: "history")
-                                   })
+                                   onSelectRow: { vm.selectStock(from: $0) })
                     Divider()
                     statusBar
                 } else {
@@ -49,6 +45,7 @@ struct ImportView: View {
         .searchable(text: $vm.importSearch, placement: .toolbar, prompt: "Search all columns…")
         .toolbar {
             ToolbarItemGroup {
+                AlertsButton()
                 AnimateButton()
                 FreezeMenu()
                 Button {
