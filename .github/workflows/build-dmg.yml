@@ -3,9 +3,11 @@ name: Build DMG
 on:
   push:
     branches: [main]
-    paths-ignore:      # NSE Observations has its own workflow
+    paths-ignore:      # NSE Observations and Stock Screener have their own workflows
       - "NSEObservations/**"
       - ".github/workflows/nse-observations-dmg.yml"
+      - "StockScreener/**"
+      - ".github/workflows/stock-screener-dmg.yml"
   workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
 
 permissions:

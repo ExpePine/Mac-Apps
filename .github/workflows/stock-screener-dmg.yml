@@ -1,0 +1,58 @@
+name: Stock Screener DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "StockScreener/**"
+      - ".github/workflows/stock-screener-dmg.yml"
+  workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: StockScreener
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build app and DMG
+        run: |
+          chmod +x scripts/build-dmg.sh
+          ./scripts/build-dmg.sh "0.1.${{ github.run_number }}" "${{ github.run_number }}"
+
+      - name: Upload DMG (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: StockScreener-dmg
+          path: StockScreener/dist/*.dmg
+
+      - name: Publish Release with DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="stock-screener-build-${{ github.run_number }}"
+          gh release create "$TAG" dist/*.dmg \
+            --title "Stock Screener (build ${{ github.run_number }})" \
+            --notes "Download the DMG below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch. Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
+
+      - name: Update stable "stock-screener-latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete stock-screener-latest --yes --cleanup-tag || true
+          gh release create stock-screener-latest dist/*.dmg \
+            --title "Stock Screener (latest)" \
+            --notes "Always the newest Stock Screener build (currently build ${{ github.run_number }}). Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
