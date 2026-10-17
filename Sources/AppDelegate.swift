@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         plans = PlanStore(directory: store.directory)
         coach.plans = plans
         archive = ReportArchive(baseDirectory: store.directory, store: store, usage: usage, goals: goals)
+        archive.plans = plans
         reports = ReportService(settings: settings, store: store, usage: usage, goals: goals, archive: archive)
         super.init()
 

@@ -11,10 +11,22 @@ struct DayUsage: Codable {
     var activeSeconds: Double = 0
     var firstActive: Date?
     var lastActive: Date?
+    /// When each app/site was in front, as seconds since midnight (recorded from this version on).
+    var segments: [UsageSegment]? = nil
 
     func top(_ dict: [String: Double], _ n: Int) -> [(name: String, seconds: Double)] {
         dict.sorted { $0.value > $1.value }.prefix(n).map { ($0.key, $0.value) }
     }
+}
+
+/// A continuous stretch on one app (and site), in seconds since midnight.
+struct UsageSegment: Codable, Equatable {
+    var start: Int
+    var end: Int
+    var app: String
+    var site: String?
+
+    var seconds: Int { max(0, end - start) }
 }
 
 func durationText(_ seconds: Double) -> String {
@@ -64,6 +76,19 @@ final class UsageStore {
         day.activeSeconds += seconds
         if day.firstActive == nil { day.firstActive = date }
         day.lastActive = date
+
+        // Extend the last segment if it's the same app/site and continuous; else start a new one.
+        let midnight = Calendar.current.startOfDay(for: date)
+        let end = Int(date.timeIntervalSince(midnight))
+        let start = max(0, end - Int(seconds.rounded()))
+        var segs = day.segments ?? []
+        if var last = segs.last, last.app == app, last.site == site, start - last.end <= 20 {
+            last.end = end
+            segs[segs.count - 1] = last
+        } else {
+            segs.append(UsageSegment(start: start, end: end, app: app, site: site))
+        }
+        day.segments = segs
         cache[key] = day
         dirty.insert(key)
     }

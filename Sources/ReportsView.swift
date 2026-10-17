@@ -12,6 +12,9 @@ struct ReportsView: View {
     @State private var anchor = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
     @State private var generating = false
     @State private var progress = ""
+    @State private var replayDay: ReplayDay?
+
+    struct ReplayDay: Identifiable { let id = UUID(); let day: Date }
 
     private var interval: DateInterval { archive.interval(kind, containing: anchor) }
     private var isCurrentPeriod: Bool { interval.contains(Date()) }
@@ -32,10 +35,11 @@ struct ReportsView: View {
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+                .sheet(item: $replayDay) { r in DayStoryView(story: archive.story(for: r.day)) }
             Divider()
             if kind != .day && !missing.isEmpty { missingBanner }
             if kind == .calendar {
-                CalendarGrid(archive: archive, month: anchor) { day in
+                CalendarGrid(archive: archive, month: anchor, onReplay: { replayDay = ReplayDay(day: $0) }) { day in
                     anchor = day
                     kind = .day
                 }
@@ -73,6 +77,12 @@ struct ReportsView: View {
 
             Button("Today") { anchor = Date() }
                 .disabled(isCurrentPeriod)
+
+            if kind == .day {
+                Button { replayDay = ReplayDay(day: anchor) } label: { Label("Replay", systemImage: "play.circle") }
+                    .help("Animated replay of this day")
+                    .disabled(!archive.hasActivity(anchor))
+            }
 
             Menu {
                 Button("Timeline data (CSV)…", action: exportCSV)
@@ -223,6 +233,7 @@ struct ReportWebView: NSViewRepresentable {
 struct CalendarGrid: View {
     @ObservedObject var archive: ReportArchive
     let month: Date
+    var onReplay: (Date) -> Void = { _ in }
     let onSelect: (Date) -> Void
 
     private let palette: [Color] = [
@@ -285,6 +296,11 @@ struct CalendarGrid: View {
                                     isToday: cal.isDateInToday(date),
                                     isFuture: date > Date())
                                 .onTapGesture { onSelect(date) }
+                                .contextMenu {
+                                    Button("Open report") { onSelect(date) }
+                                    Button("Replay this day") { onReplay(date) }
+                                        .disabled(!archive.hasActivity(date))
+                                }
                         } else {
                             Color.clear.frame(height: 96)
                         }

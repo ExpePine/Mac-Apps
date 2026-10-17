@@ -31,9 +31,11 @@ final class ReportArchive: ObservableObject {
     /// Bumped whenever a report is saved, so views refresh.
     @Published private(set) var version = 0
 
-    private let store: EntryStore
-    private let usage: UsageStore
-    private let goals: GoalsStore
+    let store: EntryStore
+    let usage: UsageStore
+    let goals: GoalsStore
+    /// Set by the app delegate; used for flow breaks in the day replay.
+    weak var plans: PlanStore?
 
     init(baseDirectory: URL, store: EntryStore, usage: UsageStore, goals: GoalsStore) {
         directory = baseDirectory.appendingPathComponent("Reports/daily", isDirectory: true)
