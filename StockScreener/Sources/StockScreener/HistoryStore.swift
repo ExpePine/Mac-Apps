@@ -100,7 +100,7 @@ enum HistoryStore {
             }) else { continue }
 
             var match: [String]?
-            for line in lines where line.contains(needle) {
+            for line in lines where line.range(of: needle, options: .caseInsensitive) != nil {
                 guard let cells = CSVParser.parse(String(line)).first, labelIndex < cells.count else { continue }
                 if cells[labelIndex].trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(needle) == .orderedSame {
                     match = cells
