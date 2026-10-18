@@ -14,6 +14,7 @@ struct DailyRecap: Codable {
     var dayText: String
     var headline: String
     var tagline: String?        // exactly 3 words, shown in the calendar
+    var generatedAt: Date?      // when this recap was built (to spot stale reports)
     var categories: [CategoryMinutes] = []
     var timeline: [Block] = []
     var solved: [String] = []
@@ -136,6 +137,7 @@ enum RecapBuilder {
             tagline = top   // no AI: fall back to the main category
         }
         recap.tagline = tagline.isEmpty ? nil : tagline
+        recap.generatedAt = Date()
         return recap
     }
 

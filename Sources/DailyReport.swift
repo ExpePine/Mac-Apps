@@ -274,7 +274,8 @@ final class ReportService: ObservableObject {
         guard defaults.string(forKey: "reportArchivedDay") != key else { return }
         let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now)) ?? now
         defaults.set(key, forKey: "reportArchivedDay")
-        if !archive.hasRecord(yesterday) && archive.hasActivity(yesterday) {
+        // Also replaces a report that was generated "so far" during the day.
+        if archive.hasActivity(yesterday) && (!archive.hasRecord(yesterday) || archive.isStale(yesterday)) {
             await generateReport(for: yesterday)
         }
     }

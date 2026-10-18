@@ -40,6 +40,8 @@ final class Navigator: ObservableObject {
     @Published var selectedPlan: UUID?
     /// A new draft plan that should ask the coach for steps as soon as it opens.
     @Published var autoSuggestPlan: UUID?
+    /// Open the priorities sheet and run a full analysis.
+    @Published var openAnalyze = false
 }
 
 struct MainWindowView: View {
@@ -78,7 +80,7 @@ struct MainWindowView: View {
         case .plans:
             PlansView(app: app, plans: app.plans, nav: nav)
         case .insights:
-            InsightsView(coach: app.coach, store: app.store)
+            InsightsView(app: app, analysis: app.analysis, nav: nav)
         case .stuck:
             StuckView(coach: app.coach, stuckStore: app.stuckStore)
         case .reports:
@@ -184,6 +186,11 @@ struct TodayView: View {
                     PageHeader(title: "Today",
                                subtitle: Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
                     Spacer()
+                    Button {
+                        app.nav.openAnalyze = true
+                        app.showMain(.insights)
+                    } label: { Label("Analyze", systemImage: "sparkles") }
+                        .controlSize(.large)
                     Button { app.showMain(.stuck) } label: { Label("I'm Stuck", systemImage: "lifepreserver") }
                         .controlSize(.large)
                     Button { app.logNow() } label: { Label("Log now", systemImage: "square.and.pencil") }
@@ -442,125 +449,7 @@ struct StepsList: View {
     }
 }
 
-// MARK: - Insights
-
-struct InsightsView: View {
-    let coach: CoachService
-    @ObservedObject var store: EntryStore
-
-    @State private var report: PatternReport?
-    @State private var loading = false
-    @State private var error: String?
-    @State private var problem = ""
-    @State private var breakdown: BreakdownRequest?
-
-    struct BreakdownRequest: Identifiable {
-        let id = UUID()
-        let text: String
-    }
-
-    private var recent: [Entry] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date()
-        return store.entries.filter { $0.periodEnd > cutoff }
-    }
-
-    private var answered: [Entry] { recent.filter { $0.status != .missed && $0.status != .skipped } }
-
-    private var responseRate: String {
-        guard !recent.isEmpty else { return "–" }
-        return "\(Int((Double(answered.count) / Double(recent.count) * 100).rounded()))%"
-    }
-
-    private var onPlan: String {
-        let checked = answered.filter { $0.goalAligned != nil }
-        guard !checked.isEmpty else { return "–" }
-        return "\(Int((Double(checked.filter { $0.goalAligned == true }.count) / Double(checked.count) * 100).rounded()))%"
-    }
-
-    private var successes: Int {
-        answered.filter { RecapBuilder.keywordSuccess(CoachService.text(of: $0)) == true }.count
-    }
-
-    private var bestHour: String {
-        var counts: [Int: Int] = [:]
-        for e in answered where e.goalAligned == true || RecapBuilder.keywordSuccess(CoachService.text(of: e)) == true {
-            counts[Calendar.current.component(.hour, from: e.periodStart), default: 0] += 1
-        }
-        guard let best = counts.max(by: { $0.value < $1.value })?.key else { return "–" }
-        let start = Calendar.current.date(bySettingHour: best, minute: 0, second: 0, of: Date()) ?? Date()
-        return start.formatted(date: .omitted, time: .shortened)
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                PageHeader(title: "Insights", subtitle: "Your last 14 days")
-
-                HStack(spacing: 12) {
-                    StatTile(value: responseRate, label: "Check-ins answered", symbol: "checklist", tint: .accentColor)
-                    StatTile(value: onPlan, label: "On plan", symbol: "scope", tint: .green)
-                    StatTile(value: "\(successes)", label: "Successes", symbol: "star.fill", tint: .yellow)
-                    StatTile(value: bestHour, label: "Best hour", symbol: "bolt.fill", tint: .orange)
-                }
-
-                Card(title: "Patterns", symbol: "waveform.path.ecg") {
-                    if loading {
-                        HStack { ProgressView().controlSize(.small); Text("Reading your last 14 days…").foregroundStyle(.secondary) }
-                    } else if let error {
-                        Text(error).foregroundStyle(.red)
-                    } else if let report {
-                        if let best = report.bestTime {
-                            Label(best, systemImage: "bolt.fill").foregroundStyle(.orange)
-                        }
-                        ForEach(report.patterns) { InsightRow(item: $0, symbol: "eye") }
-                    } else {
-                        Text("Find out when you do your best work, what pulls you off-plan, and where time goes.")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Spacer()
-                        Button(report == nil ? "Analyze my patterns" : "Analyze again") { Task { await analyze() } }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(loading)
-                    }
-                }
-
-                if let report, !report.suggestions.isEmpty {
-                    Card(title: "Try this", symbol: "lightbulb") {
-                        ForEach(report.suggestions) { InsightRow(item: $0, symbol: "arrow.right.circle") }
-                    }
-                }
-
-                Card(title: "Break down a problem", symbol: "sparkles") {
-                    Text("Turn something big or vague into small steps, using your history.")
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        TextField("e.g. Finalize MV2 picker BOM and order samples", text: $problem)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit(startBreakdown)
-                        Button("Break down", action: startBreakdown)
-                            .disabled(problem.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-            }
-            .padding(28)
-        }
-        .sheet(item: $breakdown) { req in BreakdownSheet(problem: req.text, coach: coach) }
-    }
-
-    private func startBreakdown() {
-        let t = problem.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return }
-        breakdown = BreakdownRequest(text: t)
-    }
-
-    private func analyze() async {
-        loading = true
-        error = nil
-        do { report = try await coach.analyzePatterns() } catch { self.error = error.localizedDescription }
-        loading = false
-    }
-}
+// MARK: - Insights (see Analysis.swift)
 
 struct InsightRow: View {
     let item: InsightItem

@@ -13,6 +13,7 @@ struct ReportsView: View {
     @State private var generating = false
     @State private var progress = ""
     @State private var replayDay: ReplayDay?
+    @State private var lastAutoRefresh: [String: Date] = [:]
 
     struct ReplayDay: Identifiable { let id = UUID(); let day: Date }
 
@@ -32,9 +33,19 @@ struct ReportsView: View {
 
     private var missing: [Date] { _ = archive.version; return archive.missingDays(kind, containing: anchor) }
 
+    /// The day that should be kept up to date on screen right now.
+    private var liveDay: Date? {
+        switch kind {
+        case .day: return anchor
+        case .calendar: return isCurrentPeriod ? Date() : nil
+        default: return nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+                .task(id: "\(kind.rawValue)-\(UsageStore.key(anchor))") { await keepFresh() }
                 .sheet(item: $replayDay) { r in DayStoryView(story: archive.story(for: r.day)) }
             Divider()
             if kind != .day && !missing.isEmpty { missingBanner }
@@ -126,13 +137,24 @@ struct ReportsView: View {
         if let html {
             ReportWebView(html: html)
                 .overlay(alignment: .topTrailing) {
-                    if kind == .day && !generating {
-                        Button { Task { await generate([anchor]) } } label: {
-                            Label("Regenerate", systemImage: "arrow.clockwise")
+                    if kind == .day {
+                        HStack(spacing: 8) {
+                            if generating {
+                                ProgressView().controlSize(.small)
+                                Text("Updating…")
+                            } else {
+                                Text(freshnessText)
+                                Button { Task { await generate([anchor]) } } label: {
+                                    Label("Refresh", systemImage: "arrow.clockwise")
+                                }
+                                .help("Rebuild this day's report from the latest log")
+                            }
                         }
+                        .font(.caption)
                         .controlSize(.small)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.regularMaterial, in: Capsule())
                         .padding(12)
-                        .help("Rebuild this day's report from the latest log")
                     }
                 }
         } else {
@@ -142,13 +164,13 @@ struct ReportsView: View {
                     .font(.title3.weight(.semibold))
                 if archive.hasActivity(anchor) {
                     Text(Calendar.current.isDateInToday(anchor)
-                         ? "Today's report is created tomorrow morning. You can build one for today so far."
+                         ? "Today's report builds automatically and keeps updating while you look at it."
                          : "Build it from this day's check-ins and screen time.")
                         .foregroundStyle(.secondary)
                     if generating {
                         ProgressView().controlSize(.small)
                     } else {
-                        Button(Calendar.current.isDateInToday(anchor) ? "Generate (so far)" : "Generate report") {
+                        Button(Calendar.current.isDateInToday(anchor) ? "Build now" : "Generate report") {
                             Task { await generate([anchor]) }
                         }
                         .buttonStyle(.borderedProminent)
@@ -165,6 +187,32 @@ struct ReportsView: View {
         if let d = Calendar.current.date(byAdding: kind.calendarComponent, value: delta, to: anchor) {
             anchor = min(d, Date())
         }
+    }
+
+    private var freshnessText: String {
+        _ = archive.version
+        guard let built = archive.load(anchor)?.generatedAt else { return "" }
+        let time = built.formatted(date: .omitted, time: .shortened)
+        if Calendar.current.isDateInToday(anchor) { return "Live · updated \(time)" }
+        return archive.isStale(anchor) ? "Out of date" : "Updated \(built.formatted(.dateTime.day().month(.abbreviated))) \(time)"
+    }
+
+    /// Rebuilds the visible day when it's missing or stale; repeats every 5 min for today.
+    private func keepFresh() async {
+        while !Task.isCancelled {
+            if let day = liveDay { await refreshIfNeeded(day) }
+            guard let day = liveDay, Calendar.current.isDateInToday(day) else { return }
+            try? await Task.sleep(nanoseconds: 300_000_000_000)
+        }
+    }
+
+    private func refreshIfNeeded(_ day: Date) async {
+        guard !generating, archive.hasActivity(day) else { return }
+        guard !archive.hasRecord(day) || archive.isStale(day) else { return }
+        let key = UsageStore.key(day)
+        if let last = lastAutoRefresh[key], Date().timeIntervalSince(last) < 600 { return }   // max one AI call / 10 min
+        lastAutoRefresh[key] = Date()
+        await generate([day])
     }
 
     private func generate(_ days: [Date]) async {

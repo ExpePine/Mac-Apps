@@ -73,6 +73,21 @@ final class ReportArchive: ObservableObject {
         FileManager.default.fileExists(atPath: url(day, "json").path)
     }
 
+    /// A stored report is out of date if check-ins changed since it was built, if it was
+    /// built "so far" before the day ended, or (for today) if it's over 30 minutes old.
+    func isStale(_ day: Date) -> Bool {
+        guard let rec = load(day) else { return false }
+        let entries = store.entries(on: day)
+        let answered = entries.filter { $0.status != .missed && $0.status != .skipped }.count
+        let missed = entries.filter { $0.status == .missed }.count
+        if answered != rec.answered || missed != rec.missed { return true }
+        guard let built = rec.generatedAt else { return false }
+        let cal = Calendar.current
+        let dayEnd = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: day)) ?? day
+        if Date() >= dayEnd { return built < dayEnd }
+        return Date().timeIntervalSince(built) > 1800
+    }
+
     /// Days that had check-ins or screen time.
     func hasActivity(_ day: Date) -> Bool {
         !store.entries(on: day).isEmpty || usage.usage(for: day).activeSeconds >= 60
@@ -115,6 +130,7 @@ final class ReportArchive: ObservableObject {
         return days(in: interval(kind, containing: date)).filter { day in
             guard day < today, hasActivity(day) else { return false }
             guard let rec = load(day) else { return true }
+            if isStale(day) { return true }
             // The calendar also needs the 3-word summary (older reports don't have it).
             return kind == .calendar && rec.tagline == nil
         }

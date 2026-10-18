@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let coach: CoachService
     let archive: ReportArchive
     let plans: PlanStore
+    let analysis: AnalysisStore
     let nav = Navigator()
 
     /// The check-in that is waiting for an answer (if any).
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         coach.plans = plans
         archive = ReportArchive(baseDirectory: store.directory, store: store, usage: usage, goals: goals)
         archive.plans = plans
+        analysis = AnalysisStore(directory: store.directory)
         reports = ReportService(settings: settings, store: store, usage: usage, goals: goals, archive: archive)
         super.init()
 
