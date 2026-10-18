@@ -77,7 +77,7 @@ enum FeatureClassifier {
 
     static func classify(name: String, numbers: [Double?], isLabel: Bool) -> (ColumnKind, String) {
         if isLabel { return (.identifier, "The stock name column") }
-        if name == "NN_score" { return (.identifier, "The neural net's own output") }
+        if name == "NN_score" || name == "NN_conf" { return (.identifier, "The neural net's own output") }
         let w = Set(words(name))
         let n = numbers.count
         let nums = numbers.compactMap { $0 }

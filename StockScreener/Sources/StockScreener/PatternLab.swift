@@ -65,6 +65,8 @@ struct PatternCombo: Identifiable {
     let hitRate: Double        // share of stocks with this combination that became gainers
     let lift: Double           // hitRate / base rate
     let examples: [String]     // gainers that had it
+    var testLift: Double? = nil   // lift on later days it never saw (ranking model only)
+    var heldUp: Bool? = nil       // beat luck in training AND kept a lift on the test days
 }
 
 enum PatternMiner {
@@ -131,6 +133,7 @@ enum PatternMiner {
             guard lift > 1.05 else { return }
             var examples: [String] = []
             for (i, s) in data.enumerated() where s.isGainer && (bits[i >> 6] >> UInt64(i & 63)) & 1 == 1 {
+                if examples.contains(s.symbol) { continue }
                 examples.append(s.symbol)
                 if examples.count == 12 { break }
             }

@@ -80,6 +80,7 @@ final class ScreenerViewModel: ObservableObject {
     @Published var nnError: String?
     @Published var nnReport: NNReport?
     @Published var nnScores: [String: Double] = [:]
+    @Published var nnConf: [String: Double] = [:]      // ensemble agreement 0–100 (ranking model)
     @Published var flashSpec: FlashSpec?
     @Published var flashSummary: String?
     var flashToken = 0
@@ -300,12 +301,21 @@ final class ScreenerViewModel: ObservableObject {
     /// Adds the neural net's NN_score column (0–100) when a model has been trained.
     private func withScores(_ t: SheetTable) -> SheetTable {
         guard !nnScores.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let addConf = !nnConf.isEmpty
         let rows = t.rows.map { row -> SheetRow in
-            let score = nnScores[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
-            return SheetRow(id: row.id, cells: row.cells + [score.map { String(format: "%.1f", $0) } ?? ""],
-                            numbers: row.numbers + [score])
+            let key = row.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+            let score = nnScores[key]
+            var cells = row.cells + [score.map { String(format: "%.1f", $0) } ?? ""]
+            var numbers = row.numbers + [score]
+            if addConf {
+                let c = nnConf[key]
+                cells.append(c.map { String(format: "%.0f", $0) } ?? "")
+                numbers.append(c)
+            }
+            return SheetRow(id: row.id, cells: cells, numbers: numbers)
         }
-        return SheetTable(headers: t.headers + ["NN_score"], rows: rows, originalHeaders: t.originalHeaders + ["NN_score"])
+        let extra = addConf ? ["NN_score", "NN_conf"] : ["NN_score"]
+        return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
     private func setTable(_ downloaded: SheetTable) {
@@ -490,7 +500,7 @@ final class ScreenerViewModel: ObservableObject {
     private func saveSnapshotIfNeeded(raw: Data, table: SheetTable, changed: Bool) {
         let day = HistoryStore.dayKey(dataDay(of: table))
         guard changed || !HistoryStore.exists(day) else { return }
-        let keep = max(5, settings.historyKeepDays)
+        let keep = settings.historyKeepForever ? Int.max : max(5, settings.historyKeepDays)
         Task { [weak self] in
             let info = await Task.detached(priority: .utility) { () -> ([String], Int) in
                 try? HistoryStore.save(csv: raw, day: day, keepDays: keep)

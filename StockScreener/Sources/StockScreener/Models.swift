@@ -224,7 +224,8 @@ struct AppSettings: Codable {
     var cellRules: [CellRule] = []
     var columnAliases: [String: String] = [:]   // sheet column name -> your real name
     var frozenColumns = 1                       // columns pinned on the left of both tables
-    var historyKeepDays = 45                    // daily snapshots kept for the animation
+    var historyKeepDays = 45                    // used only when historyKeepForever is off
+    var historyKeepForever = true               // keep every daily snapshot (training data for the neural net)
     var historyColumns: [String] = []           // columns shown in the animation; empty = Filter columns
     var tgThreshold = 7.0                       // Top Gainers: change% above this
     var nnGainThreshold = 30                    // monthly gainer: % gain within the window
@@ -259,6 +260,7 @@ struct AppSettings: Codable {
         columnAliases   = v(.columnAliases, d.columnAliases)
         frozenColumns   = v(.frozenColumns, d.frozenColumns)
         historyKeepDays = v(.historyKeepDays, d.historyKeepDays)
+        historyKeepForever = v(.historyKeepForever, d.historyKeepForever)
         historyColumns  = v(.historyColumns, d.historyColumns)
         tgThreshold     = v(.tgThreshold, d.tgThreshold)
         nnGainThreshold = v(.nnGainThreshold, d.nnGainThreshold)

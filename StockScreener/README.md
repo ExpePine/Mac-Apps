@@ -91,6 +91,14 @@ Click **TG** to show only stocks that rose more than 7% that day (the threshold 
 
 *Descriptive* mode uses today's values for stocks that already ran up, so it describes gainers but can't predict them. Once the app holds a snapshot from about 21 trading days ago, it switches to *Predictive* mode and learns from values **before** the move. Yahoo's chart endpoint is unofficial and can rate-limit or change without notice. None of this is financial advice.
 
+### Ranking model (N window, turns on as snapshots build up)
+Once at least 3 stored snapshots are 5 or more trading days old, **Learn patterns** also trains a ranking model on **every stored day × stock**:
+- **Inputs:** your training columns, each ranked among all stocks that day (this removes market mood), plus how each one changed over 1 and 5 snapshots (Δ1d, Δ5d).
+- **Targets:** the real gain over 5, 10 and 21 trading days, from Yahoo. A ranking loss pushes gainers above the rest.
+- **Network:** 6 small nets (16→8, plus a pairwise layer). **NN_score** is their average rank; **NN_conf** is how much they agree. The **Pairs** tab shows which column pairs the nets read together.
+- **Testing:** walk-forward on later days it never saw once there are about 30 labelled days; before that, it is tested on held-out stocks. A **chance check** retrains on shuffled gains to show what luck alone scores. Combinations are found on earlier days and re-checked on the test data; ✓ **Held up** means a combination beat luck.
+- **Snapshots** are now kept forever by default (N window → Keep forever), because the model needs months of days.
+
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 

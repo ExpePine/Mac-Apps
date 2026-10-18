@@ -14,13 +14,26 @@ struct NeuralNetView: View {
             controls
             Divider()
             if let report = vm.nnReport {
-                modeBanner(report)
+                if let panel = report.panel { PanelBanner(panel: panel) } else { modeBanner(report) }
+                if let note = report.panelNote {
+                    Label(note, systemImage: "hourglass")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 TabView(selection: $tab) {
+                    if let panel = report.panel {
+                        PanelModelTab(panel: panel).tabItem { Text("Ranking model") }.tag(3)
+                        PanelPairsTab(panel: panel).tabItem { Text("Pairs (\(panel.pairs.count))") }.tag(4)
+                    }
                     combosTab(report).tabItem { Text("Combinations (\(report.combos.count))") }.tag(0)
-                    modelTab(report).tabItem { Text("Neural net") }.tag(1)
+                    if report.panel == nil {
+                        modelTab(report).tabItem { Text("Neural net") }.tag(1)
+                    }
                     gainersTab(report).tabItem { Text("Gainers (\(report.gainers))") }.tag(2)
                 }
                 .padding(10)
+                .onChange(of: report.panel != nil) { has in tab = has ? 3 : 0 }
             } else {
                 emptyState
             }
@@ -60,6 +73,13 @@ struct NeuralNetView: View {
                 } else {
                     Text(vm.priceBookAgeText).font(.caption).foregroundStyle(.secondary)
                 }
+                Divider().frame(height: 16)
+                Label("\(vm.historyDays.count) daily snapshots", systemImage: "square.stack.3d.up")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("Every stored day is training data for the ranking model")
+                Toggle("Keep forever", isOn: $vm.settings.historyKeepForever)
+                    .toggleStyle(.checkbox).font(.caption)
+                    .help("Keep every daily snapshot (recommended — the model needs months of days). Off = keep \(vm.settings.historyKeepDays) days.")
                 Spacer()
                 if let status = vm.nnStatus {
                     ProgressView().controlSize(.small)
@@ -142,6 +162,22 @@ struct NeuralNetView: View {
                 TableColumn("Lift") { c in
                     Text(String(format: "%.1f×", c.lift)).monospacedDigit().fontWeight(.semibold)
                         .foregroundStyle(c.lift >= 3 ? .green : (c.lift >= 1.5 ? .orange : .secondary))
+                }
+                .width(55)
+                TableColumn("Test lift") { c in
+                    if let t = c.testLift {
+                        Text(String(format: "%.1f×", t)).monospacedDigit()
+                            .foregroundStyle(t >= 1.2 ? .green : .secondary)
+                    } else { Text("—").foregroundStyle(.secondary) }
+                }
+                .width(60)
+                TableColumn("Held up") { c in
+                    if let h = c.heldUp {
+                        Image(systemName: h ? "checkmark.seal.fill" : "xmark.circle")
+                            .foregroundStyle(h ? .green : .secondary)
+                            .help(h ? "Lift beat the shuffled-label (luck) level and held on days/stocks it never saw"
+                                    : "Didn't beat luck or faded on unseen data")
+                    } else { Text("—").foregroundStyle(.secondary) }
                 }
                 .width(55)
                 TableColumn("Example gainers") { c in

@@ -160,18 +160,7 @@ extension ScreenerViewModel {
         if let cached = timelineCache[day] { return cached }
         let current = table
         let aligned = await Task.detached(priority: .userInitiated) { () -> SheetTable? in
-            guard let data = HistoryStore.load(day), let parsed = try? SheetService.parse(data).table else { return nil }
-            var byName: [String: Int] = [:]
-            for (j, h) in parsed.originalHeaders.enumerated() where byName[SheetTable.normalize(h)] == nil {
-                byName[SheetTable.normalize(h)] = j
-            }
-            let map = current.originalHeaders.map { byName[SheetTable.normalize($0)] }
-            let rows = parsed.rows.map { row -> SheetRow in
-                let cells = map.map { j in j.map { row.text($0) } ?? "" }
-                let numbers = map.map { j in j.flatMap { row.number($0) } }
-                return SheetRow(id: row.id, cells: cells, numbers: numbers)
-            }
-            return SheetTable(headers: current.headers, rows: rows, originalHeaders: current.originalHeaders)
+            HistoryStore.load(day).flatMap { ScreenerViewModel.align($0, to: current) }
         }.value
         if let aligned {
             timelineCache[day] = aligned
@@ -182,6 +171,22 @@ extension ScreenerViewModel {
             }
         }
         return aligned
+    }
+
+    /// Parses a stored snapshot and lays its columns out like `current` (matched by sheet names).
+    nonisolated static func align(_ data: Data, to current: SheetTable) -> SheetTable? {
+        guard let parsed = try? SheetService.parse(data).table else { return nil }
+        var byName: [String: Int] = [:]
+        for (j, h) in parsed.originalHeaders.enumerated() where byName[SheetTable.normalize(h)] == nil {
+            byName[SheetTable.normalize(h)] = j
+        }
+        let map = current.originalHeaders.map { byName[SheetTable.normalize($0)] }
+        let rows = parsed.rows.map { row -> SheetRow in
+            let cells = map.map { j in j.map { row.text($0) } ?? "" }
+            let numbers = map.map { j in j.flatMap { row.number($0) } }
+            return SheetRow(id: row.id, cells: cells, numbers: numbers)
+        }
+        return SheetTable(headers: current.headers, rows: rows, originalHeaders: current.originalHeaders)
     }
 
     func clearTimelineCache() {

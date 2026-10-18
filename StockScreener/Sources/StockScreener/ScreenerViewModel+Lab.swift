@@ -52,6 +52,8 @@ struct NNReport {
     var topScored: [(String, Double)]
     var trainedAt = Date()
     var gainerList: [(String, Double)]   // symbol, % gain
+    var panel: PanelReport? = nil        // ranking model (all stored days), when it could run
+    var panelNote: String? = nil         // why the ranking model didn't run yet
 }
 
 // MARK: - Yahoo prices, TG, neural net, flash
@@ -242,12 +244,14 @@ extension ScreenerViewModel {
             guard let self else { return }
             self.nnReport = result.0
             self.nnScores = result.1
+            self.nnConf = [:]
+            await self.runPanelModel()     // the ranking model on all stored days, when there are enough
             self.isTraining = false
             self.nnStatus = nil
-            if result.0.gainers == 0 {
+            if result.0.gainers == 0 && self.nnReport?.panel == nil {
                 self.nnError = "No stock gained ≥ \(Int(threshold))% in the window — lower the threshold or fetch more history."
             }
-            self.setTableKeepingRaw()      // adds / refreshes the NN_score column
+            self.setTableKeepingRaw()      // adds / refreshes the NN_score (and NN_conf) columns
         }
     }
 
