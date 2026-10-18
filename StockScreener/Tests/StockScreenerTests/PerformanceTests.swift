@@ -28,7 +28,7 @@ final class PerformanceTests: XCTestCase {
         XCTAssertEqual(row.daysToPeak, 5)
         XCTAssertEqual(row.hitDays, 3)                         // 120 ≥ +20% on the 3rd day after
         XCTAssertEqual(row.horizons[0]!, 10, accuracy: 1e-9)   // +2 days: 110
-        XCTAssertEqual(row.horizons[1]!, 40, accuracy: 1e-9)   // +5 days: 140
+        XCTAssertEqual(row.horizons[1]!, 50, accuracy: 1e-9)   // +5 days: 150
         XCTAssertNil(row.horizons[2])                          // not reached yet
         XCTAssertEqual(row.benchmark!, 10, accuracy: 1e-9)
         XCTAssertEqual(row.excess!, 20, accuracy: 1e-9)

@@ -264,7 +264,7 @@ enum PanelTrainer {
 
         var byDay: [Int: [Int]] = [:]
         for i in train { byDay[rows[i].day, default: []].append(i) }
-        let dayKeys = Array(byDay.keys)
+        let dayKeys = byDay.keys.sorted()             // fixed order → same result every run
 
         for _ in 0..<config.maxEpochs {
             // One epoch: day-by-day batches (so the ranking loss compares stocks on the same day)

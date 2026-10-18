@@ -163,7 +163,7 @@ enum PerfEngine {
             for (k, c) in window.enumerated() {
                 if c > peak { peak = c; peakAt = k }
                 if c < worst { worst = c }
-                if hit == nil, k > 0, (c / entry - 1) * 100 >= target { hit = k }
+                if hit == nil, k > 0, c / entry >= 1 + target / 100 - 1e-9 { hit = k }
             }
             let now = s.closes[end]
             let horizons = study.horizons.map { h -> Double? in i + h <= end ? (s.closes[i + h] / entry - 1) * 100 : nil }
