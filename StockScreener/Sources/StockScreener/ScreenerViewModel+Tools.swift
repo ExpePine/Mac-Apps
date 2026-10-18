@@ -31,7 +31,8 @@ extension ScreenerViewModel {
             let w = FeatureClassifier.words(h)
             return w.contains("close") && !w.contains("prev") && !w.contains("prevclose")
         }
-        return names.first(where: { table.rows.prefix(50).contains { r in r.number($0.offset) != nil } })?.offset
+        let sample = table.rows.prefix(50)
+        return names.first(where: { pair in sample.contains { r in r.number(pair.offset) != nil } })?.offset
     }
 
     /// Adds stocks (rows of the Data / Filter table) to a watchlist. Already-listed symbols are skipped.
