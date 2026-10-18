@@ -7,6 +7,8 @@ struct ImportView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var showSettings = false
     @State private var showColumnNames = false
+    @StateObject private var finder = TableFinder()
+    @State private var importSelection: [SheetRow] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +19,7 @@ struct ImportView: View {
                 FreshnessBar(showSettings: $showSettings)
                 Divider()
                 if vm.hasData {
+                    if finder.isVisible { FindBar(finder: finder); Divider() }
                     SheetTableView(headers: vm.headers,
                                    originalHeaders: vm.table.originalHeaders,
                                    columns: Array(vm.headers.indices),
@@ -33,7 +36,11 @@ struct ImportView: View {
                                            vm.importSortDescending = false
                                        }
                                    },
-                                   onSelectRow: { vm.selectStock(from: $0) })
+                                   onSelectRow: { vm.selectStock(from: $0) },
+                                   findQuery: finder.activeQuery,
+                                   findCurrent: finder.currentMatch,
+                                   onSelectRows: { importSelection = $0 },
+                                   rowMenu: { row in vm.rowMenu(row, selection: importSelection, openWindow: openWindow) })
                     Divider()
                     statusBar
                 } else {
@@ -42,6 +49,11 @@ struct ImportView: View {
             }
         }
         .navigationTitle("Data Import")
+        .onChange(of: vm.importVersion) { _ in finder.update(rows: vm.importRows, columns: Array(vm.headers.indices)) }
+        .onChange(of: finder.isVisible) { v in if v { finder.update(rows: vm.importRows, columns: Array(vm.headers.indices)) } }
+        .background(WindowReader { window in
+            FindRouter.register(window) { [weak finder] in finder?.show() }
+        })
         .searchable(text: $vm.importSearch, placement: .toolbar, prompt: "Search all columns…")
         .toolbar {
             ToolbarItemGroup {
@@ -63,6 +75,13 @@ struct ImportView: View {
                     Label("Filter", systemImage: "line.3.horizontal.decrease.circle.fill")
                 }
                 .help("Open the Filter screen (⇧⌘1)")
+
+                Button {
+                    openWindow(id: "notes")
+                } label: {
+                    Label("MV2 Requirements & Pine", systemImage: "doc.text")
+                }
+                .help("MV2 Build Requirements and Pine Script editor (⇧⌘7)")
 
                 Button {
                     openWindow(id: "alerts")

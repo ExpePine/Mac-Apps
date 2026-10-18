@@ -95,9 +95,9 @@ enum YahooClient {
     /// NSE symbol as Yahoo writes it, e.g. "TCS" -> "TCS.NS", "M&M" -> "M%26M.NS".
     static func yahooSymbol(_ symbol: String) -> String {
         let s = symbol.trimmingCharacters(in: .whitespaces).uppercased()
-        let base = s.contains(".") ? s : s + ".NS"
+        let base = s.contains(".") || s.hasPrefix("^") ? s : s + ".NS"     // ^NSEI = Nifty 50 index
         var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._^")
+        allowed.insert(charactersIn: "-._")
         return base.addingPercentEncoding(withAllowedCharacters: allowed) ?? base
     }
 

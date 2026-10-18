@@ -30,6 +30,16 @@ struct SheetTableView: NSViewRepresentable {
     var ePanel: ((SheetRow) -> AnyView)? = nil
     /// Cells to flash briefly ("what changed since the previous day").
     var flash: FlashSpec? = nil
+    /// When set, an "S" (screenshots) column follows E: its color per row, and what a click does.
+    var sColor: ((SheetRow) -> NSColor)? = nil
+    var onSClick: ((SheetRow) -> Void)? = nil
+    /// Find (⌘F): cells containing this text are outlined; `findCurrent` (row index, column) is focused.
+    var findQuery = ""
+    var findCurrent: FindMatch? = nil
+    /// All selected rows (⌘-click / ⇧-click select several).
+    var onSelectRows: (([SheetRow]) -> Void)? = nil
+    /// Right-click menu for a row: (title, action) pairs; title "-" adds a separator.
+    var rowMenu: ((SheetRow) -> [(String, () -> Void)])? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -91,12 +101,17 @@ struct SheetTableView: NSViewRepresentable {
         let scrolling = Array(visible.dropFirst(frozenCount))
 
         // Rebuild columns only when the column set changes.
-        let signature = "E\(eColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
+        let signature = "E\(eColor != nil)S\(sColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
             + "#" + originalHeaders.joined(separator: "|")
         if signature != c.columnSignature {
             c.columnSignature = signature
             c.setColumns(frozen, on: left, parent: self)
             c.setColumns(scrolling, on: right, parent: self)
+            if sColor != nil {
+                c.addBadgeColumn(Coordinator.sID, title: "S",
+                                 tip: "S — Screenshots of this stock. Grey: none · Orange: saved · Green: newest is under 7 days old",
+                                 to: frozen.isEmpty ? right : left)
+            }
             if eColor != nil {
                 c.addEColumn(to: frozen.isEmpty ? right : left)
             }
@@ -126,15 +141,27 @@ struct SheetTableView: NSViewRepresentable {
         right.headerView?.needsDisplay = true
 
         let flashToken = flash?.token ?? 0
-        if version != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken {
+        let findKey = findQuery + "|\(findCurrent?.row ?? -1),\(findCurrent?.column ?? -1)"
+        if version != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
             c.flashToken = flashToken
             c.renderedVersion = version
+            c.findKey = findKey
             left.reloadData()
             right.reloadData()
         }
+        if let m = findCurrent, m != c.scrolledMatch, m.row < rows.count {
+            c.scrolledMatch = m
+            right.scrollRowToVisible(m.row)
+            left.scrollRowToVisible(m.row)
+            if let col = right.tableColumns.firstIndex(where: { Coordinator.columnIndex($0) == m.column }) {
+                right.scrollColumnToVisible(col)
+            }
+        } else if findCurrent == nil {
+            c.scrolledMatch = nil
+        }
     }
 
-    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
         var parent: SheetTableView?
         weak var leftTable: NSTableView?
         weak var rightTable: NSTableView?
@@ -144,6 +171,8 @@ struct SheetTableView: NSViewRepresentable {
         var columnSignature = ""
         var renderedVersion = -1
         var flashToken = 0
+        var findKey = ""
+        var scrolledMatch: FindMatch?
         private var syncing = false
         private var observers: [NSObjectProtocol] = []
         private let cellID = NSUserInterfaceItemIdentifier("SheetCell")
@@ -157,7 +186,10 @@ struct SheetTableView: NSViewRepresentable {
             table.columnAutoresizingStyle = .noColumnAutoresizing
             table.allowsColumnReordering = false
             table.allowsColumnResizing = true
-            table.allowsMultipleSelection = false
+            table.allowsMultipleSelection = true
+            let menu = NSMenu()
+            menu.delegate = self
+            table.menu = menu
             table.intercellSpacing = NSSize(width: 0, height: 0)
             table.rowHeight = 22
             table.gridStyleMask = [.solidVerticalGridLineMask]
@@ -248,6 +280,32 @@ struct SheetTableView: NSViewRepresentable {
         }
 
         static let eID = NSUserInterfaceItemIdentifier("E")
+        static let sID = NSUserInterfaceItemIdentifier("S")
+        private let sCellID = NSUserInterfaceItemIdentifier("SCell")
+
+        func addBadgeColumn(_ id: NSUserInterfaceItemIdentifier, title: String, tip: String, to table: NSTableView) {
+            let column = NSTableColumn(identifier: id)
+            column.width = 30; column.minWidth = 30; column.maxWidth = 30
+            column.title = title
+            column.headerToolTip = tip
+            column.headerCell.alignment = .center
+            table.addTableColumn(column)
+            table.moveColumn(table.numberOfColumns - 1, toColumn: 0)
+            updateLeftWidth()
+        }
+
+        // Right-click menu
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            guard let parent, let build = parent.rowMenu,
+                  let table = [leftTable, rightTable].compactMap({ $0 }).first(where: { $0.menu === menu }) else { return }
+            let row = table.clickedRow
+            guard row >= 0, row < parent.rows.count else { return }
+            for (title, action) in build(parent.rows[row]) {
+                if title == "-" { menu.addItem(.separator()); continue }
+                menu.addItem(ClosureMenuItem(title: title, action: action))
+            }
+        }
         private let eCellID = NSUserInterfaceItemIdentifier("ECell")
 
         func addEColumn(to table: NSTableView) {
@@ -265,6 +323,11 @@ struct SheetTableView: NSViewRepresentable {
 
         @objc func clicked(_ sender: NSTableView) {
             let row = sender.clickedRow, col = sender.clickedColumn
+            if let parent, row >= 0, row < parent.rows.count, col >= 0, col < sender.tableColumns.count,
+               sender.tableColumns[col].identifier == Self.sID {
+                parent.onSClick?(parent.rows[row])
+                return
+            }
             guard let parent, let build = parent.ePanel, row >= 0, row < parent.rows.count,
                   col >= 0, col < sender.tableColumns.count,
                   sender.tableColumns[col].identifier == Self.eID else { return }
@@ -288,6 +351,15 @@ struct SheetTableView: NSViewRepresentable {
                 cell.configure(color: parent.eColor?(parent.rows[row]) ?? .clear)
                 return cell
             }
+            if let tableColumn, tableColumn.identifier == Self.sID, let parent, row < parent.rows.count {
+                let cell = (tableView.makeView(withIdentifier: sCellID, owner: nil) as? ECellView) ?? {
+                    let v = ECellView(letter: "S", tip: "Click to open this stock's screenshots")
+                    v.identifier = sCellID
+                    return v
+                }()
+                cell.configure(color: parent.sColor?(parent.rows[row]) ?? .clear)
+                return cell
+            }
             guard let parent, let tableColumn, let index = Self.columnIndex(tableColumn),
                   row < parent.rows.count else { return nil }
             let data = parent.rows[row]
@@ -303,6 +375,12 @@ struct SheetTableView: NSViewRepresentable {
                            alignRight: isNumber,
                            bold: index == parent.emphasizedColumn || tableView === leftTable,
                            background: parent.painter?.color(for: data, column: index))
+            let q = parent.findQuery
+            if !q.isEmpty, text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
+                cell.setFindHighlight(parent.findCurrent == FindMatch(row: row, column: index) ? .current : .match)
+            } else {
+                cell.setFindHighlight(.none)
+            }
             if let flash = parent.flash, flash.isActive, let kind = flash.kind(row: data.id, column: index) {
                 let remaining = flash.duration - Date().timeIntervalSince(flash.started)
                 cell.flash(FlashSpec.color(kind), duration: remaining)
@@ -328,6 +406,9 @@ struct SheetTableView: NSViewRepresentable {
                 parent.onSelectRow?(parent.rows[row])
             } else {
                 parent?.onSelectRow?(nil)
+            }
+            if let parent {
+                parent.onSelectRows?(source.selectedRowIndexes.filter { $0 < parent.rows.count }.map { parent.rows[$0] })
             }
         }
 
@@ -386,6 +467,26 @@ final class SheetCellView: NSTableCellView {
         glow.add(fade, forKey: "fade")
     }
 
+    enum FindHighlight { case none, match, current }
+    private var findLayer: CALayer?
+
+    func setFindHighlight(_ h: FindHighlight) {
+        guard let layer else { return }
+        if h == .none { findLayer?.isHidden = true; return }
+        let l = findLayer ?? {
+            let l = CALayer()
+            l.cornerRadius = 3
+            layer.addSublayer(l)
+            findLayer = l
+            return l
+        }()
+        l.isHidden = false
+        l.frame = bounds.insetBy(dx: 1, dy: 1)
+        l.borderWidth = h == .current ? 2.5 : 1.5
+        l.borderColor = (h == .current ? NSColor.systemOrange : NSColor.systemYellow).cgColor
+        l.backgroundColor = (h == .current ? NSColor.systemOrange : NSColor.systemYellow).withAlphaComponent(0.25).cgColor
+    }
+
     func clearFlash() {
         flashLayer?.removeAllAnimations()
         flashLayer?.opacity = 0
@@ -394,6 +495,7 @@ final class SheetCellView: NSTableCellView {
     override func layout() {
         super.layout()
         flashLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
+        findLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
     }
 
     func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?) {
@@ -449,11 +551,19 @@ final class MenuHeaderCell: NSTableHeaderCell {
     }
 }
 
-/// The small "E" badge in the E column.
+/// The small "E" / "S" badge in the E and S columns.
 final class ECellView: NSTableCellView {
-    private let badge = NSTextField(labelWithString: "E")
+    private let badge: NSTextField
 
-    override init(frame: NSRect) {
+    convenience init(letter: String, tip: String) {
+        self.init(frame: .zero, letter: letter)
+        toolTip = tip
+    }
+
+    override convenience init(frame: NSRect) { self.init(frame: frame, letter: "E") }
+
+    init(frame: NSRect, letter: String) {
+        badge = NSTextField(labelWithString: letter)
         super.init(frame: frame)
         badge.font = .systemFont(ofSize: 11, weight: .bold)
         badge.alignment = .center
@@ -477,4 +587,22 @@ final class ECellView: NSTableCellView {
         let strong = color == .systemGreen || color == .systemOrange
         badge.textColor = strong ? .white : .secondaryLabelColor
     }
+}
+
+/// Position of a find match: row index in the shown rows, and sheet column index.
+struct FindMatch: Equatable {
+    let row: Int
+    let column: Int
+}
+
+/// Menu item that runs a closure.
+final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
+    init(title: String, action: @escaping () -> Void) {
+        handler = action
+        super.init(title: title, action: #selector(run), keyEquivalent: "")
+        target = self
+    }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func run() { handler() }
 }

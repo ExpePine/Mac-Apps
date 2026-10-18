@@ -102,6 +102,26 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Find (⌘F or ⌃F)
+In the Data Import and Filter tables, ⌘F or ⌃F opens a find bar. Every matching cell is outlined in yellow and the current match in orange. Press ↩ for the next match, ⇧↩ for the previous one, and Esc to close the bar.
+
+### S — Screenshots (Filter screen)
+The **S** column sits next to E. Grey means the stock has no screenshot, orange means it has screenshots, and green means the newest one is under 7 days old. Click **S** (or ⇧⌘6) to open the Screenshot viewer for that stock. Screenshots are listed newest first.
+- **Adding screenshots:** capture an area of the screen, paste an image with ⇧⌘V, import a file, or drag images onto the viewer.
+- **Annotating:** pen, highlighter, line, arrow, rectangle, ellipse and text, with 8 colours, line width, eraser and undo/redo. Each screenshot can also have a note.
+- **Sharing:** copy or export the image with your drawings.
+- Files are kept in ~/Library/Application Support/StockScreener/Screenshots/<SYMBOL>/. The first capture may ask for Screen Recording permission.
+
+### Watchlists (⇧⌘5)
+- **Adding stocks:** select rows in the Filter or Data table (⌘-click or ⇧-click several), then right-click → *Add to "Watchlist"*. You can also use the **Watchlist** toolbar menu (add the selected or all shown stocks), or paste symbols.
+- **Returns:** from the price when added to the latest close, plus 1-day, 5-day and 1-month change, best close since added, distance from that best, and the return compared with the Nifty 50 over the same days.
+- **Summary:** average, median, winners, best and worst stock.
+- **Sharing:** copy symbols (including TradingView format) or export a CSV.
+- Prices come from Yahoo daily closes, which is an unofficial source.
+
+### MV2 Requirements & Pine Scripts (⇧⌘7)
+A plain-text editor with two sections: **MV2 Build Requirements** documents and **Pine Scripts**. It supports copy and paste, undo, ⌘F find and replace, Pine syntax colours, **Copy all** (to paste into TradingView's Pine Editor) and **Replace with clipboard**. Documents save automatically as files in ~/Library/Application Support/StockScreener/.
+
 ### Alerts browser
 
 **Alerts** (⇧⌘3, the bell button) lists every alert that has fired: when it fired, the stock, the rule, whether it was an alert or an email, and the values at that moment. You can search, filter by period (today / 7 days / 30 days / all), type and rule, and click an alert to see its details. The toolbar shows how many alerts are new.

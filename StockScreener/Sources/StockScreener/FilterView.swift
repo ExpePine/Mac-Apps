@@ -8,6 +8,7 @@ struct FilterView: View {
     @AppStorage("filterConditionsVisible") private var conditionsVisible = true
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var flashedDay: String?
+    @StateObject private var finder = TableFinder()
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
@@ -22,6 +23,7 @@ struct FilterView: View {
                 if !vm.hasData {
                     placeholder
                 } else {
+                    if finder.isVisible { FindBar(finder: finder); Divider() }
                     if vm.tgMode { TGStrip() }
                     if let note = vm.flashSummary { FlashToast(text: note) }
                     if !vm.filterIssues.isEmpty {
@@ -56,7 +58,16 @@ struct FilterView: View {
                                    ePanel: { row in
                                        AnyView(StockRulesView(stock: vm.stockName(row), row: row).environmentObject(vm))
                                    },
-                                   flash: vm.flashSpec)
+                                   flash: vm.flashSpec,
+                                   sColor: { vm.sColor($0) },
+                                   onSClick: { row in
+                                       vm.shotSymbol = vm.rowKey(row)
+                                       openWindow(id: "shots")
+                                   },
+                                   findQuery: finder.activeQuery,
+                                   findCurrent: finder.currentMatch,
+                                   onSelectRows: { vm.filterSelection = $0 },
+                                   rowMenu: { row in vm.rowMenu(row, selection: vm.filterSelection, openWindow: openWindow) })
                     if vm.showTimeline {
                         Divider()
                         TimelineBar()
@@ -73,7 +84,16 @@ struct FilterView: View {
             flashedDay = nil
             flashIfNewDay()
         }
-        .onChange(of: vm.filterVersion) { _ in flashIfNewDay() }
+        .onChange(of: vm.filterVersion) { _ in
+            flashIfNewDay()
+            finder.update(rows: vm.filterRows, columns: vm.filterColumnIndices)
+        }
+        .onChange(of: finder.isVisible) { visible in
+            if visible { finder.update(rows: vm.filterRows, columns: vm.filterColumnIndices) }
+        }
+        .background(WindowReader { window in
+            FindRouter.register(window) { [weak finder] in finder?.show() }
+        })
         .onChange(of: visibility) { newValue in conditionsVisible = newValue != .detailOnly }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -112,6 +132,7 @@ struct FilterView: View {
                         .background(RoundedRectangle(cornerRadius: 5).fill(Color.purple.opacity(0.12)))
                 }
                 .help("Neural Net: filter-value combinations shared by monthly top gainers (≥ \(vm.settings.nnGainThreshold)% in a month)")
+                WatchlistMenu()
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()
@@ -480,5 +501,38 @@ struct FlashToast: View {
             RoundedRectangle(cornerRadius: 2).fill(Color(nsColor: c).opacity(0.6)).frame(width: 10, height: 10)
             Text(label).foregroundStyle(.secondary)
         }
+    }
+}
+
+
+/// Toolbar menu: add the selected / shown stocks to a watchlist, or open the watchlists.
+struct WatchlistMenu: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var lastAdded: String?
+
+    var body: some View {
+        Menu {
+            ForEach(vm.watchlists) { list in
+                Section(list.name) {
+                    Button("Add selected (\(vm.filterSelection.count))") { add(vm.filterSelection, list) }
+                        .disabled(vm.filterSelection.isEmpty)
+                    Button("Add all shown (\(vm.filterRows.count))") { add(vm.filterRows, list) }
+                        .disabled(vm.filterRows.isEmpty)
+                }
+            }
+            Divider()
+            Button("New watchlist") { vm.newWatchlist(named: "") }
+            Button("Open Watchlists  ⇧⌘5") { openWindow(id: "watch") }
+        } label: {
+            Label("Watchlist", systemImage: "star")
+        }
+        .help(lastAdded ?? "Add stocks to a watchlist (select rows with ⌘-click / ⇧-click, or right-click a row)")
+    }
+
+    private func add(_ rows: [SheetRow], _ list: Watchlist) {
+        let n = vm.addToWatchlist(rows, listID: list.id)
+        lastAdded = "Added \(n) to “\(list.name)”"
+        openWindow(id: "watch")
     }
 }

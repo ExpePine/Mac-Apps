@@ -83,6 +83,15 @@ final class ScreenerViewModel: ObservableObject {
     @Published var nnConf: [String: Double] = [:]      // ensemble agreement 0–100 (ranking model)
     @Published var flashSpec: FlashSpec?
     @Published var flashSummary: String?
+
+    // Screenshots (S column), watchlists
+    @Published var shotIndex: [String: Date] = ScreenshotStore.index()
+    @Published var shotSymbol: String?
+    @Published var watchlists: [Watchlist] = WatchlistStore.load() { didSet { WatchlistStore.save(watchlists) } }
+    @Published var selectedWatchlistID: UUID?
+    @Published var isFetchingWatch = false
+    @Published var watchError: String?
+    @Published var filterSelection: [SheetRow] = []
     var flashToken = 0
 
     // E column: per-row status on the Filter screen
@@ -132,6 +141,7 @@ final class ScreenerViewModel: ObservableObject {
         settings = Persistence.load()
         freshness = Persistence.loadFreshness()
         alertState = Persistence.loadAlertState()
+        FindRouter.install()
     }
 
     // MARK: Data source
