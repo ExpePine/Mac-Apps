@@ -18,6 +18,7 @@ enum ColumnRenamer {
         s.labelColumn = r(s.labelColumn)
         s.filterSortColumn = r(s.filterSortColumn)
         s.filterColumns = s.filterColumns.map(r)
+        s.nnFeatures = s.nnFeatures.map(r)
         s.dateColumn = r(s.dateColumn)
         s.mv2.monthColumn = r(s.mv2.monthColumn)
         s.mv2.dayColumn = r(s.mv2.dayColumn)

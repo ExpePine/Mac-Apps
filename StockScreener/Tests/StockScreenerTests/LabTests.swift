@@ -53,3 +53,35 @@ final class LabTests: XCTestCase {
         XCTAssertEqual(YahooClient.yahooSymbol("m&m"), "M%26M.NS")
     }
 }
+
+final class FeatureClassifierTests: XCTestCase {
+    private func kind(_ name: String, _ values: [Double?], label: Bool = false) -> ColumnKind {
+        FeatureClassifier.classify(name: name, numbers: values, isLabel: label).0
+    }
+    private let prices: [Double?] = (0..<100).map { Double(20 + $0 * $0 * 3) }   // 20 … ~29,400
+    private let small: [Double?] = (0..<100).map { Double($0 % 40) + 30 }        // 30 … 69
+
+    func testKinds() {
+        XCTAssertEqual(kind("SYMBOL", Array(repeating: nil, count: 100), label: true), .identifier)
+        XCTAssertEqual(kind("D_CLOSE", prices), .priceLevel)
+        XCTAssertEqual(kind("EMA_20", prices), .priceLevel)
+        XCTAssertEqual(kind("PrevClose", prices), .priceLevel)
+        XCTAssertEqual(kind("D_MONTH", small.map { $0.map { Double(Int($0) % 12 + 1) } }), .date)
+        XCTAssertEqual(kind("D_DAY", small), .date)
+        XCTAssertEqual(kind("RSI_14", small), .feature)
+        XCTAssertEqual(kind("Vol Ratio", small), .feature)
+        XCTAssertEqual(kind("Close vs EMA %", small), .feature)
+        XCTAssertEqual(kind("Volume", prices), .rawSize)
+        XCTAssertEqual(kind("SECTOR", Array(repeating: nil, count: 100)), .identifier)
+        XCTAssertEqual(kind("Long_Green", (0..<100).map { Double($0 % 2) }), .feature)
+        XCTAssertEqual(kind("var3", prices), .priceLevel)          // unnamed but looks like prices
+        XCTAssertEqual(kind("var4", small), .feature)
+        XCTAssertEqual(kind("Flat", Array(repeating: 1, count: 100)), .constant)
+    }
+
+    func testWords() {
+        XCTAssertEqual(FeatureClassifier.words("D_close"), ["d", "close", "dclose"])
+        XCTAssertTrue(FeatureClassifier.words("EMA20").contains("ema"))
+        XCTAssertTrue(FeatureClassifier.words("PrevClose").contains("close"))
+    }
+}

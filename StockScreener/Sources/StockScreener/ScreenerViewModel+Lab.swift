@@ -251,13 +251,24 @@ extension ScreenerViewModel {
         }
     }
 
-    /// Feature columns for the model: chosen ones, or the Filter screen's numeric columns.
+    /// Every column with its kind (feature, price level, date…), for the training-column picker.
+    var nnColumnProfiles: [ColumnProfile] {
+        FeatureClassifier.profiles(table: table, label: labelIndex, filterColumns: filterColumnIndices)
+    }
+
+    /// Auto-pick: the Filter screen's columns that are features (no prices, dates, names, raw sizes).
+    var nnAutoFeatures: [String] {
+        let label = labelIndex
+        let sample = Array(rows.prefix(1000))
+        return filterColumnIndices.filter { c in
+            FeatureClassifier.classify(name: headers[c], numbers: sample.map { $0.number(c) }, isLabel: c == label).0.isFeature
+        }.map { headers[$0] }
+    }
+
+    /// Columns the model trains on: the ones you picked, or the auto-pick.
     var nnFeatureColumns: [String] {
         if !settings.nnFeatures.isEmpty { return settings.nnFeatures.filter { table.index(of: $0) != nil } }
-        let label = labelIndex
-        return filterColumnIndices.filter { c in
-            c != label && headers[c] != "NN_score" && rows.prefix(200).contains { $0.number(c) != nil }
-        }.map { headers[$0] }
+        return nnAutoFeatures
     }
 
     /// Applies a found combination to the Filter screen.

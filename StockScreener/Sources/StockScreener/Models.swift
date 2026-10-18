@@ -229,7 +229,7 @@ struct AppSettings: Codable {
     var tgThreshold = 7.0                       // Top Gainers: change% above this
     var nnGainThreshold = 30                    // monthly gainer: % gain within the window
     var nnWindowDays = 21                       // ~1 month of trading days
-    var nnFeatures: [String] = []               // model inputs; empty = Filter screen's numeric columns
+    var nnFeatures: [String] = []               // model inputs you picked; empty = auto-pick (Filter columns that are features)
 
     // Alerts
     var email = EmailSettings()

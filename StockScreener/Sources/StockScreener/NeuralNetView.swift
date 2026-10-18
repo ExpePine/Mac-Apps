@@ -7,6 +7,7 @@ struct NeuralNetView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var tab = 0
     @State private var comboSearch = ""
+    @State private var showColumns = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,9 @@ struct NeuralNetView: View {
             }
         }
         .navigationTitle("N — Neural Net")
+        .sheet(isPresented: $showColumns) {
+            TrainingColumnsSheet().environmentObject(vm)
+        }
     }
 
     // MARK: Controls
@@ -78,23 +82,13 @@ struct NeuralNetView: View {
     }
 
     private var featureMenu: some View {
-        Menu {
-            ForEach(vm.headers.filter { $0 != "NN_score" }, id: \.self) { name in
-                Button {
-                    var list = vm.settings.nnFeatures.isEmpty ? vm.nnFeatureColumns : vm.settings.nnFeatures
-                    if list.contains(name) { list.removeAll { $0 == name } } else { list.append(name) }
-                    vm.settings.nnFeatures = list
-                } label: {
-                    if vm.nnFeatureColumns.contains(name) { Label(name, systemImage: "checkmark") } else { Text(name) }
-                }
-            }
-            Divider()
-            Button("Use the Filter screen's numeric columns") { vm.settings.nnFeatures = [] }
+        Button {
+            showColumns = true
         } label: {
-            Label("\(vm.nnFeatureColumns.count) input columns", systemImage: "slider.horizontal.3")
+            Label("Training columns: \(vm.nnFeatureColumns.count)\(vm.settings.nnFeatures.isEmpty ? " (auto)" : "")",
+                  systemImage: "slider.horizontal.3")
         }
-        .fixedSize()
-        .help("Which Filter columns the patterns and the neural net learn from")
+        .help("Choose which columns the patterns and the neural net learn from")
     }
 
     private var emptyState: some View {
@@ -173,6 +167,8 @@ struct NeuralNetView: View {
     private func modelTab(_ r: NNReport) -> some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 10) {
+                Text("Trained on: " + r.featureNames.joined(separator: ", "))
+                    .font(.caption).lineLimit(3)
                 Text("Model: inputs → 16 → 8 → 1 (ReLU, sigmoid), Adam, gainers weighted up").font(.caption).foregroundStyle(.secondary)
                 if let auc = r.auc {
                     metric("Test AUC", String(format: "%.2f", auc),
