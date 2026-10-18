@@ -102,6 +102,14 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Changes — cards (⇧⌘8)
+One screen of cards comparing the live data with the previous stored day. You can also pick any earlier day.
+- **Cards:** each one shows how many stocks match and the biggest changes, as old → new with the change.
+- **Setting up cards (Edit cards):** name, condition, column, amount (points or %), scope (all stocks / only the Filter list / only watchlists) and colour. Drag cards to reorder them.
+- **Conditions:** went up, went down, changed, crossed above or below a level, got a value, became blank, entered or left the Filter list, new stock in the sheet, stock gone from the sheet.
+- **Default cards:** Entered Filter, Left Filter, D_Trigger appeared, D_Trigger went up, New in sheet.
+- **Actions:** right-click a stock to add it to a watchlist or open its screenshots. Each card's ⋯ menu adds all its stocks to a watchlist or copies their symbols.
+
 ### Find (⌘F or ⌃F)
 In the Data Import and Filter tables, ⌘F or ⌃F opens a find bar. Every matching cell is outlined in yellow and the current match in orange. Press ↩ for the next match, ⇧↩ for the previous one, and Esc to close the bar.
 

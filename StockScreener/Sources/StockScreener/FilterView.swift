@@ -132,6 +132,12 @@ struct FilterView: View {
                         .background(RoundedRectangle(cornerRadius: 5).fill(Color.purple.opacity(0.12)))
                 }
                 .help("Neural Net: filter-value combinations shared by monthly top gainers (≥ \(vm.settings.nnGainThreshold)% in a month)")
+                Button {
+                    openWindow(id: "changes")
+                } label: {
+                    Label("Changes", systemImage: "rectangle.grid.2x2")
+                }
+                .help("Cards showing what changed since the previous day (⇧⌘8)")
                 WatchlistMenu()
                 AlertsButton()
                 AnimateButton()

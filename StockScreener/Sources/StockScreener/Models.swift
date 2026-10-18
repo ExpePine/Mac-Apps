@@ -231,6 +231,8 @@ struct AppSettings: Codable {
     var nnGainThreshold = 30                    // monthly gainer: % gain within the window
     var nnWindowDays = 21                       // ~1 month of trading days
     var nnFeatures: [String] = []               // model inputs you picked; empty = auto-pick (Filter columns that are features)
+    var changeCards: [ChangeCard] = ChangeCard.defaults(trigger: "D_Trigger")   // Changes screen
+    var changeHideEmpty = false
 
     // Alerts
     var email = EmailSettings()
@@ -266,6 +268,8 @@ struct AppSettings: Codable {
         nnGainThreshold = v(.nnGainThreshold, d.nnGainThreshold)
         nnWindowDays    = v(.nnWindowDays, d.nnWindowDays)
         nnFeatures      = v(.nnFeatures, d.nnFeatures)
+        changeCards     = v(.changeCards, ChangeCard.defaults(trigger: triggerColumn))
+        changeHideEmpty = v(.changeHideEmpty, d.changeHideEmpty)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

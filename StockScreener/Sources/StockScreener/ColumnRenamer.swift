@@ -19,6 +19,7 @@ enum ColumnRenamer {
         s.filterSortColumn = r(s.filterSortColumn)
         s.filterColumns = s.filterColumns.map(r)
         s.nnFeatures = s.nnFeatures.map(r)
+        s.changeCards = s.changeCards.map { var c = $0; c.column = r(c.column); return c }
         s.dateColumn = r(s.dateColumn)
         s.mv2.monthColumn = r(s.mv2.monthColumn)
         s.mv2.dayColumn = r(s.mv2.dayColumn)

@@ -92,6 +92,13 @@ final class ScreenerViewModel: ObservableObject {
     @Published var isFetchingWatch = false
     @Published var watchError: String?
     @Published var filterSelection: [SheetRow] = []
+
+    // Changes screen
+    @Published var changeResults: [UUID: ChangeResult] = [:]
+    @Published var changeCompareDay: String?          // nil = the previous stored day
+    @Published var changeComparedDay: String?         // the day actually used
+    @Published var changeStatus: String?
+    @Published var isComputingChanges = false
     var flashToken = 0
 
     // E column: per-row status on the Filter screen

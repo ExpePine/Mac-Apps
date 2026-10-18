@@ -77,6 +77,13 @@ struct ImportView: View {
                 .help("Open the Filter screen (⇧⌘1)")
 
                 Button {
+                    openWindow(id: "changes")
+                } label: {
+                    Label("Changes", systemImage: "rectangle.grid.2x2")
+                }
+                .help("Cards showing what changed since the previous day (⇧⌘8)")
+
+                Button {
                     openWindow(id: "notes")
                 } label: {
                     Label("MV2 Requirements & Pine", systemImage: "doc.text")
