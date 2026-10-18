@@ -20,6 +20,12 @@ enum ColumnRenamer {
         s.filterColumns = s.filterColumns.map(r)
         s.nnFeatures = s.nnFeatures.map(r)
         s.changeCards = s.changeCards.map { var c = $0; c.column = r(c.column); return c }
+        s.perfStudies = s.perfStudies.map { st in
+            var c = st
+            if c.source == .main { c.column = r(c.column) }
+            if c.splitBy.hasPrefix("main:") { c.splitBy = "main:" + r(String(c.splitBy.dropFirst(5))) }
+            return c
+        }
         s.dateColumn = r(s.dateColumn)
         s.mv2.monthColumn = r(s.mv2.monthColumn)
         s.mv2.dayColumn = r(s.mv2.dayColumn)

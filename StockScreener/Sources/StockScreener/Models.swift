@@ -233,6 +233,11 @@ struct AppSettings: Codable {
     var nnFeatures: [String] = []               // model inputs you picked; empty = auto-pick (Filter columns that are features)
     var changeCards: [ChangeCard] = ChangeCard.defaults(trigger: "D_Trigger")   // Changes screen
     var changeHideEmpty = false
+    // Performance pane
+    var perfStudies: [PerfStudy] = [PerfStudy()]
+    var perfSheetLink = ""                      // the experiments sheet
+    var perfSymbolColumn = ""                   // its stock-name column ("" = first column)
+    var perfImportedColumns: [String] = []      // columns taken from the experiments sheet
 
     // Alerts
     var email = EmailSettings()
@@ -270,6 +275,10 @@ struct AppSettings: Codable {
         nnFeatures      = v(.nnFeatures, d.nnFeatures)
         changeCards     = v(.changeCards, ChangeCard.defaults(trigger: triggerColumn))
         changeHideEmpty = v(.changeHideEmpty, d.changeHideEmpty)
+        perfStudies     = v(.perfStudies, d.perfStudies)
+        perfSheetLink   = v(.perfSheetLink, d.perfSheetLink)
+        perfSymbolColumn = v(.perfSymbolColumn, d.perfSymbolColumn)
+        perfImportedColumns = v(.perfImportedColumns, d.perfImportedColumns)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

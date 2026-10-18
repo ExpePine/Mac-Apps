@@ -65,6 +65,13 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 760, minHeight: 520)
         }
         .keyboardShortcut("8", modifiers: [.command, .shift])
+
+        Window("Performance", id: "perf") {
+            PerformanceView()
+                .environmentObject(vm)
+                .frame(minWidth: 1050, minHeight: 640)
+        }
+        .keyboardShortcut("9", modifiers: [.command, .shift])
         .commands { ToolsCommands() }
     }
 }
@@ -76,11 +83,12 @@ struct ToolsCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Tools") {
-            Text("Shortcuts ⇧⌘1 … ⇧⌘8 are in the Window menu")
+            Text("Shortcuts ⇧⌘1 … ⇧⌘9 are in the Window menu")
             Divider()
             Button("Data Import") { openWindow(id: "data") }
             Button("Filter") { openWindow(id: "filter") }
             Button("Changes (cards)") { openWindow(id: "changes") }
+            Button("Performance") { openWindow(id: "perf") }
             Button("Email & Rules") { openWindow(id: "alerts") }
             Button("Alerts") { openWindow(id: "alertlog") }
             Button("Neural Net") { openWindow(id: "nn") }

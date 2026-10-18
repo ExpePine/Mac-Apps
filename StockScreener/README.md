@@ -102,6 +102,19 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Performance (⇧⌘9)
+A **study** looks at one column whose value says when an event happened. For example, D_Trigger = 100 means the trigger was 100 trading days before the sheet's data day; you can switch a study to calendar days or to dates. For each stock, the app finds that day in Yahoo's price history and measures what the stock did after it:
+- return from the event close to the latest close, and the same compared with the Nifty 50
+- best rise and how many trading days after the event it came, and the worst fall
+- whether it reached your "rose significantly" %, and how fast
+- returns at fixed horizons (+5, +10, +21, +50, +100 trading days)
+
+The results show summary figures, a chart of the average and median move after the event, a histogram of returns, and a sortable table of stocks. The table can be copied, exported to CSV, or added to a watchlist.
+
+**Compare groups by** splits the results by any column, from the main sheet or the experiments sheet. Numbers are split into Low / Mid / High thirds; text is split by value.
+
+**Experiments sheet:** paste a second sheet's link under *Sheet & columns…*, choose its stock-name column and the columns you want, then use them as a study's event column or as the group-by column.
+
 ### Changes — cards (⇧⌘8)
 One screen of cards comparing the live data with the previous stored day. You can also pick any earlier day.
 - **Cards:** each one shows how many stocks match and the biggest changes, as old → new with the change.

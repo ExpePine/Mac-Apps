@@ -99,6 +99,15 @@ final class ScreenerViewModel: ObservableObject {
     @Published var changeComparedDay: String?         // the day actually used
     @Published var changeStatus: String?
     @Published var isComputingChanges = false
+
+    // Performance pane
+    @Published var expTable: SheetTable = ExperimentStore.load()
+    @Published var expStatus: String?
+    @Published var isLoadingExp = false
+    @Published var perfResults: [UUID: PerfResult] = [:]
+    @Published var perfRunning: UUID?
+    @Published var perfStatus: String?
+    @Published var perfProgress: (Int, Int) = (0, 0)
     var flashToken = 0
 
     // E column: per-row status on the Filter screen

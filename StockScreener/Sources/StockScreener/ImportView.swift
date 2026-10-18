@@ -82,6 +82,12 @@ struct ImportView: View {
                     Label("Changes", systemImage: "rectangle.grid.2x2")
                 }
                 .help("Cards showing what changed since the previous day (⇧⌘8)")
+                Button {
+                    openWindow(id: "perf")
+                } label: {
+                    Label("Performance", systemImage: "chart.line.uptrend.xyaxis")
+                }
+                .help("How stocks did after an event such as D_Trigger (⇧⌘9)")
 
                 Button {
                     openWindow(id: "notes")
