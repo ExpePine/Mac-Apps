@@ -139,6 +139,12 @@ struct FilterView: View {
                 }
                 .help("Cards showing what changed since the previous day (⇧⌘8)")
                 Button {
+                    openWindow(id: "gainers")
+                } label: {
+                    Label("Gainers", systemImage: "flame")
+                }
+                .help("Daily gainers with NIFTY / SENSEX charts and news reasons (⇧⌘G)")
+                Button {
                     openWindow(id: "sectors")
                 } label: {
                     Label(vm.unseenRegimeCount > 0 ? "Sectors (\(vm.unseenRegimeCount))" : "Sectors",

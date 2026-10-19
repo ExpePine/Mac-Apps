@@ -1,0 +1,307 @@
+import SwiftUI
+import Charts
+
+/// Daily Gainers: NIFTY 50 / SENSEX mini charts, the day's gainers with sector mix, Filter columns in colour,
+/// and a 5–10 word "why" per stock from news headlines via Groq.
+struct GainersView: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var chartRange = 0              // 0 = today (5-min), 1 = 3 months
+    @State private var showSettings = false
+    @State private var sortColumn: Int?
+    @State private var sortDescending = true
+    @State private var selection: [SheetRow] = []
+    @State private var version = 0
+
+    var body: some View {
+        let day = vm.currentGainerDay
+        let gainers = vm.gainers(on: day)
+        VStack(spacing: 0) {
+            indexStrip
+            Divider()
+            controls(day: day, gainers: gainers)
+            Divider()
+            summary(day: day, gainers: gainers)
+            Divider()
+            if gainers.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 40)).foregroundStyle(.secondary)
+                    Text("No stocks up ≥ \(fmt(vm.settings.gainersThreshold))% on \(day)").font(.title3)
+                    Text("Lower the threshold, pick another day, or click Update prices (Yahoo) if the latest day is missing.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                table(day: day, gainers: gainers)
+            }
+        }
+        .navigationTitle("Daily Gainers")
+        .task {
+            while !Task.isCancelled {
+                await vm.refreshIndexCharts()
+                try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)        // every 5 minutes while open
+            }
+        }
+        .sheet(isPresented: $showSettings) { NewsAISettings().environmentObject(vm) }
+        .onChange(of: vm.newsCache.reasons.count) { _ in version += 1 }
+        .onChange(of: vm.settings.gainersShowFilterColumns) { _ in version += 1 }
+    }
+
+    // MARK: Index mini charts
+
+    private var indexStrip: some View {
+        HStack(spacing: 14) {
+            indexCard("NIFTY 50", ScreenerViewModel.benchmarkSymbol)
+            indexCard("SENSEX", ScreenerViewModel.sensexSymbol)
+            Picker("", selection: $chartRange) {
+                Text("Today").tag(0)
+                Text("3M").tag(1)
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 110)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private func indexCard(_ name: String, _ symbol: String) -> some View {
+        let intra = vm.indexIntraday[symbol]
+        let daily = vm.priceBook.series(for: symbol)
+        let points: [(Int, Double)] = {
+            if chartRange == 0, let s = intra, s.closes.count > 1 { return s.closes.enumerated().map { ($0.offset, $0.element) } }
+            let c = Array((daily?.closes ?? []).suffix(63))
+            return c.enumerated().map { ($0.offset, $0.element) }
+        }()
+        let change: Double? = chartRange == 0 ? (intra?.change ?? daily?.dailyChange(on: daily?.lastDay ?? ""))
+                                              : (daily.flatMap { s in s.closes.count > 63 ? (s.closes.last! / s.closes[s.closes.count - 64] - 1) * 100 : nil })
+        let last = intra?.last ?? daily?.closes.last
+        let up = (change ?? 0) >= 0
+        let prev = chartRange == 0 ? intra?.previousClose : nil
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.caption.bold()).foregroundStyle(.secondary)
+                Text(last.map { $0.formatted(.number.precision(.fractionLength(0...2))) } ?? "—").font(.title3.bold().monospacedDigit())
+                Text(change.map { String(format: "%+.2f%%", $0) } ?? "—").font(.callout.bold().monospacedDigit())
+                    .foregroundStyle(up ? Color.green : Color.red)
+            }
+            .frame(width: 110, alignment: .leading)
+            Chart {
+                ForEach(points, id: \.0) { p in
+                    LineMark(x: .value("t", p.0), y: .value("v", p.1)).foregroundStyle(up ? Color.green : Color.red)
+                    AreaMark(x: .value("t", p.0), yStart: .value("lo", points.map(\.1).min() ?? p.1), yEnd: .value("v", p.1))
+                        .foregroundStyle((up ? Color.green : Color.red).opacity(0.08))
+                }
+                if let prev { RuleMark(y: .value("prev", prev)).foregroundStyle(Color.secondary.opacity(0.5)).lineStyle(StrokeStyle(dash: [3, 3])) }
+            }
+            .chartXAxis(.hidden)
+            .chartYScale(domain: .automatic(includesZero: false))
+            .chartYAxis { AxisMarks(position: .trailing) { _ in AxisValueLabel().font(.system(size: 8)) } }
+            .frame(height: 70)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .help(chartRange == 0 ? "Today, 5-minute Yahoo data; dashed line = previous close" : "Last 3 months of daily closes")
+    }
+
+    // MARK: Controls
+
+    private func controls(day: String, gainers: [GainerRow]) -> some View {
+        HStack(spacing: 10) {
+            Picker("Day", selection: $vm.gainersDay) {
+                Text("Latest (\(vm.gainerDays.first ?? "—"))").tag(String?.none)
+                ForEach(vm.gainerDays.dropFirst(), id: \.self) { d in Text(d).tag(String?.some(d)) }
+            }
+            .frame(width: 210)
+            Text("Up at least").font(.callout)
+            TextField("5", value: $vm.settings.gainersThreshold, format: .number).textFieldStyle(.roundedBorder).frame(width: 50)
+            Text("%").font(.callout)
+            Toggle("Filter columns & colours", isOn: $vm.settings.gainersShowFilterColumns).toggleStyle(.switch).controlSize(.small)
+                .help("Show the Filter screen's columns next to each gainer, painted with your cell colours")
+            Spacer()
+            if let p = vm.explainProgress {
+                ProgressView(value: Double(p.0), total: Double(max(1, p.1))).frame(width: 100)
+                Text("\(p.0)/\(p.1)").font(.caption.monospacedDigit())
+            }
+            if let s = vm.newsStatus { Text(s).font(.caption).foregroundStyle(.orange).lineLimit(1) }
+            Button { vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
+                .disabled(vm.isExplaining)
+                .help("Fetch recent headlines for each gainer and ask Groq for a 5–10 word reason (cached per day)")
+            Menu {
+                Button("Re-fetch all reasons for this day") { vm.explainGainers(gainers, day: day, force: true) }
+                Button("Update Yahoo prices") { Task { await vm.updateSectorPrices() } }
+                Divider()
+                Button("News & AI settings…") { showSettings = true }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    // MARK: Summary (analysis)
+
+    private func summary(day: String, gainers: [GainerRow]) -> some View {
+        let br = vm.breadth(on: day)
+        let avg = gainers.isEmpty ? 0 : gainers.map(\.change).reduce(0, +) / Double(gainers.count)
+        let sectorIdx = vm.sectorColumnIndex
+        var bySector: [String: Int] = [:]
+        if let sc = sectorIdx { for g in gainers { bySector[g.row.text(sc).isEmpty ? "—" : g.row.text(sc), default: 0] += 1 } }
+        let filterSet = Set(vm.filterRows.map(\.id))
+        let inFilter = gainers.filter { filterSet.contains($0.row.id) }.count
+        let explained = gainers.filter { vm.reason($0.symbol, day: day) != nil }.count
+        return HStack(alignment: .top, spacing: 20) {
+            stat("Gainers ≥ \(fmt(vm.settings.gainersThreshold))%", "\(gainers.count)", .green)
+            stat("Average gain", String(format: "%+.1f%%", avg), .green)
+            stat("Advancers / decliners", "\(br.up) / \(br.down)", br.up >= br.down ? .green : .red,
+                 note: br.up + br.down > 0 ? String(format: "%.0f%% up", Double(br.up) / Double(br.up + br.down) * 100) : "")
+            stat("In your Filter list", "\(inFilter)", .blue)
+            stat("Reasons", "\(explained)/\(gainers.count)", .purple)
+            if !bySector.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Sectors among gainers").font(.caption).foregroundStyle(.secondary)
+                    FlowChips(items: bySector.sorted { $0.value > $1.value }.prefix(10).map { "\($0.key) \($0.value)" })
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    // MARK: Table
+
+    private func table(day: String, gainers: [GainerRow]) -> some View {
+        let base = vm.table
+        let extraNames = ["Day %", "Close", "Why (news)"]
+        let derived = SheetTable(headers: base.headers + extraNames,
+                                 rows: gainers.map { g in
+                                     let why = vm.reason(g.symbol, day: day) ?? ""
+                                     return SheetRow(id: g.row.id,
+                                                     cells: g.row.cells + [String(format: "%+.2f%%", g.change) + (g.fromYahoo ? "" : " *"),
+                                                                           g.close.map { String(format: "%.2f", $0) } ?? "", why],
+                                                     numbers: g.row.numbers + [g.change, g.close, nil])
+                                 },
+                                 originalHeaders: base.originalHeaders + extraNames)
+        let n = base.headers.count
+        let dayCol = n, closeCol = n + 1, whyCol = n + 2
+        var cols: [Int] = [vm.labelIndex ?? 0, dayCol, closeCol, whyCol]
+        if let sc = vm.sectorColumnIndex { cols.append(sc) }
+        if vm.settings.gainersShowFilterColumns {
+            cols += vm.filterColumnIndices.filter { !cols.contains($0) }
+        }
+        var rows = derived.rows
+        if let c = sortColumn { rows = Sorter.sort(rows, column: c, descending: sortDescending) }
+        let painter: CellPainter? = vm.settings.gainersShowFilterColumns ? CellPainter(vm.settings.cellRules, table: derived) : nil
+        return VStack(spacing: 0) {
+            SheetTableView(headers: derived.headers, originalHeaders: derived.originalHeaders, columns: cols, rows: rows,
+                           version: version &+ rows.count &+ (sortColumn ?? -1) &* 31 &+ (sortDescending ? 1 : 0),
+                           emphasizedColumn: dayCol, sortColumn: sortColumn, sortDescending: sortDescending,
+                           painter: painter, frozenColumns: 1,
+                           onHeaderClick: { i in
+                               if sortColumn == i { sortDescending.toggle() } else { sortColumn = i; sortDescending = true }
+                           },
+                           sColor: { vm.sColor($0) },
+                           onSClick: { row in vm.shotSymbol = vm.rowKey(row); openWindow(id: "shots") },
+                           onSelectRows: { selection = $0 },
+                           rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow) })
+            Divider()
+            HStack {
+                Text("Day % = Yahoo close vs previous close (* = from the sheet's change% column). “Why” = Groq's summary of recent headlines (\(vm.settings.newsProvider.rawValue)); check the source before acting. Right-click a stock to add it to a watchlist.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(6)
+        }
+    }
+
+    // MARK: Helpers
+
+    private func stat(_ title: String, _ value: String, _ color: Color, note: String = "") -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(color)
+            if !note.isEmpty { Text(note).font(.caption2).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func fmt(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...1))) }
+}
+
+/// Simple wrapping row of small chips.
+struct FlowChips: View {
+    let items: [String]
+    var body: some View {
+        let rows = stride(from: 0, to: items.count, by: 5).map { Array(items[$0..<min($0 + 5, items.count)]) }
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 4) {
+                    ForEach(row, id: \.self) { t in
+                        Text(t).font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Groq key + model, news source, company-name column.
+struct NewsAISettings: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var key = ""
+    @State private var models: [String] = []
+    @State private var status = ""
+    @State private var loading = false
+
+    var body: some View {
+        Form {
+            Section {
+                SecureField("Groq API key", text: $key)
+                HStack {
+                    Button("Save key") { Keychain.set(key.trimmingCharacters(in: .whitespacesAndNewlines), for: GroqClient.keychainAccount); status = "Key saved in the Keychain."; loadModels() }
+                    Button("Load models") { loadModels() }.disabled(loading)
+                    if loading { ProgressView().controlSize(.small) }
+                    Text(status).font(.caption).foregroundStyle(.secondary)
+                }
+                Picker("Model", selection: $vm.settings.groqModel) {
+                    if vm.settings.groqModel.isEmpty { Text("Pick a model…").tag("") }
+                    if !vm.settings.groqModel.isEmpty && !models.contains(vm.settings.groqModel) { Text(vm.settings.groqModel).tag(vm.settings.groqModel) }
+                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                }
+            } header: { Text("Groq (AI summaries)") } footer: {
+                Text("Get a key at console.groq.com. The key stays in your Mac's Keychain. The model list comes live from Groq because models change; pick a chat model (not a speech or guard model). Only headlines are sent — no portfolio data.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("News source", selection: $vm.settings.newsProvider) {
+                    ForEach(NewsProvider.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                Picker("Company name column (better searches)", selection: $vm.settings.companyNameColumn) {
+                    Text("Auto (\(vm.companyNameIndex.map { vm.headers[$0] } ?? "symbol only"))").tag("")
+                    ForEach(vm.headers, id: \.self) { Text($0).tag($0) }
+                }
+            } header: { Text("News") } footer: {
+                Text("Both sources are free and need no key, but are unofficial: Google News RSS may slow down if polled heavily, and Yahoo's search endpoint can change. Reasons are cached per day.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+        .formStyle(.grouped)
+        .frame(width: 560, height: 480)
+        .onAppear {
+            key = GroqClient.apiKey
+            if !key.isEmpty { loadModels() }
+        }
+    }
+
+    private func loadModels() {
+        loading = true
+        Task {
+            do {
+                let m = try await GroqClient.models()
+                models = m.filter { id in !["whisper", "tts", "guard", "playai", "orpheus"].contains { id.lowercased().contains($0) } }
+                status = "\(models.count) chat models"
+            } catch {
+                status = error.localizedDescription
+            }
+            loading = false
+        }
+    }
+}

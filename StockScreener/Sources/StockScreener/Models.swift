@@ -251,6 +251,12 @@ struct AppSettings: Codable {
     var regimeMajorOnly = true                  // only into Leading / Lagging, trend up / down, market flips
     var regimeEmail = false
     var sectorAutoUpdate = true                 // refresh Yahoo prices once a day after new sheet data
+    // Daily gainers
+    var gainersThreshold = 5.0                  // % up on the day
+    var gainersShowFilterColumns = false        // show the Filter screen's columns with their colours
+    var newsProvider: NewsProvider = .googleNews
+    var groqModel = ""                          // picked from Groq's live model list
+    var companyNameColumn = ""                  // optional column with company names (better news search)
 
     // Alerts
     var email = EmailSettings()
@@ -304,6 +310,11 @@ struct AppSettings: Codable {
         regimeMajorOnly = v(.regimeMajorOnly, d.regimeMajorOnly)
         regimeEmail = v(.regimeEmail, d.regimeEmail)
         sectorAutoUpdate = v(.sectorAutoUpdate, d.sectorAutoUpdate)
+        gainersThreshold = v(.gainersThreshold, d.gainersThreshold)
+        gainersShowFilterColumns = v(.gainersShowFilterColumns, d.gainersShowFilterColumns)
+        newsProvider = v(.newsProvider, d.newsProvider)
+        groqModel = v(.groqModel, d.groqModel)
+        companyNameColumn = v(.companyNameColumn, d.companyNameColumn)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

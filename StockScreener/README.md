@@ -102,6 +102,14 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Daily Gainers (⇧⌘G)
+- **Index charts:** small **NIFTY 50** and **SENSEX** charts at the top, showing today in 5-minute steps (refreshed every 5 minutes while the window is open) or the last 3 months.
+- **Gainers:** every sheet stock up at least X% on the chosen day, using Yahoo close vs previous close.
+- **Analysis:** number of gainers, average gain, advancers vs decliners, how many are in your Filter list, and which sectors they come from.
+- **Why (news):** click **Why? (news + Groq)** to fetch recent headlines for each gainer (Google News RSS or Yahoo Finance, both free) and have **Groq** sum up the likely reason in 5–10 words. Groq is told to use only the headlines and to say "No clear news" otherwise. Reasons are cached per day.
+- **Groq setup:** add your API key in *News & AI settings* (kept in the Keychain) and pick a model from Groq's live list.
+- **Filter columns & colours:** this toggle adds the Filter screen's columns, painted with your cell colours.
+
 ### Sectors & regime alerts (⇧⌘0)
 This screen uses the sheet's **Sector** column. You can pick a different column in *Alerts & settings*. It also uses Yahoo daily closes, which are fetched once and then topped up once a day after new sheet data arrives.
 - **Momentum:** each sector has an equal-weight index. The table shows its rank (with the change over 5 days), a 0–100 score, its 1W / 1M / 3M change, its 1M change vs the Nifty, rotation state, trend, breadth (% of stocks above their 50-day average) and a one-year sparkline. Click a sector to see its chart and its best stocks.

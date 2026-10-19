@@ -79,6 +79,13 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 1000, minHeight: 600)
         }
         .keyboardShortcut("0", modifiers: [.command, .shift])
+
+        Window("Daily Gainers", id: "gainers") {
+            GainersView()
+                .environmentObject(vm)
+                .frame(minWidth: 1000, minHeight: 620)
+        }
+        .keyboardShortcut("g", modifiers: [.command, .shift])
         .commands { ToolsCommands() }
     }
 }
@@ -97,6 +104,7 @@ struct ToolsCommands: Commands {
             Button("Changes (cards)") { openWindow(id: "changes") }
             Button("Performance") { openWindow(id: "perf") }
             Button("Sectors & regime alerts") { openWindow(id: "sectors") }
+            Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
             Button("Email & Rules") { openWindow(id: "alerts") }
             Button("Alerts") { openWindow(id: "alertlog") }
             Button("Neural Net") { openWindow(id: "nn") }

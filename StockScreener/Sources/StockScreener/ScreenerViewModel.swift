@@ -120,6 +120,14 @@ final class ScreenerViewModel: ObservableObject {
     @Published var regimeLog: [RegimeLogEntry] = RegimeLogStore.load()
     @Published var regimeLastSeen: Date = (UserDefaults.standard.object(forKey: "StockScreener.regimeLastSeen") as? Date) ?? .distantPast
     @Published var regimeBanner: [RegimeChange] = []
+
+    // Daily gainers
+    @Published var indexIntraday: [String: IntradaySeries] = [:]     // ^NSEI, ^BSESN
+    @Published var gainersDay: String?                                // nil = latest trading day
+    @Published var newsCache = NewsCache.load()
+    @Published var isExplaining = false
+    @Published var explainProgress: (Int, Int)?
+    @Published var newsStatus: String?
     var flashToken = 0
 
     // E column: per-row status on the Filter screen

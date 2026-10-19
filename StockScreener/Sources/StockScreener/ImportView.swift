@@ -83,6 +83,12 @@ struct ImportView: View {
                 }
                 .help("Cards showing what changed since the previous day (⇧⌘8)")
                 Button {
+                    openWindow(id: "gainers")
+                } label: {
+                    Label("Gainers", systemImage: "flame")
+                }
+                .help("Daily gainers with NIFTY / SENSEX charts and news reasons (⇧⌘G)")
+                Button {
                     openWindow(id: "sectors")
                 } label: {
                     Label("Sectors", systemImage: "square.grid.3x3")
