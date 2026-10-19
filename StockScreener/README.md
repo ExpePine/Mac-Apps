@@ -135,6 +135,13 @@ The results show summary figures, a chart of the average and median move after t
   - the stock's own move before the event
   - written findings, each marked *solid* or *tentative*
 
+**Best strategies:** six entry filters (market rising, stock weak or strong before, signals flagged by 2+ indicators…) are combined with 160 exit rules (take-profit, stop, trailing stop, max hold). Each combination is replayed on every stock's real price path after its signal, for each indicator and for all indicators pooled. Strategies are chosen on the older half of signals and checked on the newer half; **held up** means the strategy was still profitable there. Buy-and-hold for 21 days is shown as a baseline.
+
+**Good vs bad incidents:** compares the top 25% of signals with the bottom 25%.
+- Factors ranked by how well they separate the two groups (AUC), with the best single cut for each.
+- The factors used: the stock's and the Nifty's move before the signal, sector, indicator, weekday, number of indicators that flagged the stock, and the move 3 and 5 days after the signal (marked *after entry*, an early-warning sign rather than an entry filter).
+- A small decision tree turns these into "IF … AND …" rules, learned on older signals and checked on newer ones.
+
 **Experiments sheet:** paste a second sheet's link under *Sheet & columns…*, choose its stock-name column and the columns you want, then use them as a study's event column or as the group-by column.
 
 ### Changes — cards (⇧⌘8)

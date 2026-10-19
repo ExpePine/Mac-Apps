@@ -182,8 +182,10 @@ extension ScreenerViewModel {
         guard !runs.isEmpty else { compareResult = nil; return }
         let h = max(1, settings.perfCompareHorizon), t = settings.perfCompareTarget, st = settings.perfCompareStop
         isComparing = true
+        var sectors: [String: String] = [:]
+        for (sec, syms) in sectorMembers { for sym in syms { sectors[sym] = sec } }
         Task { [weak self] in
-            let r = await Task.detached(priority: .userInitiated) { PerfCompare.compare(runs, horizon: h, target: t, stop: st) }.value
+            let r = await Task.detached(priority: .userInitiated) { PerfCompare.compare(runs, horizon: h, target: t, stop: st, sectors: sectors) }.value
             self?.compareResult = r
             self?.isComparing = false
         }

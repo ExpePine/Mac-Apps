@@ -119,6 +119,8 @@ struct ComparisonResult {
     var momentum: [PatternLine] = []
     var insights: [Insight] = []
     var best: (profit: UUID?, fast: UUID?, safe: UUID?, riskAdjusted: UUID?) = (nil, nil, nil, nil)
+    var strategies: [StrategyResult] = []
+    var incidents = IncidentStudy()
 }
 
 enum PerfCompare {
@@ -196,7 +198,8 @@ enum PerfCompare {
         }
     }
 
-    static func compare(_ runs: [PerfRun], horizon h: Int, target: Double, stop: Double, rounds: Int = 1000) -> ComparisonResult {
+    static func compare(_ runs: [PerfRun], horizon h: Int, target: Double, stop: Double, rounds: Int = 1000,
+                        sectors: [String: String] = [:]) -> ComparisonResult {
         var result = ComparisonResult()
         result.horizon = h
         var rng = SeededRandom(seed: 2026)
@@ -324,6 +327,8 @@ enum PerfCompare {
         }
 
         result.insights = insights(result, runs: runs, target: target, stop: stop)
+        result.strategies = StrategyFinder.find(runs)
+        result.incidents = IncidentAnalyzer.study(runs, horizon: h, sectors: sectors)
         return result
     }
 

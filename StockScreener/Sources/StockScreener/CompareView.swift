@@ -99,6 +99,8 @@ struct CompareView: View {
                 pathChart(r, colors)
                 distribution(r, colors)
             }
+            strategies(r)
+            incidents(r.incidents)
             if !r.pairs.isEmpty { headToHead(r) }
             patterns(r, colors)
             Text("Returns are close-to-close from the event day's Yahoo close to the close H trading days later. Only stocks with at least H days of history count; the speed curve also uses newer events until they run out of history (Kaplan–Meier). 95% ranges come from 1,000 bootstrap resamples. “vs Nifty” is approximate. Past results are not a forecast or financial advice.")
@@ -350,6 +352,122 @@ struct CompareView: View {
                 }
             }
             Text("Mean return after H days (stocks). Grey = fewer than 5 stocks.").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Strategies
+
+    private func strategies(_ r: ComparisonResult) -> some View {
+        box("Best strategies — entry filter × exit rule") {
+            Text("Every combination of entry filter (6) and exit rule (take-profit, stop, trailing stop, max hold: 160) is replayed on each stock's real price path after its signal. Strategies are ranked on the OLDER half of signals only, then checked on the NEWER half — “held up” means still profitable there. The last row of each block is plain buy-and-hold for 21 days, for reference.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if r.strategies.isEmpty {
+                Text("Needs at least 20 signals with enough price history.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 4) {
+                    GridRow {
+                        Text("Indicator").gridColumnAlignment(.leading); Text("Entry").gridColumnAlignment(.leading)
+                        Text("Exit").gridColumnAlignment(.leading); Text("Trades"); Text("Avg / trade"); Text("Win"); Text("PF")
+                        Text("Avg hold"); Text("Per day"); Text("Worst 5%"); Text("Older half"); Text("Newer half"); Text("")
+                    }
+                    .font(.caption.bold()).foregroundStyle(.secondary)
+                    ForEach(Array(r.strategies.enumerated()), id: \.offset) { i, s in
+                        let isBase = s.filter == .all && s.rule.target == nil && s.rule.stop == nil && s.rule.trail == nil && s.rule.hold == 21
+                        if i > 0 && r.strategies[i - 1].scope != s.scope { GridRow { Divider().gridCellColumns(13) } }
+                        GridRow {
+                            Text(i == 0 || r.strategies[i - 1].scope != s.scope ? s.scope : "").fontWeight(.semibold).lineLimit(1)
+                            Text(s.filter.rawValue).font(.caption).lineLimit(2).frame(maxWidth: 180, alignment: .leading)
+                            Text(isBase ? "buy & hold 21d (baseline)" : s.rule.text).font(.caption).foregroundStyle(isBase ? .secondary : .primary)
+                            Text("\(s.trades)").foregroundStyle(.secondary)
+                            Text(pct(s.mean)).foregroundStyle(s.mean >= 0 ? Color.green : Color.red).fontWeight(.semibold)
+                            Text(String(format: "%.0f%%", s.winRate * 100))
+                            Text(s.profitFactor.map { String(format: "%.2f", $0) } ?? "∞")
+                            Text(String(format: "%.0fd", s.avgHold))
+                            Text(String(format: "%+.2f%%", s.perDay))
+                            Text(pct(s.worst5)).foregroundStyle(.red)
+                            Text(pct(s.trainMean)).foregroundStyle(.secondary)
+                            Text(s.testMean.map(pct) ?? "—").foregroundStyle((s.testMean ?? 0) >= 0 ? Color.green : Color.red)
+                            if isBase { Text("") } else {
+                                Text(s.heldUp ? "held up" : "faded").font(.caption2.bold())
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Capsule().fill((s.heldUp ? Color.green : Color.orange).opacity(0.15)))
+                                    .foregroundStyle(s.heldUp ? Color.green : Color.orange)
+                            }
+                        }
+                        .font(.callout.monospacedDigit())
+                    }
+                }
+                Text("Per day = average return ÷ average days held: how hard the money works. Exits use daily closes (real fills, gaps and costs will be worse). Not financial advice.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Good vs bad incidents
+
+    private func incidents(_ st: IncidentStudy) -> some View {
+        box("Good vs bad incidents — what separates them") {
+            if st.good + st.bad < 40 {
+                Text("Needs at least 40 signals with \(st.horizon)+ days of history.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text("Good = top 25% of returns after \(st.horizon) days (≥ \(pct(st.goodCut))), bad = bottom 25% (≤ \(pct(st.badCut))); \(st.good) good and \(st.bad) bad signals, the middle half left out to sharpen the contrast.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Single factors, strongest first").font(.subheadline.bold())
+                        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                            GridRow {
+                                Text("Factor"); Text("Separation"); Text("Good").gridColumnAlignment(.trailing); Text("Bad").gridColumnAlignment(.trailing); Text("Best cut")
+                            }
+                            .font(.caption.bold()).foregroundStyle(.secondary)
+                            ForEach(st.features) { f in
+                                GridRow {
+                                    HStack(spacing: 4) {
+                                        Text(f.name).lineLimit(1)
+                                        if f.early {
+                                            Text("after entry").font(.caption2).padding(.horizontal, 4)
+                                                .background(Capsule().fill(Color.blue.opacity(0.15))).foregroundStyle(.blue)
+                                                .help("Measured after the signal — useful as an early exit warning, not as an entry filter")
+                                        }
+                                    }
+                                    HStack(spacing: 4) {
+                                        let strength = min(1, abs(f.auc - 0.5) * 4)
+                                        RoundedRectangle(cornerRadius: 2).fill(strength > 0.4 ? Color.green : (strength > 0.15 ? Color.orange : Color.secondary))
+                                            .frame(width: 60 * strength + 2, height: 8)
+                                        Text(String(format: "%.2f", f.auc)).font(.caption.monospacedDigit())
+                                    }
+                                    .help("AUC: 0.50 = no separation; further from 0.50 = stronger (above = higher values go with good)")
+                                    Text(f.goodMedian).font(.caption.monospacedDigit()).foregroundStyle(.green)
+                                    Text(f.badMedian).font(.caption.monospacedDigit()).foregroundStyle(.red)
+                                    Text(f.rule).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                .font(.callout)
+                            }
+                        }
+                        Text("Good / Bad = median value among good and bad signals.").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Rules found (decision tree, entry-time factors)").font(.subheadline.bold())
+                        Text(String(format: "Overall %.0f%% of these signals are good. Learned on older signals, checked on newer ones.", st.baseGoodRate * 100))
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(st.leaves) { leaf in
+                            HStack(alignment: .top, spacing: 8) {
+                                let up = leaf.goodRate > st.baseGoodRate + 0.08, down = leaf.goodRate < st.baseGoodRate - 0.08
+                                Image(systemName: up ? "hand.thumbsup.fill" : (down ? "hand.thumbsdown.fill" : "minus.circle"))
+                                    .foregroundStyle(up ? Color.green : (down ? Color.red : Color.secondary))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(leaf.conditions.joined(separator: "  AND  ")).font(.callout)
+                                    Text(String(format: "%.0f%% good (n=%d)", leaf.goodRate * 100, leaf.n)
+                                         + (leaf.testGoodRate.map { String(format: " · newer signals: %.0f%% (n=%d)", $0 * 100, leaf.testN) } ?? ""))
+                                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Text("A rule is believable when the newer-signal rate stays on the same side of the overall rate.").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: 460, alignment: .leading)
+                }
+            }
         }
     }
 
