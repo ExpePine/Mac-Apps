@@ -172,7 +172,7 @@ enum MBEngine {
         return PriceSeries(days: Array(s.days[i...]), closes: Array(s.closes[i...]))
     }
 
-    static func monthBefore(_ m: String, _ n: Int) -> String {
+    nonisolated static func monthBefore(_ m: String, _ n: Int) -> String {
         let p = m.split(separator: "-").compactMap { Int($0) }
         guard p.count == 2 else { return m }
         var y = p[0], mo = p[1] - n
