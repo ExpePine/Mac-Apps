@@ -36,3 +36,20 @@ final class QuickFilterTests: XCTestCase {
         XCTAssertFalse(ColumnQuickFilter().isActive)
     }
 }
+
+final class ChartLinkTests: XCTestCase {
+    func testImportAndPattern() throws {
+        let csv = """
+        Symbol,Link1
+        20MICRONS,https://in.tradingview.com/chart/vnr7IqQO/?symbol=NSE%3A20MICRONS
+        360ONE,https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3A360ONE
+        3MINDIA,https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3A3MINDIA
+        """
+        let t = try SheetService.parse(Data(csv.utf8)).table
+        let b = ChartLinkBook.from(t, symbolColumn: "Symbol")
+        XCTAssertEqual(b.columns, ["Link1"])
+        XCTAssertEqual(b.templates.first, "https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3A{SYMBOL}")
+        XCTAssertEqual(b.url(for: "20microns", fallbackTemplate: "")?.absoluteString, "https://in.tradingview.com/chart/vnr7IqQO/?symbol=NSE%3A20MICRONS")
+        XCTAssertEqual(b.url(for: "M&M", fallbackTemplate: "")?.absoluteString, "https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3AM%26M")
+    }
+}

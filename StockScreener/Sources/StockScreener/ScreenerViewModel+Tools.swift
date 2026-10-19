@@ -126,10 +126,11 @@ extension ScreenerViewModel {
     }
 
     /// Right-click menu for a stock row (Data and Filter tables).
-    func rowMenu(_ row: SheetRow, selection: [SheetRow], openWindow: OpenWindowAction) -> [(String, () -> Void)] {
+    func rowMenu(_ row: SheetRow, selection: [SheetRow], openWindow: OpenWindowAction, queue: [SheetRow] = []) -> [(String, () -> Void)] {
         let sym = rowKey(row)
         let targets = selection.contains(where: { $0.id == row.id }) && selection.count > 1 ? selection : [row]
-        var items: [(String, () -> Void)] = []
+        let queueSymbols = queue.map { rowKey($0) }
+        var items: [(String, () -> Void)] = [("Open chart of \(sym)", { [weak self] in self?.openChart(sym, queue: queueSymbols, openWindow: openWindow) }), ("-", {})]
         for list in watchlists {
             let title = targets.count > 1 ? "Add \(targets.count) stocks to “\(list.name)”" : "Add \(sym) to “\(list.name)”"
             items.append((title, { [weak self] in self?.addToWatchlist(targets, listID: list.id) }))

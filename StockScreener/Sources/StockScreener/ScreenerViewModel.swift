@@ -128,6 +128,13 @@ final class ScreenerViewModel: ObservableObject {
     @Published var isExplaining = false
     @Published var explainProgress: (Int, Int)?
     @Published var newsStatus: String?
+
+    // Chart links & in-app chart viewer
+    @Published var chartBook = ChartLinkBook.load()
+    @Published var chartSymbol: String?
+    @Published var chartQueue: [String] = []        // the list the chart was opened from (for ◀ ▶)
+    @Published var chartStatus: String?
+    @Published var isImportingCharts = false
     var flashToken = 0
 
     // E column: per-row status on the Filter screen

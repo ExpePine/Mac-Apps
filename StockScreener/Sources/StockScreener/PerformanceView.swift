@@ -385,6 +385,7 @@ struct PerformanceView: View {
                 ForEach(vm.watchlists) { list in
                     Button("Add \(ids.count) to “\(list.name)”") { vm.addSymbols(Array(ids), listID: list.id) }
                 }
+                Button("Open chart") { if let s = ids.first { vm.openChart(s, queue: rows.map(\.symbol), openWindow: openWindow) } }.disabled(ids.count != 1)
                 Button("Screenshots…") { if let s = ids.first { vm.shotSymbol = s; openWindow(id: "shots") } }.disabled(ids.count != 1)
                 Button("Copy symbols") { copy(ids.sorted().joined(separator: "\n")) }
             }

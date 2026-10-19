@@ -37,10 +37,11 @@ struct ImportView: View {
                                        }
                                    },
                                    onSelectRow: { vm.selectStock(from: $0) },
+                                   onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.importRows.map { vm.rowKey($0) }, openWindow: openWindow) },
                                    findQuery: finder.activeQuery,
                                    findCurrent: finder.currentMatch,
                                    onSelectRows: { importSelection = $0 },
-                                   rowMenu: { row in vm.rowMenu(row, selection: importSelection, openWindow: openWindow) })
+                                   rowMenu: { row in vm.rowMenu(row, selection: importSelection, openWindow: openWindow, queue: vm.importRows) })
                     Divider()
                     statusBar
                 } else {

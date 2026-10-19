@@ -1,0 +1,174 @@
+import SwiftUI
+import WebKit
+
+/// In-app chart window: opens the stock's chart link (e.g. TradingView) in a built-in browser that keeps your login,
+/// with ◀ ▶ through the list it was opened from, and one-click snapshots stored per stock.
+struct ChartViewer: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+    @StateObject private var web = WebHolder()
+    @State private var typed = ""
+    @State private var showSettings = false
+
+    private var symbol: String { vm.chartSymbol ?? "" }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            if symbol.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "chart.xyaxis.line").font(.system(size: 44)).foregroundStyle(.secondary)
+                    Text("Type a symbol above, or double-click / right-click a stock anywhere in the app").font(.title3)
+                    Text("Charts open from your chart-links sheet (Chart settings). Log in to TradingView once here — it stays logged in.")
+                        .foregroundStyle(.secondary)
+                    Button(vm.chartBook.links.isEmpty ? "Set up chart links…" : "Chart settings…") { showSettings = true }
+                        .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                WebView(holder: web)
+                if let s = vm.chartStatus {
+                    Divider()
+                    HStack { Text(s).font(.caption).foregroundStyle(.secondary); Spacer() }.padding(.horizontal, 10).padding(.vertical, 3)
+                }
+            }
+        }
+        .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
+        .onAppear { load() }
+        .onChange(of: vm.chartSymbol) { _ in load() }
+        .onChange(of: vm.settings.chartLinkColumn) { _ in load() }
+        .sheet(isPresented: $showSettings) { ChartLinkSettings().environmentObject(vm) }
+    }
+
+    private var toolbar: some View {
+        let pos = vm.chartQueue.firstIndex(of: symbol)
+        return HStack(spacing: 8) {
+            Button { vm.stepChart(-1) } label: { Image(systemName: "chevron.left") }
+                .disabled((pos ?? 0) == 0).keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .help("Previous stock in the list (⌥⌘←)")
+            Button { vm.stepChart(1) } label: { Image(systemName: "chevron.right") }
+                .disabled(pos == nil || pos! >= vm.chartQueue.count - 1).keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .help("Next stock in the list (⌥⌘→)")
+            if let p = pos, vm.chartQueue.count > 1 {
+                Text("\(p + 1) / \(vm.chartQueue.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            TextField("Symbol", text: $typed)
+                .textFieldStyle(.roundedBorder).frame(width: 130)
+                .onSubmit { if !typed.isEmpty { vm.chartSymbol = typed.uppercased() } }
+            Text(symbol).font(.headline)
+            if vm.chartBook.columns.count > 1 {
+                Picker("", selection: $vm.settings.chartLinkColumn) {
+                    ForEach(Array(vm.chartBook.columns.enumerated()), id: \.offset) { i, c in Text(c).tag(i) }
+                }
+                .labelsHidden().frame(width: 110)
+            }
+            Spacer()
+            Button { web.view.goBack() } label: { Image(systemName: "arrow.backward") }.help("Back")
+            Button { web.view.reload() } label: { Image(systemName: "arrow.clockwise") }.help("Reload")
+            Button { snapshot() } label: { Label("Save snapshot", systemImage: "camera") }
+                .disabled(symbol.isEmpty)
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .help("Store the chart as a dated screenshot of \(symbol) (⇧⌘S) — the S column turns green")
+            Button { vm.shotSymbol = symbol; openWindow(id: "shots") } label: { Label("Annotate", systemImage: "pencil.tip.crop.circle") }
+                .disabled(symbol.isEmpty).help("Open this stock's screenshots to draw on them")
+            Menu {
+                Button("Open in browser") { if let u = web.view.url ?? vm.chartURL(symbol) { NSWorkspace.shared.open(u) } }
+                Button("Copy chart link") {
+                    if let u = web.view.url ?? vm.chartURL(symbol) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u.absoluteString, forType: .string) }
+                }
+                Divider()
+                Button("Chart settings…") { showSettings = true }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize()
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private func load() {
+        guard !symbol.isEmpty else { return }
+        typed = symbol
+        guard let url = vm.chartURL(symbol) else { vm.chartStatus = "No chart link for \(symbol)"; return }
+        vm.chartStatus = nil
+        web.view.load(URLRequest(url: url))
+    }
+
+    private func snapshot() {
+        let sym = symbol
+        let config = WKSnapshotConfiguration()
+        web.view.takeSnapshot(with: config) { image, error in
+            DispatchQueue.main.async {
+                if let image { vm.saveChartSnapshot(image, symbol: sym) }
+                else { vm.chartStatus = "Snapshot failed: \(error?.localizedDescription ?? "unknown")" }
+            }
+        }
+    }
+}
+
+/// Keeps one web view alive for the window (logins and cookies persist in the app's default web store).
+final class WebHolder: ObservableObject {
+    let view: WKWebView = {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let v = WKWebView(frame: .zero, configuration: config)
+        v.allowsBackForwardNavigationGestures = true
+        v.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        return v
+    }()
+}
+
+struct WebView: NSViewRepresentable {
+    let holder: WebHolder
+    func makeNSView(context: Context) -> WKWebView { holder.view }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+
+/// Chart-links sheet and how charts open.
+struct ChartLinkSettings: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var link = ""
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Chart-links sheet link", text: $link)
+                HStack {
+                    Button(vm.chartBook.links.isEmpty ? "Import" : "Re-import") {
+                        vm.settings.chartSheetLink = link
+                        vm.importChartLinks()
+                    }
+                    .disabled(link.trimmingCharacters(in: .whitespaces).isEmpty || vm.isImportingCharts)
+                    if vm.isImportingCharts { ProgressView().controlSize(.small) }
+                    if let s = vm.chartStatus { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                }
+                TextField("Symbol column", text: $vm.settings.chartSymbolColumn)
+            } header: { Text("Chart links") } footer: {
+                Text("A Google Sheet with a Symbol column and one or more link columns (Link1, Link2…), shared as “Anyone with the link can view”. For stocks not in the sheet, the app reuses the sheet's link pattern with the stock's symbol.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Learned patterns") {
+                if vm.chartBook.templates.isEmpty {
+                    Text("Import the sheet to learn its pattern.").foregroundStyle(.secondary)
+                }
+                ForEach(Array(vm.chartBook.templates.enumerated()), id: \.offset) { i, t in
+                    LabeledContent(i < vm.chartBook.columns.count ? vm.chartBook.columns[i] : "Link \(i + 1)") {
+                        Text(t.isEmpty ? "—" : t).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2)
+                    }
+                }
+                TextField("Fallback when nothing else fits", text: $vm.settings.chartFallbackTemplate)
+                    .font(.caption.monospaced())
+            }
+            Section("Opening charts") {
+                Toggle("Open charts inside the app (otherwise in your browser)", isOn: $vm.settings.chartOpenInApp)
+                Text("Double-click a stock in the Data, Filter or Gainers tables, or right-click any stock → Open chart.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+        .formStyle(.grouped)
+        .frame(width: 620, height: 560)
+        .onAppear { link = vm.settings.chartSheetLink }
+    }
+}

@@ -50,6 +50,7 @@ struct FilterView: View {
                                        }
                                    },
                                    onSelectRow: { vm.selectStock(from: $0) },
+                                   onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, openWindow: openWindow) },
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
@@ -67,7 +68,7 @@ struct FilterView: View {
                                    findQuery: finder.activeQuery,
                                    findCurrent: finder.currentMatch,
                                    onSelectRows: { vm.filterSelection = $0 },
-                                   rowMenu: { row in vm.rowMenu(row, selection: vm.filterSelection, openWindow: openWindow) })
+                                   rowMenu: { row in vm.rowMenu(row, selection: vm.filterSelection, openWindow: openWindow, queue: vm.filterRows) })
                     if vm.showTimeline {
                         Divider()
                         TimelineBar()

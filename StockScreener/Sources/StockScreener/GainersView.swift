@@ -210,6 +210,7 @@ struct GainersView: View {
                            onHeaderClick: { i in
                                if sortColumn == i { sortDescending.toggle() } else { sortColumn = i; sortDescending = true }
                            },
+                           onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: rows.map { vm.rowKey($0) }, openWindow: openWindow) },
                            columnMenu: { i in
                                AnyView(GainerColumnMenu(name: derived.headers[i], sample: derived.rows.map { $0.number(i) },
                                                         sortColumn: $sortColumn, sortDescending: $sortDescending, column: i)
@@ -219,7 +220,7 @@ struct GainersView: View {
                            sColor: { vm.sColor($0) },
                            onSClick: { row in vm.shotSymbol = vm.rowKey(row); openWindow(id: "shots") },
                            onSelectRows: { selection = $0 },
-                           rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow) })
+                           rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow, queue: rows) })
             Divider()
             HStack(spacing: 10) {
                 Text("\(rows.count) of \(derived.rows.count) shown").font(.caption.bold())

@@ -102,6 +102,11 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Charts (⇧⌘K)
+- **Chart links:** in the Chart window, open ⋯ → *Chart settings* and import a Google Sheet with a **Symbol** column and link columns (e.g. TradingView chart links). For stocks not in the sheet, the app reuses the sheet's link pattern.
+- **Opening a chart:** **double-click** a stock in the Data, Filter or Gainers tables, or **right-click** any stock (also in Watchlists, Changes, Performance and Sectors) → *Open chart*. It opens in the in-app **Chart viewer**. Log in to TradingView there once and it stays logged in. ◀ ▶ (⌥⌘← / ⌥⌘→) steps through the list you opened it from.
+- **Save snapshot (⇧⌘S):** stores the chart as a dated screenshot of that stock, so the S column turns green. **Annotate** opens it for drawing.
+
 ### Daily Gainers (⇧⌘G)
 - **Index charts:** small **NIFTY 50** and **SENSEX** charts at the top, showing today in 5-minute steps (refreshed every 5 minutes while the window is open) or the last 3 months.
 - **Gainers:** every sheet stock up at least X% on the chosen day, using Yahoo close vs previous close.

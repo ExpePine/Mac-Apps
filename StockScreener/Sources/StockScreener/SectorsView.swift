@@ -314,6 +314,7 @@ struct Sparkline: View {
 /// One sector: index vs Nifty, state history, and its stocks.
 struct SectorDetail: View {
     @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     let stat: SectorStat
 
@@ -355,6 +356,7 @@ struct SectorDetail: View {
                     Text(String(format: "%+.1f%%", r)).monospacedDigit().foregroundStyle(r >= 0 ? Color.green : Color.red)
                 }
                 .contextMenu {
+                    Button("Open chart of \(sym)") { vm.openChart(sym, queue: stat.topMembers.map(\.0), openWindow: openWindow) }
                     ForEach(vm.watchlists) { list in Button("Add to “\(list.name)”") { vm.addSymbols([sym], listID: list.id) } }
                 }
             }

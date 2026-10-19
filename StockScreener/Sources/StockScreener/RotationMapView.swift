@@ -164,7 +164,14 @@ struct RotationMapView: View {
             Divider().frame(height: 16)
             Picker("", selection: $show) { ForEach(Show.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 .labelsHidden().frame(width: 160)
-            TextField("Find sector", text: $search).textFieldStyle(.roundedBorder).frame(width: 130)
+            Picker("Industry", selection: Binding(get: { selected.count == 1 ? selected.first! : "" },
+                                                  set: { v in selected = v.isEmpty ? [] : [v] })) {
+                Text("All industries").tag("")
+                Divider()
+                ForEach(report.sectors.filter { $0.priced >= minStocks }.map(\.name).sorted(), id: \.self) { Text($0).tag($0) }
+            }
+            .frame(width: 240)
+            .help("Pick an industry to follow it: bold trail and label, everything else fades")
             Stepper("≥ \(minStocks) stocks", value: $minStocks, in: 1...30).fixedSize()
             Toggle("Tails", isOn: $tails).toggleStyle(.checkbox)
             if !selected.isEmpty { Button("Clear \(selected.count)") { selected.removeAll() } }

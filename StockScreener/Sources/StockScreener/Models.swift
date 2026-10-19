@@ -259,6 +259,12 @@ struct AppSettings: Codable {
     var companyNameColumn = ""                  // optional column with company names (better news search)
     var gainersColumnFilters: [String: ColumnQuickFilter] = [:]   // per-column min / max / text on the gainers table
     var gainersOnlyFilterList = false           // only gainers that pass the Filter screen's conditions
+    // Chart links
+    var chartSheetLink = ""
+    var chartSymbolColumn = "Symbol"
+    var chartFallbackTemplate = "https://in.tradingview.com/chart/?symbol=NSE%3A{SYMBOL}"
+    var chartOpenInApp = true
+    var chartLinkColumn = 0                     // which link column to open (Link1, Link2…)
 
     // Alerts
     var email = EmailSettings()
@@ -319,6 +325,11 @@ struct AppSettings: Codable {
         companyNameColumn = v(.companyNameColumn, d.companyNameColumn)
         gainersColumnFilters = v(.gainersColumnFilters, d.gainersColumnFilters)
         gainersOnlyFilterList = v(.gainersOnlyFilterList, d.gainersOnlyFilterList)
+        chartSheetLink = v(.chartSheetLink, d.chartSheetLink)
+        chartSymbolColumn = v(.chartSymbolColumn, d.chartSymbolColumn)
+        chartFallbackTemplate = v(.chartFallbackTemplate, d.chartFallbackTemplate)
+        chartOpenInApp = v(.chartOpenInApp, d.chartOpenInApp)
+        chartLinkColumn = v(.chartLinkColumn, d.chartLinkColumn)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

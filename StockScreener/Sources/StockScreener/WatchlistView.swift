@@ -135,6 +135,12 @@ struct WatchlistView: View {
             }
             .contextMenu(forSelectionType: UUID.self) { ids in
                 Button("Remove \(ids.count) from list", role: .destructive) { remove(ids, from: li) }
+                Button("Open chart") {
+                    if let id = ids.first, let it = list.items.first(where: { $0.id == id }) {
+                        vm.openChart(it.symbol, queue: rows.map(\.symbol), openWindow: openWindow)
+                    }
+                }
+                .disabled(ids.count != 1)
                 Button("Screenshots…") {
                     if let id = ids.first, let it = list.items.first(where: { $0.id == id }) { vm.shotSymbol = it.symbol; openWindow(id: "shots") }
                 }

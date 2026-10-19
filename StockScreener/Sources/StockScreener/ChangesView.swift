@@ -186,6 +186,7 @@ struct ChangeRow: View {
             ForEach(vm.watchlists) { list in
                 Button("Add \(item.symbol) to “\(list.name)”") { vm.addSymbols([item.symbol], listID: list.id) }
             }
+            Button("Open chart of \(item.symbol)") { vm.openChart(item.symbol, openWindow: openWindow) }
             Button("Screenshots of \(item.symbol)…") { vm.shotSymbol = item.symbol; openWindow(id: "shots") }
             Button("Copy \(item.symbol)") {
                 NSPasteboard.general.clearContents()
