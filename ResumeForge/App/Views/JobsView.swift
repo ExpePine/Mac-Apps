@@ -37,6 +37,10 @@ struct JobsView: View {
                     Button { showAdd = true } label: { Label("Add job manually", systemImage: "plus") }
                         .buttonStyle(.borderless)
                     Spacer()
+                    Text("Today: \(store.jobsCapturedToday)")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .help("Jobs captured today — matches the count on the Safari toolbar icon")
                 }
                 .padding(8)
             }

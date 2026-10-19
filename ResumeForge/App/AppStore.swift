@@ -31,6 +31,7 @@ final class AppStore: ObservableObject {
     @Published var errorMessage: String?
 
     private var saveTask: Task<Void, Never>?
+    private var midnightTimer: Timer?
     private var isLoading = true
 
     static let defaultModel = "openai/gpt-oss-120b"
@@ -45,6 +46,11 @@ final class AppStore: ObservableObject {
     init() {
         load()
         isLoading = false
+        DispatchQueue.main.async { self.updateDockBadge() }
+        // Refresh the Dock count after midnight.
+        midnightTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateDockBadge() }
+        }
     }
 
     // MARK: Persistence
@@ -101,36 +107,69 @@ final class AppStore: ObservableObject {
         ingest(c)
     }
 
+    /// Adds a captured job. Duplicates (same page, or same title + company) are ignored.
+    /// The app is NOT brought to the front, so you can keep browsing in Safari.
     func ingest(_ c: CapturedJob) {
-        let id: UUID
-        let key = Self.normalizedURL(c.url)
-        if !key.isEmpty, let i = data.jobs.firstIndex(where: { Self.normalizedURL($0.url) == key }) {
-            // Same job captured again: refresh the description if the new one is better.
-            if c.description.count > data.jobs[i].description.count { data.jobs[i].description = c.description }
-            if !c.rawText.isEmpty { data.jobs[i].rawText = c.rawText }
-            id = data.jobs[i].id
-        } else {
-            var j = JobPosting()
-            j.source = c.source; j.url = c.url; j.title = c.title; j.company = c.company
-            j.location = c.location; j.experience = c.experience; j.salary = c.salary
-            j.skills = c.skills; j.description = c.description; j.rawText = c.rawText
-            j.capturedAt = c.capturedAt
-            data.jobs.insert(j, at: 0)
-            id = j.id
+        let newKeys = Set(Self.jobKeys(url: c.url, title: c.title, company: c.company))
+        if !newKeys.isEmpty, data.jobs.contains(where: { !newKeys.isDisjoint(with: Self.jobKeys(url: $0.url, title: $0.title, company: $0.company)) }) {
+            return
         }
-        section = .jobs
-        selectedJobID = id
-        NSApp.activate(ignoringOtherApps: true)
+        var j = JobPosting()
+        j.source = c.source; j.url = c.url; j.title = c.title; j.company = c.company
+        j.location = c.location; j.experience = c.experience; j.salary = c.salary
+        j.skills = c.skills; j.description = c.description; j.rawText = c.rawText
+        j.capturedAt = Date()
+        data.jobs.insert(j, at: 0)
+        if !NSApp.isActive || selectedJobID == nil {
+            section = .jobs
+            selectedJobID = j.id
+        }
+        updateDockBadge()
+        let id = j.id
         if !Keychain.load().isEmpty {
             run("Cleaning up job description…") { try await self.parseJob(id) }
         }
     }
 
-    static func normalizedURL(_ s: String) -> String {
-        guard var c = URLComponents(string: s) else { return s }
-        c.query = nil
-        c.fragment = nil
-        return c.string?.lowercased() ?? s
+    var jobsCapturedToday: Int {
+        data.jobs.filter { Calendar.current.isDateInToday($0.capturedAt) }.count
+    }
+
+    /// Dock icon shows today's count too (matches the Safari toolbar badge).
+    func updateDockBadge() {
+        let n = jobsCapturedToday
+        NSApp.dockTile.badgeLabel = n > 0 ? String(n) : nil
+    }
+
+    // Same rules as background.js: same page (ignoring tracking parameters) or same title + company.
+    static func jobKeys(url: String, title: String, company: String) -> [String] {
+        var keys: [String] = []
+        let u = urlKey(url)
+        if !u.isEmpty { keys.append("u:" + u) }
+        let t = norm(title), c = norm(company)
+        if !t.isEmpty && !c.isEmpty { keys.append("t:\(t)|\(c)") }
+        return keys
+    }
+
+    static func urlKey(_ s: String) -> String {
+        guard let comps = URLComponents(string: s), let host = comps.host else { return "" }
+        let keep: Set<String> = ["job_listing_slug", "jobid", "currentjobid", "jk", "jid"]
+        let params = (comps.queryItems ?? []).compactMap { q -> String? in
+            let k = q.name.lowercased()
+            guard keep.contains(k), let v = q.value, !v.isEmpty else { return nil }
+            return "\(k)=\(v)"
+        }.sorted()
+        var path = comps.path
+        while path.hasSuffix("/") { path.removeLast() }
+        let h = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        return (h + path + (params.isEmpty ? "" : "?" + params.joined(separator: "&"))).lowercased()
+    }
+
+    static func norm(_ s: String) -> String {
+        s.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     // MARK: Helpers
@@ -141,6 +180,7 @@ final class AppStore: ObservableObject {
     func deleteJob(_ id: UUID) {
         data.jobs.removeAll { $0.id == id }
         if selectedJobID == id { selectedJobID = data.jobs.first?.id }
+        updateDockBadge()
     }
 
     func deleteStory(_ id: UUID) {

@@ -22,13 +22,23 @@ The extension captures job descriptions from Naukri, Wellfound and LinkedIn. The
 
 ## Use
 
-1. **Profile ▸ Import from my existing resume…** — paste your CV text. This fills in your roles and education and seeds your story bank.
-2. On a job page, click the ResumeForge toolbar button, check the fields, and press **Send to ResumeForge**. The app comes to the front with the job.
-3. Work through the job's tabs: **Job Description → Best Resume → Missing Stories → (Interview) → My Resume → Export PDF**.
+1. **Profile ▸ Import from my existing resume…** — paste your CV text to fill in your roles and education and seed your story bank.
+2. **Capture while you browse.** On any job page on Naukri, Wellfound or LinkedIn, **click the ResumeForge toolbar icon**. That's it. There's no popup, and the app stays in the background.
+
+   The icon's badge tells you what happened:
+
+   | Badge | Meaning |
+   |---|---|
+   | **12** | JDs sent today. Resets at midnight. The app's Dock icon and Jobs list show the same count. |
+   | **✓** | Just sent. |
+   | **DUP** | Already sent before, either the same page or the same title + company. Nothing is sent. |
+   | **?** | No job description found on this page. Open the job itself and click again. |
+   | **ERR** | Sending failed. A status page opens with the reason and a *Copy job as JSON* fallback. |
+
+   To see recently sent jobs, reset today's count, or forget sent jobs (so you can send them again), go to **Safari ▸ Settings ▸ Extensions ▸ ResumeForge Capture ▸ Settings**.
+3. **Later, in the app**, work through each job's tabs: **Job Description → Best Resume → Missing Stories → (Interview) → My Resume → Export PDF**.
    - **Facts from my stories only** keeps every line traceable to something you said.
    - **Allow [VERIFY] placeholders** adds orange, clearly marked guesses for you to confirm or delete.
-
-If **Send** doesn't work, use **Copy as JSON** in the popup, then in the app go to **Jobs ▸ Add job manually** and paste.
 
 Your data is stored in `~/Library/Application Support/ResumeForge/ResumeForge.json`. Your Groq key is kept in the macOS Keychain.
 
@@ -49,5 +59,7 @@ To build locally: `cd ResumeForge && ./scripts/build-dmg.sh`. You need Xcode 15 
 ## Things worth verifying
 
 - **Site selectors.** The Naukri, Wellfound and LinkedIn selectors are best guesses, and these sites change their markup. If a field is empty, the app's **Clean up with AI** step fills it in from the full page text.
-- **Hand-off.** It relies on the sandboxed extension being allowed to open the app's URL scheme. If that fails on your macOS version, the Copy-as-JSON fallback always works.
+- **Hand-off.** It relies on the sandboxed extension being allowed to open the app's URL scheme in the background. If that fails on your macOS version, the badge shows ERR and the status page offers the Copy-as-JSON fallback.
+- **Duplicate memory.** The extension remembers sent jobs for a year. If you delete a job in the app and want it back, use *Forget sent jobs* on the status page.
+- **Same title, different posting.** Two postings with the same title and company (e.g. different cities) count as duplicates.
 - **Groq models.** Groq's model line-up changes often. Use Settings ▸ Test & list models rather than relying on the default.

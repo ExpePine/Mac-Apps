@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ResumeForge Capture",
-  "description": "Send the job description you're viewing on Naukri, Wellfound or LinkedIn to the ResumeForge app.",
-  "version": "1.0",
+  "description": "One click sends the job you're viewing on Naukri, Wellfound or LinkedIn to ResumeForge. The icon shows how many JDs you've sent today.",
+  "version": "1.1",
   "icons": {
     "48": "icon-48.png",
     "96": "icon-96.png",
@@ -11,7 +11,7 @@
     "512": "icon-512.png"
   },
   "action": {
-    "default_popup": "popup.html",
+    "default_title": "Send this job to ResumeForge",
     "default_icon": {
       "16": "toolbar-16.png",
       "32": "toolbar-32.png"
@@ -36,11 +36,17 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "nativeMessaging"
+    "nativeMessaging",
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "*://*.naukri.com/*",
     "*://*.wellfound.com/*",
     "*://*.linkedin.com/*"
-  ]
+  ],
+  "options_ui": {
+    "page": "status.html",
+    "open_in_tab": true
+  }
 }
