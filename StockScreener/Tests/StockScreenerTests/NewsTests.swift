@@ -98,3 +98,21 @@ final class ChartLayoutTests: XCTestCase {
         XCTAssertEqual(ChartLinkBook.layoutID("https://example.com/x"), "")
     }
 }
+
+final class ChartLayoutOverrideTests: XCTestCase {
+    func testWithLayout() {
+        XCTAssertEqual(ChartLinkBook.withLayout("https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3ATCS", "bXJLby4L"),
+                       "https://in.tradingview.com/chart/bXJLby4L/?symbol=NSE%3ATCS")
+        XCTAssertEqual(ChartLinkBook.withLayout("https://in.tradingview.com/chart/?symbol=NSE%3ATCS", "bXJLby4L"),
+                       "https://in.tradingview.com/chart/bXJLby4L/?symbol=NSE%3ATCS")
+    }
+    func testLayoutsAndTrimmedHeader() {
+        let t = SheetTable(headers: ["\nSymbol", "Link1", "Link2"], rows: [
+            SheetRow(id: 1, cells: ["AAA", "https://x.com/chart/L1/?symbol=NSE%3AAAA", "https://x.com/chart/L2/?symbol=NSE%3AAAA"], numbers: [nil, nil, nil]),
+            SheetRow(id: 2, cells: ["BBB", "https://x.com/chart/L1/?symbol=NSE%3ABBB", "https://x.com/chart/L1/?symbol=NSE%3ABBB"], numbers: [nil, nil, nil]),
+        ], originalHeaders: ["\nSymbol", "Link1", "Link2"])
+        let b = ChartLinkBook.from(t, symbolColumn: "Symbol")
+        XCTAssertEqual(b.columns, ["Link1", "Link2"])
+        XCTAssertEqual(Set(b.layouts(column: 1).map(\.id)), ["L1", "L2"])
+    }
+}

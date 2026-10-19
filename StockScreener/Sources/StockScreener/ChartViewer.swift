@@ -30,7 +30,19 @@ struct ChartViewer: View {
                 WebView(holder: web)
                 if let s = vm.chartStatus {
                     Divider()
-                    HStack { Text(s).font(.caption).foregroundStyle(.secondary); Spacer() }.padding(.horizontal, 10).padding(.vertical, 3)
+                    HStack {
+                        Text(s).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        let c = min(vm.settings.chartLinkColumn, vm.chartCount - 1)
+                        if vm.duplicateChartLayouts(for: symbol)[c] != nil, let id = vm.suggestedLayout(column: c) {
+                            Button("Use layout \(id) for every stock in \(vm.chartBook.columns[c])") {
+                                vm.settings.chartLayoutOverride[vm.chartBook.columns[c]] = id
+                                load()
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 3)
                 }
             }
         }
@@ -271,9 +283,23 @@ struct ChartLinkSettings: View {
                     Text("Import the sheet to learn its pattern.").foregroundStyle(.secondary)
                 }
                 ForEach(Array(vm.chartBook.templates.enumerated()), id: \.offset) { i, t in
-                    LabeledContent(i < vm.chartBook.columns.count ? vm.chartBook.columns[i] : "Link \(i + 1)") {
+                    let col = i < vm.chartBook.columns.count ? vm.chartBook.columns[i] : "Link \(i + 1)"
+                    LabeledContent(col) {
                         Text(t.isEmpty ? "—" : t).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2)
                     }
+                    let found = vm.chartBook.layouts(column: i)
+                    Picker("Layout for \(col)", selection: Binding(
+                        get: { vm.settings.chartLayoutOverride[col] ?? "" },
+                        set: { vm.settings.chartLayoutOverride[col] = $0.isEmpty ? nil : $0 })) {
+                        Text("Each stock's own link from the sheet").tag("")
+                        ForEach(found.filter { !$0.id.isEmpty }, id: \.id) { l in
+                            Text("\(l.id) for every stock  (in \(l.count) rows)").tag(l.id)
+                        }
+                        if let o = vm.settings.chartLayoutOverride[col], !o.isEmpty, !found.contains(where: { $0.id == o }) {
+                            Text("\(o) for every stock").tag(o)
+                        }
+                    }
+                    .font(.caption)
                 }
                 TextField("Fallback when nothing else fits", text: $vm.settings.chartFallbackTemplate)
                     .font(.caption.monospaced())

@@ -28,6 +28,9 @@ struct ChartLinkBook: Codable {
     static func from(_ table: SheetTable, symbolColumn: String) -> ChartLinkBook {
         var book = ChartLinkBook()
         book.importedAt = Date()
+        // Header cells can carry stray line breaks / spaces (e.g. "\nSymbol")
+        let table = SheetTable(headers: table.headers.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) },
+                               rows: table.rows, originalHeaders: table.originalHeaders)
         let symCol = table.index(of: symbolColumn)
             ?? table.headers.firstIndex { ["symbol", "ticker", "stock", "nse symbol"].contains($0.lowercased()) } ?? 0
         let linkCols = table.headers.indices.filter { c in
@@ -60,6 +63,24 @@ struct ChartLinkBook: Codable {
         let rest = link[r.upperBound...]
         let id = rest.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
         return String(id)
+    }
+
+    /// Swaps the layout id in a TradingView link: …/chart/OLD/?… → …/chart/NEW/?… (adds it if the link has none).
+    static func withLayout(_ link: String, _ id: String) -> String {
+        let id = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, let r = link.range(of: "/chart/") else { return link }
+        let old = layoutID(link)
+        let start = r.upperBound
+        if old.isEmpty { return link.replacingCharacters(in: start..<start, with: id + "/") }
+        let end = link.index(start, offsetBy: old.count)
+        return link.replacingCharacters(in: start..<end, with: id)
+    }
+
+    /// Layouts used in a link column, most used first: [(id, number of stocks)].
+    func layouts(column: Int) -> [(id: String, count: Int)] {
+        var n: [String: Int] = [:]
+        for ls in links.values where column < ls.count && !ls[column].isEmpty { n[Self.layoutID(ls[column]), default: 0] += 1 }
+        return n.map { ($0.key, $0.value) }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.id < $1.id }
     }
 
     /// The chart link for a stock: its own link from the sheet, else the learned pattern, else TradingView's default.

@@ -54,8 +54,21 @@ extension ScreenerViewModel {
         let col = min(c, sheetCount - 1)
         let name = col < chartBook.columns.count ? chartBook.columns[col] : "Link1"
         let own = chartBook.links[sym].map { col < $0.count && !$0[col].isEmpty } ?? false
-        return (chartBook.url(for: symbol, column: col, fallbackTemplate: settings.chartFallbackTemplate),
-                own ? "sheet column \(name)" : "\(name) pattern")
+        var u = chartBook.url(for: symbol, column: col, fallbackTemplate: settings.chartFallbackTemplate)
+        var from = own ? "sheet column \(name)" : "\(name) pattern"
+        if let id = settings.chartLayoutOverride[name], !id.isEmpty, let s = u?.absoluteString {
+            u = URL(string: ChartLinkBook.withLayout(s, id))
+            from += ", layout set to \(id) for all stocks"
+        }
+        return (u, from)
+    }
+
+    /// For a sheet column whose links mostly repeat Chart 1's layout: another layout found in it (to use for every stock).
+    func suggestedLayout(column c: Int) -> String? {
+        guard c > 0, c < chartBook.columns.count,
+              (settings.chartLayoutOverride[chartBook.columns[c]] ?? "").isEmpty else { return nil }
+        let first = Set(chartBook.layouts(column: 0).prefix(1).map(\.id))
+        return chartBook.layouts(column: c).map(\.id).first { !first.contains($0) && !$0.isEmpty }
     }
 
     /// Charts whose TradingView layout is the same as an earlier chart's (so they would look identical).
