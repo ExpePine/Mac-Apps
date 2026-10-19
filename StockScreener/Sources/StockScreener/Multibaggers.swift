@@ -99,7 +99,7 @@ enum MBEngine {
     private var loaded = false
     private var task: Task<Void, Never>?
 
-    private static var url: URL { AppFolders.base.appendingPathComponent("multibagger_prices.json.lzfse") }
+    nonisolated private static var url: URL { AppFolders.base.appendingPathComponent("multibagger_prices.json.lzfse") }
 
     func loadIfNeeded() {
         guard !loaded else { return }
