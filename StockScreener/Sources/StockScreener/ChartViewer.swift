@@ -16,7 +16,7 @@ struct ChartViewer: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            if symbol.isEmpty {
+            if symbol.isEmpty && !web.signingIn {
                 VStack(spacing: 10) {
                     Image(systemName: "chart.xyaxis.line").font(.system(size: 44)).foregroundStyle(.secondary)
                     Text("Type a symbol above, or double-click / right-click a stock anywhere in the app").font(.title3)
@@ -27,7 +27,7 @@ struct ChartViewer: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                WebView(holder: web)
+                ReelWebView(web: web.view)
                 if let s = vm.chartStatus {
                     Divider()
                     HStack {
@@ -99,8 +99,20 @@ struct ChartViewer: View {
                     if let u = web.view.url ?? vm.chartURL(symbol) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u.absoluteString, forType: .string) }
                 }
                 Divider()
-                Button("Sign in to TradingView…") { web.openSignIn() }
-                Button("Sign out (clear in-app browser data)") { web.signOut() }
+                ForEach(0..<TVAccounts.count, id: \.self) { a in
+                    Button("Sign in — \(TVAccounts.name(a)) (\(a == 0 ? "Chart 1" : "Chart 2"))…") {
+                        web.openSignIn(account: a)
+                        vm.chartStatus = "Signing in \(TVAccounts.name(a)) — used for \(a == 0 ? "Chart 1" : "Chart 2 and later charts"). Use a different TradingView account for each. Then open a stock."
+                            + (a == 1 && !TVAccounts.secondIsPersistent ? " (On macOS 13 this sign-in lasts until the app quits.)" : "")
+                    }
+                }
+                Menu("Sign out") {
+                    ForEach(0..<TVAccounts.count, id: \.self) { a in
+                        Button("Sign out \(TVAccounts.name(a))") { web.signOut(account: a) }
+                    }
+                }
+                Toggle("Separate TradingView accounts for Chart 1 and Chart 2", isOn: Binding(
+                    get: { TVAccounts.separate }, set: { TVAccounts.separate = $0; load() }))
                 Divider()
                 Button("Chart settings…") { showSettings = true }
             } label: { Image(systemName: "ellipsis.circle") }
@@ -123,7 +135,11 @@ struct ChartViewer: View {
         } else if vm.chartCount == 1 {
             status += " · only one chart: your sheet has no Link2 column yet"
         }
+        let acct = TVAccounts.account(forChart: c)
+        if TVAccounts.separate { status += " · \(TVAccounts.name(acct))" }
         vm.chartStatus = status
+        web.use(account: acct)
+        web.signingIn = false
         web.view.stopLoading()
         web.view.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
     }
@@ -140,24 +156,65 @@ struct ChartViewer: View {
     }
 }
 
-/// Keeps one web view alive for the window (logins and cookies persist in the app's default web store).
+/// TradingView sign-ins: Account 1 (Chart 1) and Account 2 (Chart 2 and later charts) keep separate cookies,
+/// so each chart can stay signed in to a different TradingView account at the same time.
+enum TVAccounts {
+    static let count = 2
+    private static let secondID = UUID(uuidString: "6B1F0C4E-2F7A-4D8E-9C1B-5A3E7D2F9B40")!
+    private static var cache: [Int: WKWebsiteDataStore] = [:]
+
+    static var separate: Bool {
+        get { UserDefaults.standard.object(forKey: "tv.separateAccounts") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "tv.separateAccounts") }
+    }
+
+    /// Which account a chart uses: Chart 1 → Account 1; Chart 2 (and extra layouts) → Account 2.
+    static func account(forChart c: Int) -> Int { separate && c >= 1 ? 1 : 0 }
+
+    static func name(_ a: Int) -> String { "Account \(a + 1)" }
+
+    /// Account 2 keeps its sign-in across restarts on macOS 14+; on macOS 13 it lasts until the app quits.
+    static var secondIsPersistent: Bool { if #available(macOS 14.0, *) { return true } else { return false } }
+
+    static func store(_ a: Int) -> WKWebsiteDataStore {
+        if a == 0 { return .default() }
+        if let s = cache[a] { return s }
+        let s: WKWebsiteDataStore
+        if #available(macOS 14.0, *) { s = WKWebsiteDataStore(forIdentifier: secondID) } else { s = .nonPersistent() }
+        cache[a] = s
+        return s
+    }
+}
+
+/// One web view per TradingView account for the window (logins and cookies persist per account).
 /// Also opens sign-in pop-ups (e.g. "Continue with Google") in their own small window.
 final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDelegate {
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    let view: WKWebView
+    @Published private(set) var account = 0
+    @Published var signingIn = false         // show the web view even without a stock (sign-in page)
+    private var views: [Int: WKWebView] = [:]
     private var popups: [(window: NSWindow, web: WKWebView)] = []
 
-    override init() {
+    var view: WKWebView { webView(for: account) }
+
+    private func webView(for a: Int) -> WKWebView {
+        if let v = views[a] { return v }
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
+        config.websiteDataStore = TVAccounts.store(a)
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         let v = WKWebView(frame: .zero, configuration: config)
         v.allowsBackForwardNavigationGestures = true
         v.customUserAgent = Self.userAgent
-        view = v
-        super.init()
         v.uiDelegate = self
         v.navigationDelegate = self
+        views[a] = v
+        return v
+    }
+
+    /// Switches the window to an account's web view (its own cookies / sign-in).
+    func use(account a: Int) {
+        guard a != account else { return }
+        account = a
     }
 
     // window.open(...) → a real window that shares the session, so the login flows back to the chart page
@@ -201,7 +258,7 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
     // links that want a new tab (target=_blank) without a pop-up: open in the same view
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if navigationAction.targetFrame == nil, webView === view, let u = navigationAction.request.url {
+        if navigationAction.targetFrame == nil, views.values.contains(where: { $0 === webView }), let u = navigationAction.request.url {
             webView.load(URLRequest(url: u))
             decisionHandler(.cancel)
             return
@@ -209,16 +266,17 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         decisionHandler(.allow)
     }
 
-    /// Opens TradingView's sign-in page in the chart window (email / password works without pop-ups).
-    func openSignIn() {
+    /// Opens TradingView's sign-in page for an account in the chart window.
+    func openSignIn(account a: Int) {
+        use(account: a)
+        signingIn = true
         if let u = URL(string: "https://in.tradingview.com/accounts/signin/") { view.load(URLRequest(url: u)) }
     }
 
-    /// Clears the in-app browser's cookies (sign out everywhere in this window).
-    func signOut() {
-        let store = view.configuration.websiteDataStore
-        store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
-            self?.view.reload()
+    /// Clears one account's cookies (signs that account out).
+    func signOut(account a: Int) {
+        TVAccounts.store(a).removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
+            self?.views[a]?.reload()
         }
     }
 }

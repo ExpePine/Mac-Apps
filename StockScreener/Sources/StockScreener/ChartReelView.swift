@@ -195,6 +195,7 @@ struct ChartReelView: View {
                 Toggle("Swap zoom − / + (if they work the wrong way)", isOn: $zoomSwap)
                 Divider()
                 Button("Chart settings… (in the Chart viewer)") { openWindow(id: "chart") }
+                Button("Sign in to TradingView accounts… (in the Chart viewer ⋯ menu)") { openWindow(id: "chart") }
                 Button("Reload these charts") { pool.reloadAll() }
             } label: { Image(systemName: "gearshape") }
             .menuStyle(.borderlessButton).fixedSize()
@@ -484,7 +485,7 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate {
 
     private func make(_ url: URL, slot: Int) -> WKWebView {
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()     // same sign-in as the Chart viewer
+        config.websiteDataStore = TVAccounts.store(TVAccounts.account(forChart: slot))   // Chart 1 → Account 1, Chart 2 → Account 2
         let v = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: config)
         v.customUserAgent = WebHolder.userAgent
         v.pageZoom = Self.pageZoom(slot)
