@@ -78,6 +78,9 @@ struct ChartViewer: View {
                     if let u = web.view.url ?? vm.chartURL(symbol) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u.absoluteString, forType: .string) }
                 }
                 Divider()
+                Button("Sign in to TradingView…") { web.openSignIn() }
+                Button("Sign out (clear in-app browser data)") { web.signOut() }
+                Divider()
                 Button("Chart settings…") { showSettings = true }
             } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
@@ -107,15 +110,86 @@ struct ChartViewer: View {
 }
 
 /// Keeps one web view alive for the window (logins and cookies persist in the app's default web store).
-final class WebHolder: ObservableObject {
-    let view: WKWebView = {
+/// Also opens sign-in pop-ups (e.g. "Continue with Google") in their own small window.
+final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDelegate {
+    static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    let view: WKWebView
+    private var popups: [(window: NSWindow, web: WKWebView)] = []
+
+    override init() {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
         let v = WKWebView(frame: .zero, configuration: config)
         v.allowsBackForwardNavigationGestures = true
-        v.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-        return v
-    }()
+        v.customUserAgent = Self.userAgent
+        view = v
+        super.init()
+        v.uiDelegate = self
+        v.navigationDelegate = self
+    }
+
+    // window.open(...) → a real window that shares the session, so the login flows back to the chart page
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let popup = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 680), configuration: configuration)
+        popup.customUserAgent = Self.userAgent
+        popup.uiDelegate = self
+        popup.navigationDelegate = self
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
+                         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.title = "Sign in"
+        w.contentView = popup
+        w.isReleasedWhenClosed = false
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        popups.append((w, popup))
+        return popup
+    }
+
+    // the pop-up closes itself after signing in
+    func webViewDidClose(_ webView: WKWebView) {
+        if let i = popups.firstIndex(where: { $0.web === webView }) {
+            popups[i].window.close()
+            popups.remove(at: i)
+            view.reload()                        // pick up the new login
+        }
+    }
+
+    // JavaScript alert / confirm (some sites use them during login)
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let a = NSAlert(); a.messageText = message; a.runModal(); completionHandler()
+    }
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let a = NSAlert(); a.messageText = message; a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        completionHandler(a.runModal() == .alertFirstButtonReturn)
+    }
+
+    // links that want a new tab (target=_blank) without a pop-up: open in the same view
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if navigationAction.targetFrame == nil, webView === view, let u = navigationAction.request.url {
+            webView.load(URLRequest(url: u))
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    /// Opens TradingView's sign-in page in the chart window (email / password works without pop-ups).
+    func openSignIn() {
+        if let u = URL(string: "https://in.tradingview.com/accounts/signin/") { view.load(URLRequest(url: u)) }
+    }
+
+    /// Clears the in-app browser's cookies (sign out everywhere in this window).
+    func signOut() {
+        let store = view.configuration.websiteDataStore
+        store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
+            self?.view.reload()
+        }
+    }
 }
 
 struct WebView: NSViewRepresentable {
