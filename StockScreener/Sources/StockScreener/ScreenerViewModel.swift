@@ -76,6 +76,9 @@ final class ScreenerViewModel: ObservableObject {
     @Published var tgMode = false
     @Published var tgSummary: TGSummary?
     @Published var isTraining = false
+    @Published var combiReport: CombiReport?
+    @Published var combiStatus: String?
+    @Published var isMiningCombos = false
     @Published var nnStatus: String?
     @Published var nnError: String?
     @Published var nnReport: NNReport?

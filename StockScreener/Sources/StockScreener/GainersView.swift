@@ -148,6 +148,8 @@ struct GainersView: View {
                 .help("Mark the selected stocks as an OK selection (orange P)")
             Button { openWindow(id: "picks") } label: { Label("My Picks", systemImage: "star.square.on.square") }
                 .help("All your picks in one place, with returns since (⌥⌘P)")
+            Button { openWindow(id: "combi") } label: { Label("Combinatorix", systemImage: "square.stack.3d.up") }
+                .help("Which combinations of your filters came before daily, weekly and monthly gainers (⌥⌘X)")
             Button { vm.explainIndices(day: day); vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
                 .disabled(vm.isExplaining)
                 .help("Fetch recent headlines for each gainer and ask Groq for a 5–10 word reason (cached per day)")

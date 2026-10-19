@@ -265,6 +265,14 @@ struct AppSettings: Codable {
     var chartFallbackTemplate = "https://in.tradingview.com/chart/?symbol=NSE%3A{SYMBOL}"
     var chartOpenInApp = true
     var chartLinkColumn = 0                     // which link column to open (Link1, Link2…)
+    var combiDailyPct = 5.0                     // Combinatorix: daily gainer = next-day gain ≥ this
+    var combiWeeklyPct = 10.0                   // weekly gainer = gain within 5 trading days ≥ this
+    var combiMonthlyPct = 20.0                  // monthly gainer = gain within 21 trading days ≥ this
+    var combiUsePeak = true                     // weekly / monthly: highest close in the period (else the last close)
+    var combiMaxSize = 3                        // up to 2 or 3 signals per combination
+    var combiUseChanges = true                  // include "rising / falling over 5 snapshots" and "just turned 1"
+    var combiUseContext = true                  // include sector quadrant and market regime
+    var combiNames: [String: String] = [:]      // your own names for families (horizon|signal → name)
     var chartLayoutOverride: [String: String] = [:]   // sheet column → TradingView layout id used for every stock
     var extraChartTemplates: [String] = []      // extra chart layouts (links with {SYMBOL}), after the sheet's columns
 
@@ -334,6 +342,14 @@ struct AppSettings: Codable {
         chartLinkColumn = v(.chartLinkColumn, d.chartLinkColumn)
         extraChartTemplates = v(.extraChartTemplates, d.extraChartTemplates)
         chartLayoutOverride = v(.chartLayoutOverride, d.chartLayoutOverride)
+        combiDailyPct = v(.combiDailyPct, d.combiDailyPct)
+        combiWeeklyPct = v(.combiWeeklyPct, d.combiWeeklyPct)
+        combiMonthlyPct = v(.combiMonthlyPct, d.combiMonthlyPct)
+        combiUsePeak = v(.combiUsePeak, d.combiUsePeak)
+        combiMaxSize = v(.combiMaxSize, d.combiMaxSize)
+        combiUseChanges = v(.combiUseChanges, d.combiUseChanges)
+        combiUseContext = v(.combiUseContext, d.combiUseContext)
+        combiNames = v(.combiNames, d.combiNames)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

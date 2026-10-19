@@ -101,6 +101,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("p", modifiers: [.command, .option])
 
+        Window("Combinatorix", id: "combi") {
+            CombinatorixView()
+                .environmentObject(vm)
+                .frame(minWidth: 1100, minHeight: 640)
+        }
+        .keyboardShortcut("x", modifiers: [.command, .option])
+
         Window("Symbols", id: "symbols") {
             SymbolsView()
                 .environmentObject(vm)
@@ -128,6 +135,7 @@ struct ToolsCommands: Commands {
             Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
             Button("Chart viewer (⇧⌘K)") { openWindow(id: "chart") }
             Button("My Picks (⌥⌘P)") { openWindow(id: "picks") }
+            Button("Combinatorix — combinations behind gainers (⌥⌘X)") { openWindow(id: "combi") }
             Button("Symbols — add / hide (⌥⌘Y)") { openWindow(id: "symbols") }
             Button("Email & Rules") { openWindow(id: "alerts") }
             Button("Alerts") { openWindow(id: "alertlog") }
