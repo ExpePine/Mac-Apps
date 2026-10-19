@@ -72,6 +72,8 @@ struct IndicatorStats: Identifiable {
     let std: Double
     let sortino: Double?             // mean / downside deviation
     let avgMaxUp: Double             // best close within H
+    let avgBestDay: Double           // average trading days from the event to that best close
+    let medianBestDay: Double
     let avgMaxDown: Double           // worst close within H (negative)
     let cvar5: Double                // average of the worst 5% of returns
     let hitWithinH: Double           // reached the target within H days
@@ -132,6 +134,7 @@ enum PerfCompare {
         let preMove: Double?
         let marketPre: Double?
         let excess: Double?
+        var bestDay = 0              // trading days after the event of the best close within H
     }
 
     static func samples(_ run: PerfRun, horizon h: Int, target: Double, stop: Double) -> [Sample] {
@@ -149,7 +152,8 @@ enum PerfCompare {
             }
             return Sample(symbol: r.symbol, ret: r.path[h], maxUp: w.max() ?? 0, maxDown: min(0, w.min() ?? 0),
                           hit: (w.max() ?? 0) >= target - 1e-9, first: first,
-                          preMove: r.preMove, marketPre: r.marketPre, excess: ex)
+                          preMove: r.preMove, marketPre: r.marketPre, excess: ex,
+                          bestDay: (1...h).max { r.path[$0] < r.path[$1] } ?? 0)
         }
     }
 
@@ -229,6 +233,8 @@ enum PerfCompare {
                 profitFactor: sumLoss > 0 ? wins.reduce(0, +) / sumLoss : nil,
                 std: sqrt(variance), sortino: downside > 0 ? mean / downside : nil,
                 avgMaxUp: n > 0 ? s.map(\.maxUp).reduce(0, +) / Double(n) : 0,
+                avgBestDay: n > 0 ? Double(s.map(\.bestDay).reduce(0, +)) / Double(n) : 0,
+                medianBestDay: percentile(s.map { Double($0.bestDay) }.sorted(), 0.5),
                 avgMaxDown: n > 0 ? s.map(\.maxDown).reduce(0, +) / Double(n) : 0,
                 cvar5: n > 0 ? sorted.prefix(worstK).reduce(0, +) / Double(worstK) : 0,
                 hitWithinH: n > 0 ? Double(s.filter(\.hit).count) / Double(n) : 0,

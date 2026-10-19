@@ -232,7 +232,8 @@ struct PerformanceView: View {
             stat("Stocks", "\(r.count)", .primary)
             stat("Avg return", pct(r.avgReturn), color(r.avgReturn), note: "median " + pct(r.medianReturn))
             stat("Up now", r.winRate.map { String(format: "%.0f%%", $0 * 100) } ?? "—", .primary)
-            stat("Avg best rise", pct(r.avgPeak), .green)
+            stat("Avg best rise", pct(r.avgPeak), .green,
+                 note: r.avgDaysToPeak.map { String(format: "avg %.0f trading days after trigger (median %.0f)", $0, r.medianDaysToPeak ?? 0) } ?? "")
             stat("Reached +\(fmt(s.successPercent))%", r.hitRate.map { String(format: "%.0f%%", $0 * 100) } ?? "—", .blue,
                  note: r.medianDaysToHit.map { "median \(Int($0)) trading days" } ?? "")
             stat("vs Nifty 50", r.avgExcess.map { String(format: "%+.1f pts", $0) } ?? "—", color(r.avgExcess),

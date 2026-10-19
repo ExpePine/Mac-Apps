@@ -22,6 +22,8 @@ final class CompareTests: XCTestCase {
         let f = r.stats.first { $0.name == "Fast" }!, s = r.stats.first { $0.name == "Slow" }!
         XCTAssertEqual(f.median, 42, accuracy: 1e-9)
         XCTAssertEqual(f.kmMedianDays, 10)
+        XCTAssertEqual(f.avgBestDay, 21, accuracy: 1e-9)      // a steady climb peaks on the last day of the window
+        XCTAssertEqual(f.medianBestDay, 21, accuracy: 1e-9)
         XCTAssertEqual(s.kmMedianDays, 40)
         XCTAssertEqual(r.best.profit, fast.id)
         XCTAssertEqual(r.best.fast, fast.id)

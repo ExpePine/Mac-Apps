@@ -105,6 +105,8 @@ struct PerfResult {
     var avgReturn: Double? { rows.isEmpty ? nil : rows.map(\.returnNow).reduce(0, +) / Double(rows.count) }
     var medianReturn: Double? { PerfEngine.median(rows.map(\.returnNow)) }
     var avgPeak: Double? { rows.isEmpty ? nil : rows.map(\.peak).reduce(0, +) / Double(rows.count) }
+    var avgDaysToPeak: Double? { rows.isEmpty ? nil : Double(rows.map(\.daysToPeak).reduce(0, +)) / Double(rows.count) }
+    var medianDaysToPeak: Double? { PerfEngine.median(rows.map { Double($0.daysToPeak) }) }
     var hitRate: Double? { rows.isEmpty ? nil : Double(rows.filter { $0.hitDays != nil }.count) / Double(rows.count) }
     var medianDaysToHit: Double? { PerfEngine.median(rows.compactMap { $0.hitDays.map(Double.init) }) }
     var avgExcess: Double? {

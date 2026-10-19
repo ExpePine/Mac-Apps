@@ -166,6 +166,7 @@ struct CompareView: View {
             ("Expectancy", "Avg win × win rate − avg loss × loss rate", { $0.expectancy }, { pct($0.expectancy) }, true),
             ("Profit factor", "Sum of gains ÷ sum of losses (> 1 = more gained than lost)", { $0.profitFactor }, { $0.profitFactor.map { String(format: "%.2f", $0) } ?? "∞" }, true),
             ("Avg best rise", "Highest close within H days, averaged", { $0.avgMaxUp }, { pct($0.avgMaxUp) }, true),
+            ("Delay to best rise", "Trading days from the trigger to the best close within H — average (median). Lower = the rise comes sooner.", { $0.avgBestDay }, { String(format: "%.1f d (%.0f)", $0.avgBestDay, $0.medianBestDay) }, false),
             ("Avg worst dip", "Lowest close within H days, averaged", { $0.avgMaxDown }, { pct($0.avgMaxDown) }, true),
             ("Worst 5% (CVaR)", "Average of the worst 5% of returns", { $0.cvar5 }, { pct($0.cvar5) }, true),
             ("Volatility", "Spread (standard deviation) of returns", { $0.std }, { String(format: "%.1f", $0.std) }, false),
