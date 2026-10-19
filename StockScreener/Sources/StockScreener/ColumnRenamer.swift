@@ -27,6 +27,7 @@ enum ColumnRenamer {
             return c
         }
         s.dateColumn = r(s.dateColumn)
+        s.sectorColumn = r(s.sectorColumn)
         s.mv2.monthColumn = r(s.mv2.monthColumn)
         s.mv2.dayColumn = r(s.mv2.dayColumn)
         for i in s.cellRules.indices { s.cellRules[i].condition.column = r(s.cellRules[i].condition.column) }

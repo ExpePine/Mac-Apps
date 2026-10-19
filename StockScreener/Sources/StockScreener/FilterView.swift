@@ -139,6 +139,13 @@ struct FilterView: View {
                 }
                 .help("Cards showing what changed since the previous day (⇧⌘8)")
                 Button {
+                    openWindow(id: "sectors")
+                } label: {
+                    Label(vm.unseenRegimeCount > 0 ? "Sectors (\(vm.unseenRegimeCount))" : "Sectors",
+                          systemImage: vm.unseenRegimeCount > 0 ? "square.grid.3x3.fill" : "square.grid.3x3")
+                }
+                .help(vm.unseenRegimeCount > 0 ? "\(vm.unseenRegimeCount) new sector regime change(s) (⇧⌘0)" : "Sector momentum & regime changes (⇧⌘0)")
+                Button {
                     openWindow(id: "perf")
                 } label: {
                     Label("Performance", systemImage: "chart.line.uptrend.xyaxis")

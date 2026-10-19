@@ -102,6 +102,13 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Sectors & regime alerts (⇧⌘0)
+This screen uses the sheet's **Sector** column. You can pick a different column in *Alerts & settings*. It also uses Yahoo daily closes, which are fetched once and then topped up once a day after new sheet data arrives.
+- **Momentum:** each sector has an equal-weight index. The table shows its rank (with the change over 5 days), a 0–100 score, its 1W / 1M / 3M change, its 1M change vs the Nifty, rotation state, trend, breadth (% of stocks above their 50-day average) and a one-year sparkline. Click a sector to see its chart and its best stocks.
+- **Rotation map:** relative strength vs the Nifty against how fast that strength is changing (an approximation of an RRG chart), with 10-day tails. The quadrants are Leading, Weakening, Lagging and Improving.
+- **Change heatmap:** each sector's rotation state for each of the last 30 trading days, with the market regime on top. A dot marks a day the trend flipped.
+- **Regime changes:** confirmed changes in rotation, trend or market regime (Risk-on / Mixed / Risk-off), where the new state must hold for N days. New changes produce a **macOS notification**, a banner on this screen, a count on the Filter toolbar button and, if you turn it on, an **email**.
+
 ### Performance (⇧⌘9)
 A **study** looks at one column whose value says when an event happened. For example, D_Trigger = 100 means the trigger was 100 trading days before the sheet's data day; you can switch a study to calendar days or to dates. For each stock, the app finds that day in Yahoo's price history and measures what the stock did after it:
 - return from the event close to the latest close, and the same compared with the Nifty 50

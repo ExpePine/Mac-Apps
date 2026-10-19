@@ -112,6 +112,14 @@ final class ScreenerViewModel: ObservableObject {
     @Published var compareSelection: Set<UUID> = []
     @Published var compareResult: ComparisonResult?
     @Published var isComparing = false
+
+    // Sectors & regime alerts
+    @Published var sectorReport: SectorReport?
+    @Published var isComputingSectors = false
+    @Published var sectorFetch: (Int, Int)?
+    @Published var regimeLog: [RegimeLogEntry] = RegimeLogStore.load()
+    @Published var regimeLastSeen: Date = (UserDefaults.standard.object(forKey: "StockScreener.regimeLastSeen") as? Date) ?? .distantPast
+    @Published var regimeBanner: [RegimeChange] = []
     var flashToken = 0
 
     // E column: per-row status on the Filter screen
@@ -310,6 +318,9 @@ final class ScreenerViewModel: ObservableObject {
             // Alerts run only after the sheet's data has actually been updated.
             if contentChanged {
                 await runAlertChecks()
+                Task { [weak self] in await self?.sectorDailyUpdate() }
+            } else if sectorReport == nil {
+                Task { [weak self] in await self?.computeSectors(notify: true) }      // from cached prices
             }
             // In-app alert: once when the app opens (first data), then whenever new data arrives.
             if !launchAlertDone {

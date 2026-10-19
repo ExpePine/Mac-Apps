@@ -241,6 +241,16 @@ struct AppSettings: Codable {
     var perfCompareHorizon = 21                 // compare indicators on the return after this many trading days
     var perfCompareTarget = 20.0                // "+target %" for speed / hit rates
     var perfCompareStop = 10.0                  // "−stop %" for risk (which comes first)
+    // Sectors & regime alerts
+    var sectorColumn = ""                       // "" = auto (a column named Sector / Industry)
+    var sectorMinMembers = 3
+    var regimeConfirmDays = 2
+    var regimeNotifyRotation = true
+    var regimeNotifyTrend = true
+    var regimeNotifyMarket = true
+    var regimeMajorOnly = true                  // only into Leading / Lagging, trend up / down, market flips
+    var regimeEmail = false
+    var sectorAutoUpdate = true                 // refresh Yahoo prices once a day after new sheet data
 
     // Alerts
     var email = EmailSettings()
@@ -285,6 +295,15 @@ struct AppSettings: Codable {
         perfCompareHorizon = v(.perfCompareHorizon, d.perfCompareHorizon)
         perfCompareTarget = v(.perfCompareTarget, d.perfCompareTarget)
         perfCompareStop = v(.perfCompareStop, d.perfCompareStop)
+        sectorColumn = v(.sectorColumn, d.sectorColumn)
+        sectorMinMembers = v(.sectorMinMembers, d.sectorMinMembers)
+        regimeConfirmDays = v(.regimeConfirmDays, d.regimeConfirmDays)
+        regimeNotifyRotation = v(.regimeNotifyRotation, d.regimeNotifyRotation)
+        regimeNotifyTrend = v(.regimeNotifyTrend, d.regimeNotifyTrend)
+        regimeNotifyMarket = v(.regimeNotifyMarket, d.regimeNotifyMarket)
+        regimeMajorOnly = v(.regimeMajorOnly, d.regimeMajorOnly)
+        regimeEmail = v(.regimeEmail, d.regimeEmail)
+        sectorAutoUpdate = v(.sectorAutoUpdate, d.sectorAutoUpdate)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)
