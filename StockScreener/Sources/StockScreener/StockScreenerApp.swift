@@ -108,6 +108,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("x", modifiers: [.command, .option])
 
+        Window("Chart Reel", id: "reel") {
+            ChartReelView()
+                .environmentObject(vm)
+                .frame(minWidth: 1000, minHeight: 650)
+        }
+        .keyboardShortcut("r", modifiers: [.command, .option])
+
         Window("Symbols", id: "symbols") {
             SymbolsView()
                 .environmentObject(vm)
@@ -135,6 +142,7 @@ struct ToolsCommands: Commands {
             Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
             Button("Chart viewer (⇧⌘K)") { openWindow(id: "chart") }
             Button("My Picks (⌥⌘P)") { openWindow(id: "picks") }
+            Button("Chart Reel — flick through charts (⌥⌘R)") { openWindow(id: "reel") }
             Button("Combinatorix — combinations behind gainers (⌥⌘X)") { openWindow(id: "combi") }
             Button("Symbols — add / hide (⌥⌘Y)") { openWindow(id: "symbols") }
             Button("Email & Rules") { openWindow(id: "alerts") }

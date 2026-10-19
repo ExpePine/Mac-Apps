@@ -12,6 +12,17 @@ struct FilterView: View {
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
+    private func openReel(_ source: ReelSource, value: String? = nil) {
+        let d = UserDefaults.standard
+        d.set(source.rawValue, forKey: "reel.source")
+        if let value {
+            d.set(vm.settings.triggerColumn, forKey: "reel.column")
+            d.set("=", forKey: "reel.op")
+            d.set(value, forKey: "reel.value")
+        }
+        openWindow(id: "reel")
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility) {
             FilterSidebar(showColumns: $showColumns)
@@ -133,6 +144,15 @@ struct FilterView: View {
                         .background(RoundedRectangle(cornerRadius: 5).fill(Color.purple.opacity(0.12)))
                 }
                 .help("Neural Net: filter-value combinations shared by monthly top gainers (≥ \(vm.settings.nnGainThreshold)% in a month)")
+                Menu {
+                    Button("This Filter's stocks") { openReel(.filter) }
+                    Button("\(vm.settings.triggerColumn) = 1") { openReel(.column, value: "1") }
+                    Button("\(vm.settings.triggerColumn) = 0") { openReel(.column, value: "0") }
+                    Button("Daily gainers") { openReel(.gainers) }
+                } label: {
+                    Label("Chart Reel", systemImage: "film.stack")
+                } primaryAction: { openReel(.filter) }
+                .help("Flick through charts with a slider — click for this Filter's stocks, or pick a list (⌥⌘R)")
                 Button {
                     openWindow(id: "changes")
                 } label: {
