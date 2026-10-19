@@ -19,6 +19,13 @@ struct ChartReelView: View {
     @AppStorage("reel.preload") private var preload = true
     @AppStorage("reel.seconds") private var seconds = 3.0
     @AppStorage("reel.sort") private var sortMode = "List order"
+    @AppStorage("reel.seq1") private var seq1 = 3.0          // "1 → 2": seconds on Chart 1
+    @AppStorage("reel.seq2") private var seq2 = 3.0          // … then on Chart 2
+    @AppStorage("reel.autoZoom") private var autoZoom = true
+    @AppStorage("reel.zoomDelay") private var zoomDelay = 2.5
+    @AppStorage("reel.zoomSwap") private var zoomSwap = false
+    @State private var phase = 0                  // "1 → 2": 0 = showing Chart 1, 1 = Chart 2
+    @State private var zoomTick = 0               // redraws the zoom labels
 
     @State private var index = 0.0                // slider position
     @State private var shown = 0                  // index whose charts are loaded
@@ -113,9 +120,13 @@ struct ChartReelView: View {
         .onChange(of: alsoFilter) { _ in restart() }
         .onChange(of: sortMode) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
-        .onChange(of: layout) { _ in show(shown, items) }
+        .onChange(of: layout) { _ in phase = 0; show(shown, items) }
         .onReceive(timer) { _ in
-            guard playing, !dragging, Date().timeIntervalSince(lastStep) >= seconds else { return }
+            guard playing, !dragging else { return }
+            let isSeq = ReelLayout(rawValue: layout) == .sequence
+            let wait = isSeq ? (phase == 0 ? seq1 : seq2) : seconds
+            guard Date().timeIntervalSince(lastStep) >= wait else { return }
+            if isSeq && phase == 0 { phase = 1; lastStep = Date(); return }
             if shown + 1 < list.count { step(1, list) } else { playing = false }
         }
         .background {
@@ -173,9 +184,15 @@ struct ChartReelView: View {
                 ForEach(ReelLayout.allCases) { Text($0.rawValue).tag($0.rawValue) }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .help("Chart 1 only, Chart 2 only, or both (side by side / stacked)")
+            .help("Chart 1 only, Chart 2 only, both (side by side / stacked), or 1 → 2: Chart 1 then Chart 2 for each stock")
             Menu {
                 Toggle("Preload the next charts (faster, uses more memory)", isOn: $preload)
+                Divider()
+                Toggle("Apply my zoom to every chart after it loads", isOn: $autoZoom)
+                Picker("Wait before applying zoom", selection: $zoomDelay) {
+                    ForEach([1.5, 2.5, 4.0, 6.0], id: \.self) { Text("\(CombiEngine.fmt($0)) s").tag($0) }
+                }
+                Toggle("Swap zoom − / + (if they work the wrong way)", isOn: $zoomSwap)
                 Divider()
                 Button("Chart settings… (in the Chart viewer)") { openWindow(id: "chart") }
                 Button("Reload these charts") { pool.reloadAll() }
@@ -274,6 +291,7 @@ struct ChartReelView: View {
             case .chart2: chartPane(it.symbol, 1)
             case .side: HSplitView { chartPane(it.symbol, 0); chartPane(it.symbol, 1) }
             case .stacked: VSplitView { chartPane(it.symbol, 0); chartPane(it.symbol, 1) }
+            case .sequence: chartPane(it.symbol, phase)
             }
         } else {
             Color.clear
@@ -284,7 +302,8 @@ struct ChartReelView: View {
         let col = min(c, vm.chartCount - 1)
         return VStack(spacing: 0) {
             if let u = vm.chartURL(symbol, column: col) {
-                ReelWebView(web: pool.view(for: u))
+                ReelWebView(web: pool.view(for: u, slot: c))
+                    .overlay(alignment: .topTrailing) { zoomBar(c) }
             } else {
                 Text("No chart link for \(symbol)").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -293,6 +312,36 @@ struct ChartReelView: View {
             }
         }
         .frame(minWidth: 300, minHeight: 200)
+    }
+
+    /// Per-chart zoom, remembered and re-applied to every stock's chart after it loads.
+    private func zoomBar(_ c: Int) -> some View {
+        _ = zoomTick
+        let steps = ReelPool.zoomSteps(c)
+        let page = ReelPool.pageZoom(c)
+        return HStack(spacing: 4) {
+            Text("Chart \(c + 1)").font(.caption2.bold())
+            Divider().frame(height: 12)
+            Button { pool.nudge(slot: c, by: -1); zoomTick += 1 } label: { Image(systemName: "minus.magnifyingglass") }
+                .help("Show more bars (zoom out the time axis) — remembered for every Chart \(c + 1)")
+            Text(steps == 0 ? "0" : String(format: "%+d", steps)).font(.caption2.monospacedDigit()).frame(minWidth: 18)
+            Button { pool.nudge(slot: c, by: 1); zoomTick += 1 } label: { Image(systemName: "plus.magnifyingglass") }
+                .help("Show fewer, wider bars (zoom in the time axis) — remembered for every Chart \(c + 1)")
+            Button { pool.resetZoom(slot: c); zoomTick += 1 } label: { Image(systemName: "arrow.counterclockwise") }
+                .help("Back to the layout's own zoom (reloads this chart)")
+            Divider().frame(height: 12)
+            Button { pool.setPageZoom(slot: c, page - 0.1); zoomTick += 1 } label: { Text("A−").font(.caption2) }
+                .help("Smaller page (more chart fits)")
+            Text("\(Int((page * 100).rounded()))%").font(.caption2.monospacedDigit())
+            Button { pool.setPageZoom(slot: c, page + 0.1); zoomTick += 1 } label: { Text("A+").font(.caption2) }
+                .help("Bigger page")
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .background(.regularMaterial, in: Capsule())
+        .padding(6)
+        .opacity(0.92)
     }
 
     // MARK: Scrubbing
@@ -327,10 +376,19 @@ struct ChartReelView: View {
             Button { step(-1, list) } label: { Image(systemName: "chevron.left") }.disabled(shown == 0).help("Previous (←)")
             Button { playing.toggle(); lastStep = Date() } label: { Image(systemName: playing ? "pause.fill" : "play.fill") }
                 .help("Autoplay (⌘P)")
-            Picker("", selection: $seconds) {
-                ForEach([1.5, 2, 3, 5, 8], id: \.self) { Text("\(CombiEngine.fmt($0)) s").tag($0) }
+            if ReelLayout(rawValue: layout) == .sequence {
+                Text("Chart 1").font(.caption).foregroundStyle(phase == 0 ? Color.accentColor : Color.secondary)
+                Picker("", selection: $seq1) { ForEach(Self.speeds, id: \.self) { Text("\(CombiEngine.fmt($0)) s").tag($0) } }
+                    .labelsHidden().fixedSize().help("Seconds on Chart 1 for every stock")
+                Text("→ Chart 2").font(.caption).foregroundStyle(phase == 1 ? Color.accentColor : Color.secondary)
+                Picker("", selection: $seq2) { ForEach(Self.speeds, id: \.self) { Text("\(CombiEngine.fmt($0)) s").tag($0) } }
+                    .labelsHidden().fixedSize().help("Then seconds on Chart 2, then the next stock")
+            } else {
+                Picker("", selection: $seconds) {
+                    ForEach(Self.speeds, id: \.self) { Text("\(CombiEngine.fmt($0)) s").tag($0) }
+                }
+                .labelsHidden().fixedSize().help("Seconds per chart in autoplay")
             }
-            .labelsHidden().fixedSize().help("Seconds per chart in autoplay")
             Slider(value: $index, in: 0...Double(max(1, list.count - 1)), step: 1) { editing in
                 dragging = editing
                 if !editing { show(Int(index), list) }
@@ -350,8 +408,15 @@ struct ChartReelView: View {
         .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
+    static let speeds: [Double] = [1, 1.5, 2, 3, 4, 5, 8, 12]
+
     private func step(_ d: Int, _ list: [ReelItem]) {
         guard !list.isEmpty else { return }
+        if ReelLayout(rawValue: layout) == .sequence {
+            if d == 1 && phase == 0 { phase = 1; lastStep = Date(); return }      // → : Chart 2 of the same stock first
+            if d == -1 && phase == 1 { phase = 0; lastStep = Date(); return }
+        }
+        phase = 0
         let i = max(0, min(list.count - 1, shown + d))
         index = Double(i)
         show(i, list)
@@ -371,9 +436,9 @@ struct ChartReelView: View {
         guard preload else { return }
         let l = ReelLayout(rawValue: layout) ?? .chart1
         let cols: [Int] = l == .chart1 ? [0] : (l == .chart2 ? [1] : [0, 1])
-        var urls: [URL] = []
-        for j in [i + 1, i + 2, i - 1] where list.indices.contains(j) {
-            for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append(u) } }
+        var urls: [(URL, Int)] = []
+        for j in [i, i + 1, i + 2, i - 1] where list.indices.contains(j) {
+            for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c)) } }
         }
         pool.preload(urls, keep: cols.count * 4)
     }
@@ -387,7 +452,7 @@ enum ReelSource: String, CaseIterable, Identifiable {
 }
 
 enum ReelLayout: String, CaseIterable, Identifiable {
-    case chart1 = "Chart 1", chart2 = "Chart 2", side = "Both ⇆", stacked = "Both ⇅"
+    case chart1 = "Chart 1", chart2 = "Chart 2", side = "Both ⇆", stacked = "Both ⇅", sequence = "1 → 2"
     var id: String { rawValue }
 }
 
@@ -399,41 +464,108 @@ struct ReelItem {
     var day: String? = nil
 }
 
-/// Keeps a few loaded chart pages (most recent first) so stepping back and forth is instant.
-@MainActor final class ReelPool: ObservableObject {
+/// Keeps a few loaded chart pages so stepping back and forth is instant, and re-applies your remembered
+/// zoom (time-axis wheel steps + page size) to each chart after it loads.
+final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate {
     private var views: [String: WKWebView] = [:]
+    private var slots: [String: Int] = [:]    // url → chart (0 = Chart 1, 1 = Chart 2)
     private var order: [String] = []          // most recent last
     private var keep = 6
 
-    private func make(_ url: URL) -> WKWebView {
+    // Remembered per chart
+    static func zoomSteps(_ slot: Int) -> Int { UserDefaults.standard.integer(forKey: "reel.zoomSteps.\(slot)") }
+    static func pageZoom(_ slot: Int) -> Double {
+        let v = UserDefaults.standard.double(forKey: "reel.pageZoom.\(slot)")
+        return v == 0 ? 1 : v
+    }
+    private var autoZoom: Bool { UserDefaults.standard.object(forKey: "reel.autoZoom") as? Bool ?? true }
+    private var delay: Double { let d = UserDefaults.standard.double(forKey: "reel.zoomDelay"); return d == 0 ? 2.5 : d }
+    private var swap: Bool { UserDefaults.standard.bool(forKey: "reel.zoomSwap") }
+
+    private func make(_ url: URL, slot: Int) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()     // same sign-in as the Chart viewer
         let v = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: config)
         v.customUserAgent = WebHolder.userAgent
+        v.pageZoom = Self.pageZoom(slot)
+        v.navigationDelegate = self
+        slots[url.absoluteString] = slot
         v.load(URLRequest(url: url))
         return v
     }
 
-    func view(for url: URL) -> WKWebView {
+    func view(for url: URL, slot: Int) -> WKWebView {
         let key = url.absoluteString
         if let v = views[key] { touch(key); return v }
-        let v = make(url)
+        let v = make(url, slot: slot)
         views[key] = v
         touch(key)
         trim()
         return v
     }
 
-    func preload(_ urls: [URL], keep: Int) {
+    func preload(_ urls: [(URL, Int)], keep: Int) {
         self.keep = max(4, keep + 2)
-        for u in urls where views[u.absoluteString] == nil {
-            views[u.absoluteString] = make(u)
+        for (u, slot) in urls where views[u.absoluteString] == nil {
+            views[u.absoluteString] = make(u, slot: slot)
             touch(u.absoluteString)
         }
         trim()
     }
 
     func reloadAll() { views.values.forEach { $0.reload() } }
+
+    // MARK: Zoom
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard autoZoom, let key = views.first(where: { $0.value === webView })?.key else { return }
+        let steps = Self.zoomSteps(slots[key] ?? 0)
+        guard steps != 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
+            guard let self, let webView else { return }
+            self.wheel(webView, steps: steps, tries: 4)
+        }
+    }
+
+    /// Turns the mouse wheel `steps` times over the chart (+ = zoom in). Retries while the chart is still drawing.
+    private func wheel(_ web: WKWebView, steps: Int, tries: Int) {
+        let s = swap ? -steps : steps
+        let js = """
+        (function(n){
+          var best=null, area=0;
+          document.querySelectorAll('canvas').forEach(function(c){
+            var r=c.getBoundingClientRect(); var a=r.width*r.height; if(a>area){area=a; best=c;} });
+          if(!best || area < 40000) return 'wait';
+          var r=best.getBoundingClientRect(); var x=r.left+r.width*0.7, y=r.top+r.height*0.5;
+          for(var i=0;i<Math.abs(n);i++){
+            best.dispatchEvent(new WheelEvent('wheel',{deltaY:(n>0?-100:100), deltaMode:0, clientX:x, clientY:y, bubbles:true, cancelable:true, view:window}));
+          }
+          return 'ok';
+        })(\(s))
+        """
+        web.evaluateJavaScript(js) { [weak self, weak web] result, _ in
+            guard let self, let web, (result as? String) == "wait", tries > 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.wheel(web, steps: steps, tries: tries - 1) }
+        }
+    }
+
+    /// One more / fewer zoom step: applied now to that chart's pages on screen and remembered for the rest.
+    func nudge(slot: Int, by d: Int) {
+        UserDefaults.standard.set(Self.zoomSteps(slot) + d, forKey: "reel.zoomSteps.\(slot)")
+        for (k, v) in views where slots[k] == slot { wheel(v, steps: d, tries: 0) }
+    }
+
+    /// Forget the zoom for this chart and reload its pages (back to the layout's own zoom).
+    func resetZoom(slot: Int) {
+        UserDefaults.standard.set(0, forKey: "reel.zoomSteps.\(slot)")
+        for (k, v) in views where slots[k] == slot { v.reload() }
+    }
+
+    func setPageZoom(slot: Int, _ z: Double) {
+        let v = max(0.5, min(1.6, (z * 10).rounded() / 10))
+        UserDefaults.standard.set(v, forKey: "reel.pageZoom.\(slot)")
+        for (k, w) in views where slots[k] == slot { w.pageZoom = v }
+    }
 
     private func touch(_ key: String) {
         order.removeAll { $0 == key }
@@ -447,6 +579,7 @@ struct ReelItem {
             if let v = views[k], v.superview != nil { i += 1; continue }     // on screen: keep
             views[k]?.stopLoading()
             views[k] = nil
+            slots[k] = nil
             order.remove(at: i)
         }
     }
