@@ -32,12 +32,14 @@ struct MenuContentView: View {
             }
 
             Button {
-                app.showMain(.goals)
+                if app.needsGoals { app.showGoalsGate() } else { app.showMain(.goals) }
             } label: {
                 HStack {
-                    Image(systemName: "target")
                     let g = goals.activeToday
-                    Text(g.isEmpty ? "Set today's goals" : "Goals: \(g.filter(\.done).count) of \(g.count) done")
+                    let missing = g.isEmpty || goals.activeMonth.isEmpty
+                    Image(systemName: missing ? "exclamationmark.circle.fill" : "target")
+                        .foregroundStyle(missing ? Color.orange : Color.primary)
+                    Text(missing ? "Set goals to start check-ins" : "Goals: \(g.filter(\.done).count) of \(g.count) done")
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                 }

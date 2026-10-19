@@ -8,6 +8,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     private var mainWindow: NSWindow?
     private var deviationWindow: NSWindow?
     private var deviationModel: DeviationModel?
+    private var gateWindow: NSWindow?
 
     /// Called when the user closes the check-in window with the red ✕.
     var onPromptClosedByUser: (@MainActor () -> Void)?
@@ -85,6 +86,30 @@ final class WindowManager: NSObject, NSWindowDelegate {
         deviationWindow = nil
         deviationModel = nil
         window?.close()
+    }
+
+    // MARK: Goals gate (no close button: plan, snooze or take the day off)
+
+    func showGate<V: View>(_ view: V) {
+        if let gateWindow {
+            bringToFront(gateWindow)
+            return
+        }
+        let host = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: host)
+        window.title = "Plan your day"
+        window.styleMask = [.titled]
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.isReleasedWhenClosed = false
+        window.center()
+        gateWindow = window
+        bringToFront(window)
+    }
+
+    func closeGate() {
+        gateWindow?.close()
+        gateWindow = nil
     }
 
     // MARK: Helpers

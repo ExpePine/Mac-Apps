@@ -72,7 +72,7 @@ struct EmailSettingsView: View {
             }
 
             Section {
-                Toggle("Ask for today's goals each morning", isOn: $settings.askGoalsMorning)
+                Toggle("Set today's and this month's goals before check-ins start", isOn: $settings.requireGoals)
                 Toggle("Compare each check-in with my goals", isOn: $settings.coachChecksEnabled)
             } header: {
                 Text("Coach")

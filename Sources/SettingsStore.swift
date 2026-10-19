@@ -25,6 +25,7 @@ final class SettingsStore: ObservableObject {
         static let includeUsageInEmail = "includeUsageInEmail"
         static let coachChecks = "coachChecksEnabled"
         static let askGoalsMorning = "askGoalsMorning"
+        static let requireGoals = "requireGoals"
     }
 
     static let intervalPresets = [15, 20, 30, 40, 60]
@@ -74,6 +75,8 @@ final class SettingsStore: ObservableObject {
     @Published var coachChecksEnabled: Bool { didSet { defaults.set(coachChecksEnabled, forKey: Keys.coachChecks) } }
     /// Open the Goals screen the first time you're at the Mac each day.
     @Published var askGoalsMorning: Bool { didSet { defaults.set(askGoalsMorning, forKey: Keys.askGoalsMorning) } }
+    /// Check-ins don't start until today's and this month's goals are set.
+    @Published var requireGoals: Bool { didSet { defaults.set(requireGoals, forKey: Keys.requireGoals) } }
 
     init() {
         defaults.register(defaults: [
@@ -98,6 +101,7 @@ final class SettingsStore: ObservableObject {
             Keys.includeUsageInEmail: true,
             Keys.coachChecks: true,
             Keys.askGoalsMorning: true,
+            Keys.requireGoals: true,
         ])
         intervalMinutes = defaults.integer(forKey: Keys.interval)
         entryWindowMinutes = defaults.integer(forKey: Keys.window)
@@ -120,6 +124,7 @@ final class SettingsStore: ObservableObject {
         includeUsageInEmail = defaults.bool(forKey: Keys.includeUsageInEmail)
         coachChecksEnabled = defaults.bool(forKey: Keys.coachChecks)
         askGoalsMorning = defaults.bool(forKey: Keys.askGoalsMorning)
+        requireGoals = defaults.bool(forKey: Keys.requireGoals)
     }
 }
 

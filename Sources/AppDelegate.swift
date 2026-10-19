@@ -107,18 +107,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     /// Opens Goals once per day (from 5 am) if today's goals are empty.
+    /// Shows the goals gate when goals are missing (re-checked every 10 minutes).
     private func maybeAskForGoals() {
-        guard settings.askGoalsMorning, goals.activeToday.isEmpty else { return }
-        let now = Date()
-        guard Calendar.current.component(.hour, from: now) >= 5 else { return }
-        let key = GoalsStore.dayKey(now)
-        let defaults = UserDefaults.standard
-        guard defaults.string(forKey: "goalsAskedDay") != key else { return }
-        // Don't ask while the user is away (idle > 5 min).
+        guard needsGoals else { return }
+        // Don't pop up while the user is away (idle > 5 min).
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
         guard idle < 300 else { return }
-        defaults.set(key, forKey: "goalsAskedDay")
-        showMain(.goals)
+        if let until = gateSnoozedUntil, Date() < until { return }
+        showGoalsGate()
+    }
+
+    // MARK: - Goals gate
+
+    private var gateSnoozedUntil: Date?
+
+    /// Today is marked "day off": no check-ins, no gate.
+    var isDayOff: Bool { UserDefaults.standard.string(forKey: "dayOff") == GoalsStore.dayKey(Date()) }
+
+    /// Check-ins wait until today's goals (and this month's) exist.
+    var needsGoals: Bool {
+        guard settings.requireGoals, !isDayOff else { return false }
+        // Between midnight and 5 am the previous day's goals still count.
+        guard Calendar.current.component(.hour, from: Date()) >= 5 else { return false }
+        return goals.activeToday.isEmpty || goals.activeMonth.isEmpty
+    }
+
+    func showGoalsGate() {
+        windows.showGate(GoalsGateView(goals: goals, onStart: { [weak self] in self?.gateDone() },
+                                       onSnooze: { [weak self] in self?.snoozeGate() },
+                                       onDayOff: { [weak self] in self?.takeDayOff() }))
+    }
+
+    private func gateDone() {
+        windows.closeGate()
+        gateSnoozedUntil = nil
+        // The first check-in comes one full interval after the day is planned.
+        if scheduler.isPaused { scheduler.resume() } else { scheduler.restart() }
+        pendingPrompt = nil
+    }
+
+    private func snoozeGate() {
+        gateSnoozedUntil = Date().addingTimeInterval(600)
+        windows.closeGate()
+    }
+
+    private func takeDayOff() {
+        UserDefaults.standard.set(GoalsStore.dayKey(Date()), forKey: "dayOff")
+        windows.closeGate()
     }
 
     // MARK: - Check-in flow
@@ -126,6 +161,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func firePrompt(start: Date, end: Date) {
         // Still writing the previous one — don't interrupt.
         if activeSession != nil { return }
+        if isDayOff { return }
+        // No goals yet: plan the day first, no check-in.
+        if needsGoals {
+            if let until = gateSnoozedUntil, Date() < until { return }
+            showGoalsGate()
+            return
+        }
 
         // Previous check-in was never answered.
         if let old = pendingPrompt {
@@ -143,6 +185,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Menu bar "Log now".
     func logNow() {
+        if needsGoals {
+            gateSnoozedUntil = nil
+            showGoalsGate()
+            return
+        }
         if activeSession != nil {
             windows.bringPromptToFront()
             return
