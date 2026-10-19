@@ -150,6 +150,8 @@ struct GainersView: View {
                 .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { UserDefaults.standard.set(ReelSource.gainers.rawValue, forKey: "reel.source"); openWindow(id: "reel") } label: { Label("Chart Reel", systemImage: "film.stack") }
                 .help("Flick through these gainers' charts with a slider (⌥⌘R)")
+            Button { openWindow(id: "multibaggers") } label: { Label("Multibaggers", systemImage: "chart.line.uptrend.xyaxis.circle") }
+                .help("Every stock that gained ≥ 30% in a month since 2023 — and a Chart Reel jumped to each move (⌥⌘M)")
             Button { openWindow(id: "delivery") } label: { Label("Delivery", systemImage: "shippingbox") }
                 .help("NSE delivery history: stocks whose delivery quantity just made a 300-day high (⌥⌘D)")
             Button { openWindow(id: "combi") } label: { Label("Combinatorix", systemImage: "square.stack.3d.up") }

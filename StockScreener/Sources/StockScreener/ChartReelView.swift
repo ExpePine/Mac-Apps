@@ -24,6 +24,10 @@ struct ChartReelView: View {
     @AppStorage("reel.autoZoom") private var autoZoom = true
     @AppStorage("reel.zoomDelay") private var zoomDelay = 2.5
     @AppStorage("reel.zoomSwap") private var zoomSwap = false
+    @AppStorage("reel.mbMonth") private var mbMonth = ""
+    @AppStorage("reel.mbScope") private var mbScope = "Sheet stocks"
+    @AppStorage("mb.center") private var mbCenter = MBCenter.start.rawValue
+    @ObservedObject private var mbc = MultibaggerCenter.shared
     @State private var phase = 0                  // "1 → 2": 0 = showing Chart 1, 1 = Chart 2
     @State private var zoomTick = 0               // redraws the zoom labels
 
@@ -57,9 +61,20 @@ struct ChartReelView: View {
             out = rows.filter(pred).map { r in ReelItem(symbol: sym(r), note: ci.map { "\(column) \(r.text($0))" } ?? "", row: r) }
         case .all:
             out = vm.table.rows.map { ReelItem(symbol: sym($0), note: "", row: $0) }
+        case .multibaggers:
+            var ev = mbc.events
+            if !mbMonth.isEmpty { ev = ev.filter { $0.month == mbMonth } }
+            if mbScope == "Sheet stocks" { let s = Set(vm.allSymbols.map { $0.uppercased() }); ev = ev.filter { s.contains($0.symbol) } }
+            if mbScope == "My Filter" { let s = Set(vm.filterRows.map(sym)); ev = ev.filter { s.contains($0.symbol) } }
+            let center = MBCenter(rawValue: mbCenter) ?? .start
+            let rowOf = Dictionary(vm.table.rows.map { (sym($0), $0) }, uniquingKeysWith: { a, _ in a })
+            out = ev.map { e in
+                ReelItem(symbol: e.symbol, note: String(format: "%+.0f%% · ", e.gain) + e.monthTitle, row: rowOf[e.symbol],
+                         goTo: e.day(for: center), key: e.id)
+            }
         }
         var seen = Set<String>()
-        out = out.filter { !$0.symbol.isEmpty && seen.insert($0.symbol).inserted }
+        out = out.filter { !$0.symbol.isEmpty && seen.insert($0.key ?? $0.symbol).inserted }
         switch sortMode {
         case "A → Z": out.sort { $0.symbol < $1.symbol }
         case "Day % (high first)":
@@ -112,13 +127,25 @@ struct ChartReelView: View {
             }
         }
         .navigationTitle(current.map { "Chart Reel — \($0.symbol)" } ?? "Chart Reel")
-        .onAppear { if column.isEmpty { column = vm.settings.triggerColumn }; vm.refreshChartLinksIfStale(); show(0, list) }
+        .onAppear {
+            if column.isEmpty { column = vm.settings.triggerColumn }
+            vm.refreshChartLinksIfStale()
+            mbc.loadIfNeeded()
+            let start = UserDefaults.standard.string(forKey: "reel.mbStart") ?? ""
+            UserDefaults.standard.set("", forKey: "reel.mbStart")
+            let i = start.isEmpty ? 0 : (list.firstIndex { $0.key == start } ?? 0)
+            index = Double(i)
+            show(i, list)
+        }
         .onChange(of: source) { _ in restart() }
         .onChange(of: column) { _ in restart() }
         .onChange(of: op) { _ in restart() }
         .onChange(of: value) { _ in restart() }
         .onChange(of: alsoFilter) { _ in restart() }
         .onChange(of: sortMode) { _ in restart() }
+        .onChange(of: mbMonth) { _ in restart() }
+        .onChange(of: mbCenter) { _ in restart() }
+        .onChange(of: mbc.events.count) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
         .onChange(of: layout) { _ in phase = 0; show(shown, items) }
         .onReceive(timer) { _ in
@@ -148,6 +175,7 @@ struct ChartReelView: View {
         case .filter: return "Your Filter shows no stocks."
         case .column: return column.isEmpty || vm.table.index(of: column) == nil ? "Pick a column." : "No stock has \(column) \(op) \(value)."
         case .all: return "No data yet — import the sheet first."
+        case .multibaggers: return mbc.events.isEmpty ? "No multibaggers yet — open Multibaggers and download Yahoo history." : "No multibaggers for this month / scope."
         }
     }
 
@@ -174,6 +202,15 @@ struct ChartReelView: View {
                 Button("Edit Filter…") { openWindow(id: "filter") }
             case .all:
                 EmptyView()
+            case .multibaggers:
+                Picker("", selection: $mbMonth) {
+                    Text("All months").tag("")
+                    ForEach(mbc.months, id: \.self) { Text(MBEngine.monthTitle($0)).tag($0) }
+                }
+                .labelsHidden().frame(width: 120)
+                Picker("", selection: $mbCenter) { ForEach(MBCenter.allCases) { Text($0.rawValue).tag($0.rawValue) } }
+                    .labelsHidden().fixedSize().help("Date both charts jump to (TradingView Go to date)")
+                Button("Multibaggers…") { openWindow(id: "multibaggers") }
             }
             Spacer()
             Picker("", selection: $sortMode) {
@@ -288,23 +325,31 @@ struct ChartReelView: View {
         let l = ReelLayout(rawValue: layout) ?? .chart1
         if let it {
             switch l {
-            case .chart1: chartPane(it.symbol, 0)
-            case .chart2: chartPane(it.symbol, 1)
-            case .side: HSplitView { chartPane(it.symbol, 0); chartPane(it.symbol, 1) }
-            case .stacked: VSplitView { chartPane(it.symbol, 0); chartPane(it.symbol, 1) }
-            case .sequence: chartPane(it.symbol, phase)
+            case .chart1: chartPane(it, 0)
+            case .chart2: chartPane(it, 1)
+            case .side: HSplitView { chartPane(it, 0); chartPane(it, 1) }
+            case .stacked: VSplitView { chartPane(it, 0); chartPane(it, 1) }
+            case .sequence: chartPane(it, phase)
             }
         } else {
             Color.clear
         }
     }
 
-    private func chartPane(_ symbol: String, _ c: Int) -> some View {
+    private func chartPane(_ it: ReelItem, _ c: Int) -> some View {
+        let symbol = it.symbol
         let col = min(c, vm.chartCount - 1)
         return VStack(spacing: 0) {
             if let u = vm.chartURL(symbol, column: col) {
-                ReelWebView(web: pool.view(for: u, slot: c))
-                    .overlay(alignment: .topTrailing) { zoomBar(c) }
+                ReelWebView(web: pool.view(for: u, slot: c, goTo: it.goTo))
+                    .overlay(alignment: .topTrailing) { zoomBar(c, goTo: it.goTo) }
+                    .overlay(alignment: .bottomLeading) {
+                        if let g = it.goTo {
+                            Text("📅 \(g)").font(.caption.monospacedDigit().bold())
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.regularMaterial, in: Capsule()).padding(6)
+                        }
+                    }
             } else {
                 Text("No chart link for \(symbol)").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -316,7 +361,7 @@ struct ChartReelView: View {
     }
 
     /// Per-chart zoom, remembered and re-applied to every stock's chart after it loads.
-    private func zoomBar(_ c: Int) -> some View {
+    private func zoomBar(_ c: Int, goTo: String?) -> some View {
         _ = zoomTick
         let steps = ReelPool.zoomSteps(c)
         let page = ReelPool.pageZoom(c)
@@ -330,6 +375,11 @@ struct ChartReelView: View {
                 .help("Show fewer, wider bars (zoom in the time axis) — remembered for every Chart \(c + 1)")
             Button { pool.resetZoom(slot: c); zoomTick += 1 } label: { Image(systemName: "arrow.counterclockwise") }
                 .help("Back to the layout's own zoom (reloads this chart)")
+            if let g = goTo {
+                Divider().frame(height: 12)
+                Button { pool.goToAgain(slot: c, date: g) } label: { Image(systemName: "calendar") }
+                    .help("Jump this chart to \(g) again (TradingView Go to date). If it doesn't move: click the chart, press ⌥G and paste — the date is copied.")
+            }
             Divider().frame(height: 12)
             Button { pool.signIn(slot: c) } label: { Image(systemName: "person.crop.circle") }
                 .help("Sign in to TradingView here — \(TVAccounts.name(TVAccounts.account(forChart: c))) (Google pop-ups open in their own window)")
@@ -440,9 +490,9 @@ struct ChartReelView: View {
         guard preload else { return }
         let l = ReelLayout(rawValue: layout) ?? .chart1
         let cols: [Int] = l == .chart1 ? [0] : (l == .chart2 ? [1] : [0, 1])
-        var urls: [(URL, Int)] = []
+        var urls: [(URL, Int, String?)] = []
         for j in [i, i + 1, i + 2, i - 1] where list.indices.contains(j) {
-            for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c)) } }
+            for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
         }
         pool.preload(urls, keep: cols.count * 4)
     }
@@ -451,7 +501,7 @@ struct ChartReelView: View {
 // MARK: - Model bits
 
 enum ReelSource: String, CaseIterable, Identifiable {
-    case gainers = "Daily gainers", column = "Column filter", filter = "My Filter", all = "All stocks"
+    case gainers = "Daily gainers", column = "Column filter", filter = "My Filter", all = "All stocks", multibaggers = "Multibaggers"
     var id: String { rawValue }
 }
 
@@ -466,6 +516,8 @@ struct ReelItem {
     var row: SheetRow? = nil
     var gainer: GainerRow? = nil
     var day: String? = nil
+    var goTo: String? = nil        // TradingView "Go to date" after the chart loads (yyyy-MM-dd)
+    var key: String? = nil         // unique id when a stock appears more than once (multibagger months)
 }
 
 /// Keeps a few loaded chart pages so stepping back and forth is instant, and re-applies your remembered
@@ -473,7 +525,8 @@ struct ReelItem {
 final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     private var popups: [(window: NSWindow, web: WKWebView, slot: Int)] = []
     private var views: [String: WKWebView] = [:]
-    private var slots: [String: Int] = [:]    // url → chart (0 = Chart 1, 1 = Chart 2)
+    private var slots: [String: Int] = [:]    // key → chart (0 = Chart 1, 1 = Chart 2)
+    private var gotos: [String: String] = [:] // key → date to jump to after loading
     private var order: [String] = []          // most recent last
     private var keep = 6
 
@@ -487,7 +540,9 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
     private var delay: Double { let d = UserDefaults.standard.double(forKey: "reel.zoomDelay"); return d == 0 ? 2.5 : d }
     private var swap: Bool { UserDefaults.standard.bool(forKey: "reel.zoomSwap") }
 
-    private func make(_ url: URL, slot: Int) -> WKWebView {
+    private static func key(_ url: URL, _ goTo: String?) -> String { url.absoluteString + (goTo.map { "#goto=" + $0 } ?? "") }
+
+    private func make(_ url: URL, slot: Int, key: String, goTo: String?) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = TVAccounts.store(TVAccounts.account(forChart: slot))   // Chart 1 → Account 1, Chart 2 → Account 2
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
@@ -496,26 +551,29 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         v.pageZoom = Self.pageZoom(slot)
         v.navigationDelegate = self
         v.uiDelegate = self
-        slots[url.absoluteString] = slot
+        slots[key] = slot
+        gotos[key] = goTo
         v.load(URLRequest(url: url))
         return v
     }
 
-    func view(for url: URL, slot: Int) -> WKWebView {
-        let key = url.absoluteString
+    func view(for url: URL, slot: Int, goTo: String? = nil) -> WKWebView {
+        let key = Self.key(url, goTo)
         if let v = views[key] { touch(key); return v }
-        let v = make(url, slot: slot)
+        let v = make(url, slot: slot, key: key, goTo: goTo)
         views[key] = v
         touch(key)
         trim()
         return v
     }
 
-    func preload(_ urls: [(URL, Int)], keep: Int) {
+    func preload(_ urls: [(URL, Int, String?)], keep: Int) {
         self.keep = max(4, keep + 2)
-        for (u, slot) in urls where views[u.absoluteString] == nil {
-            views[u.absoluteString] = make(u, slot: slot)
-            touch(u.absoluteString)
+        for (u, slot, g) in urls {
+            let key = Self.key(u, g)
+            guard views[key] == nil else { continue }
+            views[key] = make(u, slot: slot, key: key, goTo: g)
+            touch(key)
         }
         trim()
     }
@@ -575,13 +633,89 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
     // MARK: Zoom
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard autoZoom, let key = views.first(where: { $0.value === webView })?.key else { return }
-        let steps = Self.zoomSteps(slots[key] ?? 0)
-        guard steps != 0 else { return }
+        guard let key = views.first(where: { $0.value === webView })?.key else { return }
+        let steps = autoZoom ? Self.zoomSteps(slots[key] ?? 0) : 0
+        let date = gotos[key]
+        guard steps != 0 || date != nil else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
             guard let self, let webView else { return }
-            self.wheel(webView, steps: steps, tries: 4)
+            if steps != 0 { self.wheel(webView, steps: steps, tries: 4) }
+            if let date {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (steps != 0 ? 1.0 : 0)) { self.goTo(webView, date: date, tries: 3) }
+            }
         }
+    }
+
+    // MARK: Go to date
+
+    /// Jumps the chart to `date` with TradingView's own "Go to" dialog (⌥G): opens it, types the date, presses Go to.
+    /// Works by scripting TradingView's page, so it can break if TradingView changes its page.
+    func goTo(_ web: WKWebView, date: String, tries: Int, native: Bool = false) {
+        if native, let w = web.window {
+            w.makeFirstResponder(web)
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: w.windowNumber, context: nil, characters: "©", charactersIgnoringModifiers: "g",
+                                            isARepeat: false, keyCode: 5) {
+                    if type == .keyDown { web.keyDown(with: e) } else { web.keyUp(with: e) }
+                }
+            }
+        }
+        let open = native ? "'native'" : """
+        (function(){
+          function vis(e){ var r=e.getBoundingClientRect(); return r.width>0 && r.height>0; }
+          var ins=[].slice.call(document.querySelectorAll('input')).filter(vis);
+          if (ins.some(function(i){ return /^\\d{4}-\\d{2}-\\d{2}$/.test(i.value); })) return 'open';
+          var b=document.querySelector('[data-name="go-to-date"]');
+          if (b && vis(b)) { b.click(); return 'clicked'; }
+          var o={key:'g', code:'KeyG', keyCode:71, which:71, altKey:true, bubbles:true, cancelable:true};
+          (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', o));
+          document.dispatchEvent(new KeyboardEvent('keyup', o));
+          return 'key';
+        })()
+        """
+        web.evaluateJavaScript(open) { [weak self, weak web] _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                guard let self, let web else { return }
+                self.fill(web, date: date) { result in
+                    if result == "noinput" && tries > 0 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                            self.goTo(web, date: date, tries: tries - 1, native: web.window != nil && !native)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func fill(_ web: WKWebView, date: String, done: @escaping (String) -> Void) {
+        let js = """
+        (function(d){
+          function vis(e){ var r=e.getBoundingClientRect(); return r.width>0 && r.height>0; }
+          var ins=[].slice.call(document.querySelectorAll('input')).filter(vis);
+          var inp=ins.find(function(i){ return /^\\d{4}-\\d{2}-\\d{2}$/.test(i.value); })
+               || ins.find(function(i){ return /yyyy/i.test(i.placeholder||''); });
+          if (!inp) return 'noinput';
+          var set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+          inp.focus(); set.call(inp, d);
+          inp.dispatchEvent(new Event('input',{bubbles:true}));
+          inp.dispatchEvent(new Event('change',{bubbles:true}));
+          var root=inp.closest('[role="dialog"],[data-name*="dialog"],[class*="dialog"]') || document;
+          var btns=[].slice.call(root.querySelectorAll('button')).filter(vis);
+          var go=btns.find(function(b){ return /^\\s*go\\s*to\\s*$/i.test(b.textContent); }) || root.querySelector('[data-name="submit-button"]');
+          if (go) { setTimeout(function(){ go.click(); }, 200); return 'done'; }
+          ['keydown','keyup'].forEach(function(t){ inp.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true})); });
+          return 'enter';
+        })('\(date)')
+        """
+        web.evaluateJavaScript(js) { r, _ in done((r as? String) ?? "error") }
+    }
+
+    /// Re-runs Go to date on the chart on screen (and copies the date, for ⌥G + paste by hand).
+    func goToAgain(slot: Int, date: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(date, forType: .string)
+        for (k, v) in views where slots[k] == slot && v.superview != nil { goTo(v, date: date, tries: 2, native: true) }
     }
 
     /// Turns the mouse wheel `steps` times over the chart (+ = zoom in). Retries while the chart is still drawing.
@@ -637,6 +771,7 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
             views[k]?.stopLoading()
             views[k] = nil
             slots[k] = nil
+            gotos[k] = nil
             order.remove(at: i)
         }
     }

@@ -98,3 +98,25 @@ final class DeliveryTests: XCTestCase {
         for i in y.indices { XCTAssertEqual(hy[i], y[max(0, i - 49)...i].max()) }
     }
 }
+
+final class MultibaggerTests: XCTestCase {
+    func testMonthlyEvents() {
+        var b = PriceBook()
+        // Dec 2022 ends at 100; Jan 2023 rises to 140 (cross on Jan 4 at 131); Feb 2023 flat
+        b.series["ABC"] = PriceSeries(days: ["2022-12-29", "2022-12-30", "2023-01-02", "2023-01-03", "2023-01-04", "2023-01-31", "2023-02-01", "2023-02-28"],
+                                      closes: [99, 100, 110, 120, 131, 140, 141, 142])
+        b.series["XYZ"] = PriceSeries(days: ["2022-12-30", "2023-01-31"], closes: [100, 120])
+        let e = MBEngine.events(b, threshold: 30, fromMonth: "2023-01", usePeak: false)
+        XCTAssertEqual(e.count, 1)
+        XCTAssertEqual(e[0].symbol, "ABC")
+        XCTAssertEqual(e[0].month, "2023-01")
+        XCTAssertEqual(e[0].gain, 40, accuracy: 1e-9)
+        XCTAssertEqual(e[0].baseDay, "2022-12-30")
+        XCTAssertEqual(e[0].startDay, "2023-01-02")
+        XCTAssertEqual(e[0].crossDay, "2023-01-04")
+        XCTAssertEqual(e[0].peakDay, "2023-01-31")
+        XCTAssertEqual(e[0].day(for: .cross), "2023-01-04")
+        XCTAssertEqual(MBEngine.monthTitle("2024-03"), "Mar 2024")
+        XCTAssertEqual(MultibaggerCenter.monthBefore("2023-01", 2), "2022-11")
+    }
+}
