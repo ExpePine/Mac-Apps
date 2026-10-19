@@ -113,6 +113,21 @@ The results show summary figures, a chart of the average and median move after t
 
 **Compare groups by** splits the results by any column, from the main sheet or the experiments sheet. Numbers are split into Low / Mid / High thirds; text is split by value.
 
+**Compare indicators & hidden patterns:** every study run is saved, up to the last 40. Tick the runs to compare, for example D_Trigger and two experiment columns. Every stock is then judged exactly **H trading days** after its own event (default 21), so old and new signals are compared over the same holding period.
+- **Winners:** most profitable, fastest to +target%, least risky, and best risk-adjusted.
+- **Side-by-side table:** median and mean return, a bootstrap 95% range of the mean, win rate, expectancy, profit factor, best rise and worst dip, worst-5% (CVaR), volatility, Sortino, hit rate, median days to target, target-before-stop and stop-before-target, and the return compared with the Nifty 50.
+- **Charts:**
+  - risk vs return
+  - speed curves (a survival estimate, which also counts newer events)
+  - the average path for each indicator
+  - the spread of returns
+- **Head to head:** the difference between each pair, with its 95% range and the chance that A is better, plus how stocks did when both indicators flagged them.
+- **Hidden patterns:**
+  - confluence: stocks flagged by 1, 2, 3 or more indicators
+  - market regime: whether the Nifty was rising, flat or falling before the event
+  - the stock's own move before the event
+  - written findings, each marked *solid* or *tentative*
+
 **Experiments sheet:** paste a second sheet's link under *Sheet & columns…*, choose its stock-name column and the columns you want, then use them as a study's event column or as the group-by column.
 
 ### Changes — cards (⇧⌘8)

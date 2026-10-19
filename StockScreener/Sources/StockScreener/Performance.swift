@@ -58,7 +58,7 @@ struct PerfEvent {
     let group: String?          // split-by value
 }
 
-struct PerfRow: Identifiable {
+struct PerfRow: Identifiable, Codable {
     var id: String { symbol }
     let symbol: String
     let value: String
@@ -73,8 +73,10 @@ struct PerfRow: Identifiable {
     let hitDays: Int?                // trading days until it first closed ≥ success %
     let horizons: [Double?]          // % at each horizon (trading days after the event)
     let benchmark: Double?           // Nifty 50 over the same days, %
-    let group: String
+    var group: String
     let path: [Double]               // % vs entry for day 0, 1, 2… (up to 250)
+    var preMove: Double? = nil       // the stock's own % move over the 21 trading days BEFORE the event
+    var marketPre: Double? = nil     // Nifty 50 % move over the 21 trading days before the event
 
     var excess: Double? { benchmark.map { returnNow - $0 } }
 }
@@ -172,22 +174,35 @@ enum PerfEngine {
                 benchmark = (b.closes[be] / b.closes[bi] - 1) * 100
             }
             let path = window.prefix(251).map { ($0 / entry - 1) * 100 }
+            let preMove: Double? = i >= 21 && s.closes[i - 21] > 0 ? (entry / s.closes[i - 21] - 1) * 100 : nil
+            var marketPre: Double?
+            if let b = bench, let bi = b.index(onOrBefore: s.days[i]), bi >= 21, b.closes[bi - 21] > 0 {
+                marketPre = (b.closes[bi] / b.closes[bi - 21] - 1) * 100
+            }
             result.rows.append(PerfRow(symbol: e.symbol, value: e.value, eventDay: s.days[i], tradingDaysSince: since,
                                        entry: entry, now: now, returnNow: (now / entry - 1) * 100,
                                        peak: (peak / entry - 1) * 100, daysToPeak: peakAt,
                                        worst: (worst / entry - 1) * 100, hitDays: hit, horizons: horizons,
-                                       benchmark: benchmark, group: e.group ?? "", path: Array(path)))
+                                       benchmark: benchmark, group: e.group ?? "", path: Array(path),
+                                       preMove: preMove, marketPre: marketPre))
         }
+        let skipped = result.skipped
+        var summary = summarize(result.rows, study: study)
+        summary.skipped = skipped
+        summary.refDay = refDay
+        return summary
+    }
+
+    /// Aggregates already-built rows (also used to show a stored run again).
+    static func summarize(_ rows: [PerfRow], study: PerfStudy) -> PerfResult {
+        var result = PerfResult()
+        result.rows = rows
 
         // Group labels: numbers → Low / Mid / High thirds; text → its values
         let raw = result.rows.map(\.group)
         if !study.splitBy.isEmpty {
             let labels = groupLabels(raw)
-            result.rows = zip(result.rows, labels).map { r, g in
-                PerfRow(symbol: r.symbol, value: r.value, eventDay: r.eventDay, tradingDaysSince: r.tradingDaysSince,
-                        entry: r.entry, now: r.now, returnNow: r.returnNow, peak: r.peak, daysToPeak: r.daysToPeak,
-                        worst: r.worst, hitDays: r.hitDays, horizons: r.horizons, benchmark: r.benchmark, group: g, path: r.path)
-            }
+            result.rows = zip(result.rows, labels).map { r, g in var c = r; c.group = g; return c }
             let byGroup = Dictionary(grouping: result.rows, by: \.group)
             result.groups = byGroup.map { name, rows in
                 PerfGroup(name: name, count: rows.count,

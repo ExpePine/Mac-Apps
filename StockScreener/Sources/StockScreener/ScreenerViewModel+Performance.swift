@@ -104,6 +104,15 @@ extension ScreenerViewModel {
                 PerfEngine.analyze(events, book: book, refDay: refDay, study: study)
             }.value
             self.perfResults[study.id] = result
+            if !result.rows.isEmpty {
+                let run = PerfRun(study: study, refDay: refDay, rows: result.rows, skipped: result.skipped.count)
+                await Task.detached(priority: .utility) { PerfRunStore.save(run) }.value
+                self.perfRuns.insert(run, at: 0)
+                if self.perfRuns.count > PerfRunStore.keep { self.perfRuns = Array(self.perfRuns.prefix(PerfRunStore.keep)) }
+                // compare the newest run of each indicator by default
+                self.compareSelection.subtract(self.perfRuns.filter { $0.study.id == study.id && $0.id != run.id }.map(\.id))
+                self.compareSelection.insert(run.id)
+            }
             self.perfRunning = nil
             self.perfProgress = (0, 0)
         }
@@ -146,5 +155,43 @@ extension ScreenerViewModel {
             let g = splitCol.flatMap { c in splitRows[sym]?.text(c) }
             return PerfEvent(symbol: sym, value: v, group: study.splitBy.isEmpty ? nil : (g ?? ""))
         }
+    }
+}
+
+extension ScreenerViewModel {
+    /// Shows each study's last saved run (after relaunch).
+    func restorePerfResults() {
+        for study in settings.perfStudies where perfResults[study.id] == nil {
+            if let run = perfRuns.first(where: { $0.study.id == study.id }) {
+                var r = PerfEngine.summarize(run.rows, study: run.study)
+                r.refDay = run.refDay
+                perfResults[study.id] = r
+            }
+        }
+        if compareSelection.isEmpty {
+            var seen = Set<UUID>()
+            for run in perfRuns where !seen.contains(run.study.id) {      // newest run of each study
+                seen.insert(run.study.id)
+                compareSelection.insert(run.id)
+            }
+        }
+    }
+
+    func runComparison() {
+        let runs = perfRuns.filter { compareSelection.contains($0.id) }
+        guard !runs.isEmpty else { compareResult = nil; return }
+        let h = max(1, settings.perfCompareHorizon), t = settings.perfCompareTarget, st = settings.perfCompareStop
+        isComparing = true
+        Task { [weak self] in
+            let r = await Task.detached(priority: .userInitiated) { PerfCompare.compare(runs, horizon: h, target: t, stop: st) }.value
+            self?.compareResult = r
+            self?.isComparing = false
+        }
+    }
+
+    func deleteRun(_ id: UUID) {
+        PerfRunStore.delete(id)
+        perfRuns.removeAll { $0.id == id }
+        compareSelection.remove(id)
     }
 }

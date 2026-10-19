@@ -238,6 +238,9 @@ struct AppSettings: Codable {
     var perfSheetLink = ""                      // the experiments sheet
     var perfSymbolColumn = ""                   // its stock-name column ("" = first column)
     var perfImportedColumns: [String] = []      // columns taken from the experiments sheet
+    var perfCompareHorizon = 21                 // compare indicators on the return after this many trading days
+    var perfCompareTarget = 20.0                // "+target %" for speed / hit rates
+    var perfCompareStop = 10.0                  // "−stop %" for risk (which comes first)
 
     // Alerts
     var email = EmailSettings()
@@ -279,6 +282,9 @@ struct AppSettings: Codable {
         perfSheetLink   = v(.perfSheetLink, d.perfSheetLink)
         perfSymbolColumn = v(.perfSymbolColumn, d.perfSymbolColumn)
         perfImportedColumns = v(.perfImportedColumns, d.perfImportedColumns)
+        perfCompareHorizon = v(.perfCompareHorizon, d.perfCompareHorizon)
+        perfCompareTarget = v(.perfCompareTarget, d.perfCompareTarget)
+        perfCompareStop = v(.perfCompareStop, d.perfCompareStop)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

@@ -108,6 +108,10 @@ final class ScreenerViewModel: ObservableObject {
     @Published var perfRunning: UUID?
     @Published var perfStatus: String?
     @Published var perfProgress: (Int, Int) = (0, 0)
+    @Published var perfRuns: [PerfRun] = PerfRunStore.loadAll()
+    @Published var compareSelection: Set<UUID> = []
+    @Published var compareResult: ComparisonResult?
+    @Published var isComparing = false
     var flashToken = 0
 
     // E column: per-row status on the Filter screen

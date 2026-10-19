@@ -19,7 +19,32 @@ struct PerformanceView: View {
         return vm.settings.perfStudies.isEmpty ? nil : 0
     }
 
+    @AppStorage("perfMode") private var mode = 0       // 0 = study, 1 = compare & patterns
+
     var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $mode) {
+                    Text("Study").tag(0)
+                    Text("Compare indicators & hidden patterns").tag(1)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 420)
+                Spacer()
+                Text("\(vm.perfRuns.count) saved run\(vm.perfRuns.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            if mode == 1 {
+                CompareView()
+            } else {
+                studyBody
+            }
+        }
+        .navigationTitle("Performance")
+        .onAppear { vm.restorePerfResults() }
+    }
+
+    private var studyBody: some View {
         HStack(spacing: 0) {
             sidebar.frame(width: 220)
             Divider()
@@ -33,7 +58,6 @@ struct PerformanceView: View {
                 Text("Add a study with +").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("Performance")
         .sheet(isPresented: $showSheetSettings) { ExperimentsSheetSettings().environmentObject(vm) }
         .onAppear {
             if let i = index { horizonsText = vm.settings.perfStudies[i].horizons.map(String.init).joined(separator: ", ") }
