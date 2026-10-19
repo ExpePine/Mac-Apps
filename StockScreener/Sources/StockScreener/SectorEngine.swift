@@ -22,6 +22,12 @@ extension PriceSeries {
     }
 }
 
+struct RRGPoint: Hashable {
+    let day: String
+    let ratio: Double
+    let momentum: Double
+}
+
 enum Quadrant: String, Codable, CaseIterable {
     case leading = "Leading", weakening = "Weakening", lagging = "Lagging", improving = "Improving"
     static func of(ratio: Double, momentum: Double) -> Quadrant {
@@ -61,6 +67,7 @@ struct SectorStat: Identifiable {
     let rank: Int
     let rankChange5d: Int?           // + = moved up
     let tail: [(ratio: Double, momentum: Double)]   // last 10 days on the rotation map
+    var path: [RRGPoint] = []                        // every day of the history window (for the animation)
     let history: [SectorState]       // last 40 days
     let topMembers: [(String, Double)]   // best 1M performers
 }
@@ -231,7 +238,11 @@ enum SectorEngine {
                 return (s, (a / b - 1) * 100)
             }.sorted { $0.1 > $1.1 }.prefix(5)
             let r1m = change(w.index, 21, at: now)
-            report.sectors.append(SectorStat(
+            let path: [RRGPoint] = (hStart..<T).compactMap { t in
+                guard let r = w.ratio[t], let m = w.mom[t] else { return nil }
+                return RRGPoint(day: cal[t], ratio: r, momentum: m)
+            }
+            var stat = SectorStat(
                 name: w.name, members: w.members, priced: w.priced.count,
                 index: Array(w.index.suffix(130)),
                 r1w: change(w.index, 5, at: now), r1m: r1m, r3m: change(w.index, 63, at: now), r6m: change(w.index, 126, at: now),
@@ -241,7 +252,9 @@ enum SectorEngine {
                 trend: trend(w.index, at: now), breadth: breadth(w, at: now),
                 score: scoreHistory[now]?[w.name] ?? 0, rank: rankNow[w.name] ?? 0,
                 rankChange5d: rank5[w.name].flatMap { old in rankNow[w.name].map { old - $0 } },
-                tail: tail, history: history, topMembers: Array(top)))
+                tail: tail, history: history, topMembers: Array(top))
+            stat.path = path
+            report.sectors.append(stat)
         }
         report.sectors.sort { $0.rank < $1.rank }
 

@@ -19,7 +19,7 @@ struct SectorsView: View {
             } else if let r = vm.sectorReport, !r.sectors.isEmpty {
                 TabView(selection: $tab) {
                     momentumTable(r).tabItem { Text("Momentum") }.tag(0)
-                    rotationMap(r).tabItem { Text("Rotation map") }.tag(1)
+                    RotationMapView(report: r).tabItem { Text("Rotation map") }.tag(1)
                     heatmap(r).tabItem { Text("Change heatmap") }.tag(2)
                     regimeLog.tabItem { Text("Regime changes\(vm.unseenRegimeCount > 0 ? " (\(vm.unseenRegimeCount))" : "")") }.tag(3)
                 }
@@ -142,47 +142,6 @@ struct SectorsView: View {
                 }
             }
             Text("Score = rank-average of 1M and 3M change, RS-Momentum and breadth (0–100). Click a sector for its stocks. Sector index = equal-weight average of its stocks' daily changes (Yahoo closes).")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: Rotation map
-
-    private func rotationMap(_ r: SectorReport) -> some View {
-        var xs: [Double] = [100], ys: [Double] = [100]
-        for sec in r.sectors { for p in sec.tail { xs.append(p.ratio); ys.append(p.momentum) } }
-        let xr: ClosedRange<Double> = ((xs.min() ?? 100) - 0.5)...((xs.max() ?? 100) + 0.5)
-        let yr: ClosedRange<Double> = ((ys.min() ?? 100) - 0.5)...((ys.max() ?? 100) + 0.5)
-        return VStack(alignment: .leading, spacing: 6) {
-            Chart {
-                RectangleMark(xStart: .value("x", xr.lowerBound), xEnd: .value("x", 100), yStart: .value("y", 100), yEnd: .value("y", yr.upperBound))
-                    .foregroundStyle(Color.blue.opacity(0.06))
-                RectangleMark(xStart: .value("x", 100), xEnd: .value("x", xr.upperBound), yStart: .value("y", 100), yEnd: .value("y", yr.upperBound))
-                    .foregroundStyle(Color.green.opacity(0.08))
-                RectangleMark(xStart: .value("x", 100), xEnd: .value("x", xr.upperBound), yStart: .value("y", yr.lowerBound), yEnd: .value("y", 100))
-                    .foregroundStyle(Color.yellow.opacity(0.08))
-                RectangleMark(xStart: .value("x", xr.lowerBound), xEnd: .value("x", 100), yStart: .value("y", yr.lowerBound), yEnd: .value("y", 100))
-                    .foregroundStyle(Color.red.opacity(0.06))
-                ForEach(r.sectors) { s in
-                    ForEach(Array(s.tail.enumerated()), id: \.offset) { i, p in
-                        LineMark(x: .value("RS-Ratio", p.ratio), y: .value("RS-Momentum", p.momentum), series: .value("Sector", s.name))
-                            .foregroundStyle(quadrantColor(s.quadrant).opacity(0.5))
-                            .lineStyle(StrokeStyle(lineWidth: 1.2))
-                    }
-                    PointMark(x: .value("RS-Ratio", s.rsRatio), y: .value("RS-Momentum", s.rsMomentum))
-                        .foregroundStyle(quadrantColor(s.quadrant))
-                        .annotation(position: .top, spacing: 2) { Text(s.name).font(.system(size: 9)) }
-                }
-            }
-            .chartXScale(domain: xr)
-            .chartYScale(domain: yr)
-            .chartXAxisLabel("RS-Ratio (relative strength vs Nifty, 100 = its 50-day norm)")
-            .chartYAxisLabel("RS-Momentum")
-            .overlay(alignment: .topLeading) { Text("Improving").font(.caption.bold()).foregroundStyle(.blue).padding(6) }
-            .overlay(alignment: .topTrailing) { Text("Leading").font(.caption.bold()).foregroundStyle(.green).padding(6) }
-            .overlay(alignment: .bottomTrailing) { Text("Weakening").font(.caption.bold()).foregroundStyle(.orange).padding(.bottom, 30).padding(6) }
-            .overlay(alignment: .bottomLeading) { Text("Lagging").font(.caption.bold()).foregroundStyle(.red).padding(.bottom, 30).padding(.leading, 40) }
-            Text("Each line is the last 10 trading days, ending at the dot. Sectors usually rotate clockwise: Improving → Leading → Weakening → Lagging. This is an approximation of a relative rotation graph built from Yahoo closes.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }

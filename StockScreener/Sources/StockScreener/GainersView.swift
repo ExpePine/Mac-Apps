@@ -45,6 +45,8 @@ struct GainersView: View {
         .sheet(isPresented: $showSettings) { NewsAISettings().environmentObject(vm) }
         .onChange(of: vm.newsCache.reasons.count) { _ in version += 1 }
         .onChange(of: vm.settings.gainersShowFilterColumns) { _ in version += 1 }
+        .onChange(of: vm.settings.gainersColumnFilters) { _ in version += 1 }
+        .onChange(of: vm.settings.gainersOnlyFilterList) { _ in version += 1 }
     }
 
     // MARK: Index mini charts
@@ -115,6 +117,8 @@ struct GainersView: View {
             Text("%").font(.callout)
             Toggle("Filter columns & colours", isOn: $vm.settings.gainersShowFilterColumns).toggleStyle(.switch).controlSize(.small)
                 .help("Show the Filter screen's columns next to each gainer, painted with your cell colours")
+            Toggle("Only my Filter list", isOn: $vm.settings.gainersOnlyFilterList).toggleStyle(.switch).controlSize(.small)
+                .help("Only gainers that also pass the Filter screen's conditions")
             Spacer()
             if let p = vm.explainProgress {
                 ProgressView(value: Double(p.0), total: Double(max(1, p.1))).frame(width: 100)
@@ -186,7 +190,17 @@ struct GainersView: View {
             cols += vm.filterColumnIndices.filter { !cols.contains($0) }
         }
         var rows = derived.rows
+        if vm.settings.gainersOnlyFilterList {
+            let pass = Set(vm.filterRows.map(\.id))
+            rows = rows.filter { pass.contains($0.id) }
+        }
+        let active = vm.settings.gainersColumnFilters.filter { $0.value.isActive }
+        for (name, f) in active {
+            guard let c = derived.index(of: name) else { continue }
+            rows = rows.filter { f.passes($0, column: c) }
+        }
         if let c = sortColumn { rows = Sorter.sort(rows, column: c, descending: sortDescending) }
+        let marked = Set(active.keys.compactMap { derived.index(of: $0) })
         let painter: CellPainter? = vm.settings.gainersShowFilterColumns ? CellPainter(vm.settings.cellRules, table: derived) : nil
         return VStack(spacing: 0) {
             SheetTableView(headers: derived.headers, originalHeaders: derived.originalHeaders, columns: cols, rows: rows,
@@ -196,12 +210,23 @@ struct GainersView: View {
                            onHeaderClick: { i in
                                if sortColumn == i { sortDescending.toggle() } else { sortColumn = i; sortDescending = true }
                            },
+                           columnMenu: { i in
+                               AnyView(GainerColumnMenu(name: derived.headers[i], sample: derived.rows.map { $0.number(i) },
+                                                        sortColumn: $sortColumn, sortDescending: $sortDescending, column: i)
+                                   .environmentObject(vm))
+                           },
+                           markedColumns: marked,
                            sColor: { vm.sColor($0) },
                            onSClick: { row in vm.shotSymbol = vm.rowKey(row); openWindow(id: "shots") },
                            onSelectRows: { selection = $0 },
                            rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow) })
             Divider()
-            HStack {
+            HStack(spacing: 10) {
+                Text("\(rows.count) of \(derived.rows.count) shown").font(.caption.bold())
+                if !active.isEmpty || vm.settings.gainersOnlyFilterList {
+                    Button("Clear filters") { vm.settings.gainersColumnFilters = [:]; vm.settings.gainersOnlyFilterList = false }
+                        .controlSize(.small)
+                }
                 Text("Day % = Yahoo close vs previous close (* = from the sheet's change% column). “Why” = Groq's summary of recent headlines (\(vm.settings.newsProvider.rawValue)); check the source before acting. Right-click a stock to add it to a watchlist.")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
@@ -303,5 +328,68 @@ struct NewsAISettings: View {
             }
             loading = false
         }
+    }
+}
+
+
+/// ▼ panel on a gainers column: sort, and a quick min / max / text filter.
+struct GainerColumnMenu: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    let name: String
+    let sample: [Double?]
+    @Binding var sortColumn: Int?
+    @Binding var sortDescending: Bool
+    let column: Int
+
+    private var isNumeric: Bool { sample.compactMap { $0 }.count * 2 >= max(1, sample.count) }
+    private var filter: Binding<ColumnQuickFilter> {
+        Binding(get: { vm.settings.gainersColumnFilters[name] ?? ColumnQuickFilter() },
+                set: { vm.settings.gainersColumnFilters[name] = $0.isActive ? $0 : nil })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(name).font(.headline)
+            HStack {
+                Button { sortColumn = column; sortDescending = false } label: { Label("Sort ascending", systemImage: "arrow.up") }
+                Button { sortColumn = column; sortDescending = true } label: { Label("Sort descending", systemImage: "arrow.down") }
+            }
+            .controlSize(.small)
+            Divider()
+            Text("Show only rows where").font(.caption).foregroundStyle(.secondary)
+            if isNumeric {
+                let vals = sample.compactMap { $0 }
+                HStack {
+                    Text("from").font(.callout)
+                    TextField("min", text: numberText(\.min)).textFieldStyle(.roundedBorder).frame(width: 80)
+                    Text("to").font(.callout)
+                    TextField("max", text: numberText(\.max)).textFieldStyle(.roundedBorder).frame(width: 80)
+                }
+                if let lo = vals.min(), let hi = vals.max() {
+                    Text("Values here: \(fmt(lo)) … \(fmt(hi))").font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                TextField("contains…", text: filter.contains).textFieldStyle(.roundedBorder).frame(width: 200)
+            }
+            Toggle("Not blank", isOn: filter.nonEmpty).toggleStyle(.checkbox)
+            HStack {
+                Spacer()
+                Button("Clear") { vm.settings.gainersColumnFilters[name] = nil }.disabled(!(vm.settings.gainersColumnFilters[name]?.isActive ?? false))
+            }
+        }
+        .padding(12)
+        .frame(width: 260)
+    }
+
+    private func fmt(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...2))) }
+
+    /// A text field bound to an optional number (blank = no limit).
+    private func numberText(_ key: WritableKeyPath<ColumnQuickFilter, Double?>) -> Binding<String> {
+        Binding(get: { filter.wrappedValue[keyPath: key].map { fmt($0) } ?? "" },
+                set: { t in
+                    var f = filter.wrappedValue
+                    f[keyPath: key] = NumberParser.parse(t.replacingOccurrences(of: ",", with: ""))
+                    filter.wrappedValue = f
+                })
     }
 }

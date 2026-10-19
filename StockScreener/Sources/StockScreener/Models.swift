@@ -257,6 +257,8 @@ struct AppSettings: Codable {
     var newsProvider: NewsProvider = .googleNews
     var groqModel = ""                          // picked from Groq's live model list
     var companyNameColumn = ""                  // optional column with company names (better news search)
+    var gainersColumnFilters: [String: ColumnQuickFilter] = [:]   // per-column min / max / text on the gainers table
+    var gainersOnlyFilterList = false           // only gainers that pass the Filter screen's conditions
 
     // Alerts
     var email = EmailSettings()
@@ -315,6 +317,8 @@ struct AppSettings: Codable {
         newsProvider = v(.newsProvider, d.newsProvider)
         groqModel = v(.groqModel, d.groqModel)
         companyNameColumn = v(.companyNameColumn, d.companyNameColumn)
+        gainersColumnFilters = v(.gainersColumnFilters, d.gainersColumnFilters)
+        gainersOnlyFilterList = v(.gainersOnlyFilterList, d.gainersOnlyFilterList)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)
@@ -571,5 +575,29 @@ enum DateParser {
             if let d = f.date(from: s) { return d }
         }
         return nil
+    }
+}
+
+
+/// A quick filter on one column: numbers between min and max, text containing, or not blank.
+struct ColumnQuickFilter: Codable, Equatable {
+    var min: Double?
+    var max: Double?
+    var contains = ""
+    var nonEmpty = false
+
+    var isActive: Bool { min != nil || max != nil || !contains.trimmingCharacters(in: .whitespaces).isEmpty || nonEmpty }
+
+    func passes(_ row: SheetRow, column c: Int) -> Bool {
+        let text = row.text(c).trimmingCharacters(in: .whitespaces)
+        if nonEmpty && text.isEmpty { return false }
+        if min != nil || max != nil {
+            guard let v = row.number(c) else { return false }
+            if let lo = min, v < lo { return false }
+            if let hi = max, v > hi { return false }
+        }
+        let q = contains.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty && text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) == nil { return false }
+        return true
     }
 }
