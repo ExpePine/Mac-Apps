@@ -1,0 +1,75 @@
+name: ResumeForge DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ResumeForge/**"
+      - ".github/workflows/resumeforge-dmg.yml"
+  workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ResumeForge
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Check extension scripts
+        run: |
+          for f in Extension/Resources/*.js; do node --check "$f"; done
+          python3 -c "import json; json.load(open('Extension/Resources/manifest.json'))"
+
+      - name: Build app and DMG
+        run: |
+          chmod +x scripts/build-dmg.sh
+          set -o pipefail
+          if ! ./scripts/build-dmg.sh "1.0.${{ github.run_number }}" "${{ github.run_number }}" 2>&1 | tee build.log; then
+            # Surface compiler errors as annotations (readable without downloading logs)
+            grep -E "error:" build.log | sort -u | head -60 | while IFS= read -r line; do echo "::error title=build::${line}"; done
+            exit 1
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ResumeForge-build-log
+          path: ResumeForge/build.log
+
+      - name: Upload DMG (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ResumeForge-dmg
+          path: ResumeForge/dist/ResumeForge.dmg
+
+      - name: Publish Release with DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="resumeforge-build-${{ github.run_number }}"
+          gh release create "$TAG" dist/ResumeForge.dmg \
+            --title "ResumeForge (build ${{ github.run_number }})" \
+            --notes "Download ResumeForge.dmg, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch. Then enable the Safari extension (see ResumeForge/README.md). Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
+
+      - name: Update stable "resumeforge-latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete resumeforge-latest --yes --cleanup-tag || true
+          gh release create resumeforge-latest dist/ResumeForge.dmg \
+            --title "ResumeForge (latest)" \
+            --notes "Always the newest ResumeForge build (currently build ${{ github.run_number }}). Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false

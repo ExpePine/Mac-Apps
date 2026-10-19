@@ -1,0 +1,6 @@
+build/
+dist/
+*.xcodeproj
+build.log
+Support/*.plist
+Support/*.entitlements
