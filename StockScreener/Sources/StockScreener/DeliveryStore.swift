@@ -143,6 +143,11 @@ struct DeliverySeries {
     var qty: [Double] = []
     var per: [Double] = []
     var close: [Double] = []
+
+    /// What the signal is computed on: DELIV_QTY × CLOSE_PRICE (delivered value, ₹) or DELIV_QTY alone.
+    func metric(value: Bool) -> [Double] {
+        value ? zip(qty, close).map { $0 * $1 } : qty
+    }
 }
 
 struct DeliveryBook {

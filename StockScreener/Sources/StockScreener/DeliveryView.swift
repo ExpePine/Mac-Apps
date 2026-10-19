@@ -9,6 +9,7 @@ struct DeliveryView: View {
     @ObservedObject private var dc = DeliveryCenter.shared
 
     @AppStorage("deliv.length") private var length = 300
+    @AppStorage("deliv.useValue") private var useValue = true     // DELIV_QTY × CLOSE_PRICE (else DELIV_QTY)
     @AppStorage("deliv.onlyRises") private var onlyRises = true
     @AppStorage("deliv.full") private var full = true
     @AppStorage("deliv.within") private var within = 5
@@ -55,6 +56,7 @@ struct DeliveryView: View {
         .onChange(of: length) { _ in recompute() }
         .onChange(of: onlyRises) { _ in recompute() }
         .onChange(of: full) { _ in recompute() }
+        .onChange(of: useValue) { _ in recompute() }
         .onChange(of: within) { _ in recompute() }
         .onChange(of: scope) { _ in recompute() }
         .onChange(of: selected) { s in loadCandles(s) }
@@ -84,7 +86,14 @@ struct DeliveryView: View {
                 if let s = dc.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             }
             HStack(spacing: 10) {
-                Text("Signal: ta.highest(DELIV_QTY,").font(.caption.monospaced())
+                Text("Signal: ta.highest(").font(.caption.monospaced())
+                Picker("", selection: $useValue) {
+                    Text("DELIV_QTY * CLOSE_PRICE").tag(true)
+                    Text("DELIV_QTY").tag(false)
+                }
+                .labelsHidden().fixedSize().font(.caption.monospaced())
+                .help("DELIV_QTY × CLOSE_PRICE = value of shares delivered that day (₹), from NSE's own close")
+                Text(",").font(.caption.monospaced())
                 TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
                 Text(")").font(.caption.monospaced())
                 Picker("", selection: $onlyRises) {
@@ -109,6 +118,8 @@ struct DeliveryView: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
+    private var metricName: String { useValue ? "DELIV_QTY*CLOSE_PRICE" : "DELIV_QTY" }
+
     private var storedText: String {
         guard let a = dc.storedDays.first, let b = dc.storedDays.last else { return "No delivery data yet" }
         let mb = Double(DeliveryFiles.totalBytes()) / 1_048_576
@@ -119,7 +130,7 @@ struct DeliveryView: View {
         VStack(spacing: 12) {
             Image(systemName: "shippingbox").font(.system(size: 44)).foregroundStyle(.secondary)
             Text("Delivery Analysis").font(.title2.bold())
-            Text("Downloads NSE's daily delivery file (sec_bhavdata_full) for each trading day — weekends are skipped, holidays are remembered — and stores it compressed. Then it marks every day where ta.highest(DELIV_QTY, \(length)) updates, on a Yahoo candle chart.")
+            Text("Downloads NSE's daily delivery file (sec_bhavdata_full) for each trading day — weekends are skipped, holidays are remembered — and stores it compressed. Then it marks every day where ta.highest(\(metricName), \(length)) updates, on a Yahoo candle chart.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 600)
             Text("The first download is about \(target) files (several hundred MB in total from NSE, ~\(target / 30)–\(target / 15) MB kept) and takes a while. After that only new days are fetched, once an hour while the app runs.")
                 .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 600)
@@ -147,7 +158,7 @@ struct DeliveryView: View {
                 TableColumn("Symbol") { r in Text(r.symbol).bold() }.width(min: 80, ideal: 100)
                 TableColumn("Signal day") { r in Text(r.lastSignal ?? "—").monospacedDigit() }.width(min: 80, ideal: 90)
                 TableColumn("Ago") { r in Text(r.barsAgo.map { $0 == 0 ? "today" : "\($0)d" } ?? "—").monospacedDigit() }.width(min: 40, ideal: 48)
-                TableColumn("DELIV_QTY") { r in Text(Self.short(r.qty)).monospacedDigit() }.width(min: 70, ideal: 80)
+                TableColumn(useValue ? "Deliv value ₹" : "DELIV_QTY") { r in Text(Self.short(r.qty)).monospacedDigit() }.width(min: 70, ideal: 85)
                 TableColumn("× avg") { r in Text(r.xAvg.map { String(format: "%.1f×", $0) } ?? "—").monospacedDigit() }.width(min: 45, ideal: 52)
                 TableColumn("Deliv %") { r in Text(String(format: "%.0f%%", r.per)).monospacedDigit() }.width(min: 45, ideal: 52)
                 TableColumn("Signals") { r in Text("\(r.signals)").monospacedDigit().foregroundStyle(.secondary) }.width(min: 40, ideal: 50)
@@ -202,7 +213,7 @@ struct DeliveryView: View {
                 .chartYScale(domain: priceDomain(cs))
                 .chartXScale(domain: from...(Date().addingTimeInterval(86_400)))
                 .frame(minHeight: 260)
-                Text("DELIV_QTY — orange = ta.highest(DELIV_QTY, \(length)) \(onlyRises ? "made a new high" : "updated"); blue line = the rolling highest")
+                Text("\(metricName) — orange = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated"); blue line = the rolling highest")
                     .font(.caption).foregroundStyle(.secondary)
                 Chart {
                     ForEach(shown) { p in
@@ -226,11 +237,12 @@ struct DeliveryView: View {
     }
 
     private func points(_ s: DeliverySeries) -> [DelivPoint] {
-        let h = DeliverySignal.highest(s.qty, length: length, full: full)
-        let sig = Set(DeliverySignal.signals(s.qty, length: length, full: full, onlyRises: onlyRises))
+        let m = s.metric(value: useValue)
+        let h = DeliverySignal.highest(m, length: length, full: full)
+        let sig = Set(DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises))
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
         return s.days.indices.compactMap { i in
-            f.date(from: s.days[i]).map { DelivPoint(day: s.days[i], date: $0, qty: s.qty[i], high: h[i], signal: sig.contains(i)) }
+            f.date(from: s.days[i]).map { DelivPoint(day: s.days[i], date: $0, qty: m[i], high: h[i], signal: sig.contains(i)) }
         }
     }
 
@@ -266,7 +278,7 @@ struct DeliveryView: View {
 
     private func recompute() {
         let book = dc.book
-        let len = max(2, length), fl = full, rises = onlyRises, win = within
+        let len = max(2, length), fl = full, rises = onlyRises, win = within, val = useValue
         let lastIndex = book.days.count - 1
         var allowed: Set<String>? = nil
         if let label = vm.labelIndex {
@@ -284,15 +296,16 @@ struct DeliveryView: View {
                 var res: [DelivRow] = []
                 for (sym, s) in book.series {
                     if let allowed, !allowed.contains(sym) { continue }
-                    let sig = DeliverySignal.signals(s.qty, length: len, full: fl, onlyRises: rises)
+                    let m = s.metric(value: val)
+                    let sig = DeliverySignal.signals(m, length: len, full: fl, onlyRises: rises)
                     guard let last = sig.last, let di = dayIndex[s.days[last]] else { continue }
                     let ago = lastIndex - di
                     guard ago < win else { continue }
                     let lo = max(0, last - len + 1)
-                    let window = s.qty[lo...last]
+                    let window = m[lo...last]
                     let avg = window.reduce(0, +) / Double(window.count)
-                    res.append(DelivRow(symbol: sym, lastSignal: s.days[last], barsAgo: ago, qty: s.qty[last], per: s.per[last],
-                                        xAvg: avg > 0 ? s.qty[last] / avg : nil, signals: sig.count, latestQty: s.qty.last ?? 0))
+                    res.append(DelivRow(symbol: sym, lastSignal: s.days[last], barsAgo: ago, qty: m[last], per: s.per[last],
+                                        xAvg: avg > 0 ? m[last] / avg : nil, signals: sig.count, latestQty: m.last ?? 0))
                 }
                 return res.sorted { ($0.barsAgo ?? 999, -($0.xAvg ?? 0)) < ($1.barsAgo ?? 999, -($1.xAvg ?? 0)) }
             }.value
