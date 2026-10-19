@@ -6,7 +6,7 @@ final class StrategyTests: XCTestCase {
         let path: [Double] = [0, 5, 12, 25, 18, 8, 3, 1, 0, -2, -4, -6]
         XCTAssertEqual(ExitRule(target: 20, stop: nil, trail: nil, hold: 10).simulate(path)!.0, 25)          // take profit day 3
         XCTAssertEqual(ExitRule(target: 20, stop: nil, trail: nil, hold: 10).simulate(path)!.1, 3)
-        XCTAssertEqual(ExitRule(target: nil, stop: nil, trail: 15, hold: 10).simulate(path)!.1, 5)           // 108/125 = −13.6%… day 5: 108→ 1.08/1.25 = −13.6%; day 6: 1.03/1.25 = −17.6%
+        XCTAssertEqual(ExitRule(target: nil, stop: nil, trail: 15, hold: 10).simulate(path)!.1, 6)           // day 6: 1.03/1.25 = −17.6% ≤ −15%
         XCTAssertEqual(ExitRule(target: nil, stop: 3, trail: nil, hold: 10).simulate(path)!.0, -4)           // stop on day 10
         XCTAssertEqual(ExitRule(target: nil, stop: nil, trail: nil, hold: 10).simulate(path)!.0, -4)         // hold to day 10
         XCTAssertNil(ExitRule(target: nil, stop: nil, trail: nil, hold: 50).simulate(path))
