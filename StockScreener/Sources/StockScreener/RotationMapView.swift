@@ -41,7 +41,8 @@ struct RotationMapView: View {
                 base = eligible.filter { s in point(s, day).map { Quadrant.of(ratio: $0.ratio, momentum: $0.momentum).rawValue == show.rawValue } ?? false }
             }
         }
-        let extra = eligible.filter { selected.contains($0.name) && !base.contains(where: { b in b.name == $0.name }) }
+        let baseNames = Set(base.map(\.name))
+        let extra = eligible.filter { selected.contains($0.name) && !baseNames.contains($0.name) }
         return base + extra
     }
 
