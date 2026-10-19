@@ -90,3 +90,11 @@ final class SymbolBookTests: XCTestCase {
         XCTAssertEqual(ScreenerViewModel.matchIndustry("Software—Infrastructure", "Technology", in: ["IT - Software", "Banks"]), "IT - Software")
     }
 }
+
+final class ChartLayoutTests: XCTestCase {
+    func testLayoutID() {
+        XCTAssertEqual(ChartLinkBook.layoutID("https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3ATCS"), "I7dkKisW")
+        XCTAssertEqual(ChartLinkBook.layoutID("https://in.tradingview.com/chart/?symbol=NSE%3ATCS"), "")
+        XCTAssertEqual(ChartLinkBook.layoutID("https://example.com/x"), "")
+    }
+}

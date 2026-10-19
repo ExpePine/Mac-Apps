@@ -31,7 +31,7 @@ struct ChartLinkBook: Codable {
         let symCol = table.index(of: symbolColumn)
             ?? table.headers.firstIndex { ["symbol", "ticker", "stock", "nse symbol"].contains($0.lowercased()) } ?? 0
         let linkCols = table.headers.indices.filter { c in
-            c != symCol && table.rows.prefix(30).contains { $0.text(c).lowercased().hasPrefix("http") }
+            c != symCol && table.rows.contains { $0.text(c).lowercased().hasPrefix("http") }
         }
         book.columns = linkCols.map { table.headers[$0] }
         for r in table.rows {
@@ -52,6 +52,14 @@ struct ChartLinkBook: Codable {
             book.templates.append(counts.max { $0.value < $1.value }?.key ?? "")
         }
         return book
+    }
+
+    /// TradingView layout id in a chart link: …/chart/I7dkKisW/?symbol=… → "I7dkKisW" ("" = default chart).
+    static func layoutID(_ link: String) -> String {
+        guard let r = link.range(of: "/chart/") else { return "" }
+        let rest = link[r.upperBound...]
+        let id = rest.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        return String(id)
     }
 
     /// The chart link for a stock: its own link from the sheet, else the learned pattern, else TradingView's default.

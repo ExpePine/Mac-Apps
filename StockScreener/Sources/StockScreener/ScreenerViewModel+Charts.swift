@@ -32,22 +32,41 @@ extension ScreenerViewModel {
         return i < max(1, chartBook.columns.count) ? "Link1" : "Extra layout \(i - max(1, chartBook.columns.count) + 1)"
     }
 
-    func chartURL(_ symbol: String, column: Int? = nil) -> URL? {
+    func chartURL(_ symbol: String, column: Int? = nil) -> URL? { chartSource(symbol, column: column).url }
+
+    /// The link a chart opens and where it came from (shown under the chart so Chart 1 / Chart 2 can be checked).
+    func chartSource(_ symbol: String, column: Int? = nil) -> (url: URL?, from: String) {
         let c = column ?? settings.chartLinkColumn
         let sym = SymbolBook.clean(symbol)
         if let m = symbolBook.manual.first(where: { $0.symbol == sym }), c < m.links.count,
            !m.links[c].trimmingCharacters(in: .whitespaces).isEmpty, let u = URL(string: m.links[c].trimmingCharacters(in: .whitespaces)) {
-            return u                                       // your own link for this symbol
+            return (u, "your link in Symbols")
         }
         let sheetCount = max(1, chartBook.columns.count)
         if c >= sheetCount {
             let extras = settings.extraChartTemplates.filter { !$0.isEmpty }
             let k = c - sheetCount
             if k < extras.count {
-                return URL(string: extras[k].replacingOccurrences(of: "{SYMBOL}", with: ChartLinkBook.encode(symbol.uppercased())))
+                return (URL(string: extras[k].replacingOccurrences(of: "{SYMBOL}", with: ChartLinkBook.encode(symbol.uppercased()))),
+                        "Extra layout \(k + 1) (Chart settings)")
             }
         }
-        return chartBook.url(for: symbol, column: min(c, sheetCount - 1), fallbackTemplate: settings.chartFallbackTemplate)
+        let col = min(c, sheetCount - 1)
+        let name = col < chartBook.columns.count ? chartBook.columns[col] : "Link1"
+        let own = chartBook.links[sym].map { col < $0.count && !$0[col].isEmpty } ?? false
+        return (chartBook.url(for: symbol, column: col, fallbackTemplate: settings.chartFallbackTemplate),
+                own ? "sheet column \(name)" : "\(name) pattern")
+    }
+
+    /// Charts whose TradingView layout is the same as an earlier chart's (so they would look identical).
+    func duplicateChartLayouts(for symbol: String) -> [Int: Int] {
+        var seen: [String: Int] = [:], dup: [Int: Int] = [:]
+        for i in 0..<chartCount {
+            guard let u = chartURL(symbol, column: i)?.absoluteString else { continue }
+            let id = ChartLinkBook.layoutID(u)
+            if let first = seen[id] { dup[i] = first } else { seen[id] = i }
+        }
+        return dup
     }
 
     /// Turns a pasted chart link for any stock into a pattern: …symbol=NSE%3ATCS → …symbol=NSE%3A{SYMBOL}.

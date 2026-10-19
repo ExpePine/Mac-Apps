@@ -60,7 +60,10 @@ struct ChartViewer: View {
             Text(symbol).font(.headline)
             Picker("", selection: Binding(get: { min(vm.settings.chartLinkColumn, vm.chartCount - 1) },
                                           set: { vm.settings.chartLinkColumn = $0 })) {
-                ForEach(0..<vm.chartCount, id: \.self) { i in Text("Chart \(i + 1)").tag(i).help(vm.chartName(i)) }
+                ForEach(0..<vm.chartCount, id: \.self) { i in
+                    Text("Chart \(i + 1)").tag(i)
+                        .help("\(vm.chartName(i)) · \(vm.chartURL(symbol, column: i)?.absoluteString ?? "no link")")
+                }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             .help(vm.chartCount > 1 ? "Switch chart layout (⌘1, ⌘2…)" : "Add a Link2 column to your chart sheet (or an extra layout in Chart settings) for Chart 2")
@@ -98,9 +101,19 @@ struct ChartViewer: View {
     private func load() {
         guard !symbol.isEmpty else { return }
         typed = symbol
-        guard let url = vm.chartURL(symbol) else { vm.chartStatus = "No chart link for \(symbol)"; return }
-        vm.chartStatus = nil
-        web.view.load(URLRequest(url: url))
+        let c = min(vm.settings.chartLinkColumn, vm.chartCount - 1)
+        let src = vm.chartSource(symbol, column: c)
+        guard let url = src.url else { vm.chartStatus = "No chart link for \(symbol)"; return }
+        let layout = ChartLinkBook.layoutID(url.absoluteString)
+        var status = "Chart \(c + 1) · \(src.from) · layout \(layout.isEmpty ? "default" : layout)"
+        if let first = vm.duplicateChartLayouts(for: symbol)[c] {
+            status += " ⚠️ same layout as Chart \(first + 1) — paste a link from a different layout in Chart settings"
+        } else if vm.chartCount == 1 {
+            status += " · only one chart: your sheet has no Link2 column yet"
+        }
+        vm.chartStatus = status
+        web.view.stopLoading()
+        web.view.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
     }
 
     private func snapshot() {
@@ -237,6 +250,15 @@ struct ChartLinkSettings: View {
                             set: { v in if vm.settings.extraChartTemplates.indices.contains(i) { vm.settings.extraChartTemplates[i] = ScreenerViewModel.templateFromLink(v) } }))
                             .font(.caption.monospaced())
                         Button { vm.settings.extraChartTemplates.remove(at: i) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                    }
+                    let t = vm.settings.extraChartTemplates.indices.contains(i) ? vm.settings.extraChartTemplates[i] : ""
+                    let id = ChartLinkBook.layoutID(t)
+                    let sheetIDs = vm.chartBook.templates.map(ChartLinkBook.layoutID)
+                    if !t.isEmpty {
+                        Text(sheetIDs.contains(id)
+                             ? "⚠️ Layout \(id.isEmpty ? "default" : id) is the same as your sheet's link — this chart will look like Chart 1. Open the other layout in TradingView and copy its link."
+                             : "Layout \(id.isEmpty ? "default" : id)" + (t.contains("{SYMBOL}") ? "" : " · ⚠️ no NSE: symbol found in the link"))
+                            .font(.caption).foregroundStyle(sheetIDs.contains(id) || !t.contains("{SYMBOL}") ? .orange : .secondary)
                     }
                 }
                 Button("Add a chart layout") { vm.settings.extraChartTemplates.append("") }
