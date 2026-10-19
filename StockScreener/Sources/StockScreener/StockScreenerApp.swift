@@ -115,6 +115,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
+        Window("Delivery Analysis", id: "delivery") {
+            DeliveryView()
+                .environmentObject(vm)
+                .frame(minWidth: 1100, minHeight: 640)
+        }
+        .keyboardShortcut("d", modifiers: [.command, .option])
+
         Window("Symbols", id: "symbols") {
             SymbolsView()
                 .environmentObject(vm)
@@ -142,6 +149,7 @@ struct ToolsCommands: Commands {
             Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
             Button("Chart viewer (⇧⌘K)") { openWindow(id: "chart") }
             Button("My Picks (⌥⌘P)") { openWindow(id: "picks") }
+            Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
             Button("Chart Reel — flick through charts (⌥⌘R)") { openWindow(id: "reel") }
             Button("Combinatorix — combinations behind gainers (⌥⌘X)") { openWindow(id: "combi") }
             Button("Symbols — add / hide (⌥⌘Y)") { openWindow(id: "symbols") }

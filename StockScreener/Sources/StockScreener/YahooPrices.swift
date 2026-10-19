@@ -143,6 +143,45 @@ enum YahooClient {
         return PriceSeries(days: days, closes: values)
     }
 
+    struct Candle: Identifiable { var id: String { day }; let day: String; let date: Date; let open, high, low, close, volume: Double }
+
+    /// Daily candles (open / high / low / close / volume) for one symbol.
+    static func candles(_ symbol: String, range: String) async throws -> [Candle] {
+        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(yahooSymbol(symbol))?range=\(range)&interval=1d") else {
+            throw Failure(message: "Bad symbol")
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                         forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw Failure(message: "HTTP \(status)") }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = ((json["chart"] as? [String: Any])?["result"] as? [[String: Any]])?.first,
+              let stamps = result["timestamp"] as? [Double],
+              let quote = ((result["indicators"] as? [String: Any])?["quote"] as? [[String: Any]])?.first else {
+            throw Failure(message: "no data")
+        }
+        func arr(_ k: String) -> [Any] { quote[k] as? [Any] ?? [] }
+        let o = arr("open"), h = arr("high"), l = arr("low"), c = arr("close"), v = arr("volume")
+        let gmtOffset = (result["meta"] as? [String: Any])?["gmtoffset"] as? Double ?? 19_800
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: Int(gmtOffset))
+        f.dateFormat = "yyyy-MM-dd"
+        var out: [Candle] = []
+        for (i, t) in stamps.enumerated() {
+            func x(_ a: [Any]) -> Double? { i < a.count ? a[i] as? Double : nil }
+            guard let cl = x(c), cl > 0 else { continue }
+            let date = Date(timeIntervalSince1970: t)
+            let day = f.string(from: date)
+            let candle = Candle(day: day, date: f.date(from: day) ?? date, open: x(o) ?? cl, high: x(h) ?? cl, low: x(l) ?? cl, close: cl, volume: x(v) ?? 0)
+            if out.last?.day == day { out[out.count - 1] = candle } else { out.append(candle) }
+        }
+        guard !out.isEmpty else { throw Failure(message: "no candles") }
+        return out
+    }
+
     /// Fetches many symbols with a few parallel requests. Calls `progress(done, total)` on the main actor.
     static func fetchAll(_ symbols: [String], range: String,
                          progress: @escaping @MainActor (Int, Int) -> Void) async -> (PriceBook, [String]) {

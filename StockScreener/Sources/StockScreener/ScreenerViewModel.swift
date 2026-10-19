@@ -233,6 +233,7 @@ final class ScreenerViewModel: ObservableObject {
                 if self.isRefreshDue(now: Date()) {
                     await self.refresh()
                 }
+                DeliveryCenter.shared.autoUpdateIfDue()          // NSE delivery data: new days, once an hour
                 try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
             }
         }

@@ -67,3 +67,34 @@ final class CombinatorixTests: XCTestCase {
         XCTAssertGreaterThan(CombiEngine.wilsonLower(500, 1000), 0.46)
     }
 }
+
+final class DeliveryTests: XCTestCase {
+    func testParseNSE() {
+        let csv = """
+        SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER
+        20MICRONS, EQ, 19-Oct-2026, 200.10, 201.00, 205.00, 199.00, 204.00, 204.50, 202.30, 150000, 303.45, 4000, 90000, 60.00
+        ABC, BE, 19-Oct-2026, 10.00, 10.00, 10.50, 9.90, 10.20, 10.25, 10.10, 5000, 0.50, 40, -, -
+        """
+        let rows = NSEDeliveryClient.parse(Data(csv.utf8))
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].symbol, "20MICRONS")
+        XCTAssertEqual(rows[0].delivQty, 90000)
+        XCTAssertEqual(rows[0].close, 204.5)
+        XCTAssertEqual(rows[0].delivPer, 60)
+        XCTAssertEqual(NSEDeliveryClient.fileName("2026-10-19"), "19102026")
+    }
+
+    func testHighestAndSignals() {
+        let x: [Double] = [5, 3, 4, 6, 2, 1, 7, 1, 1, 1]
+        let h = DeliverySignal.highest(x, length: 3, full: true)
+        XCTAssertNil(h[1])
+        XCTAssertEqual(h[2], 5); XCTAssertEqual(h[3], 6); XCTAssertEqual(h[5], 6); XCTAssertEqual(h[6], 7); XCTAssertEqual(h[9], 1)
+        XCTAssertEqual(DeliverySignal.signals(x, length: 3, full: true, onlyRises: true), [3, 6])
+        // any change also fires when an old high leaves the window
+        XCTAssertEqual(DeliverySignal.signals(x, length: 3, full: true, onlyRises: false), [3, 6, 9])
+        // same answer as a brute-force rolling max
+        let y = (0..<500).map { _ in Double(Int.random(in: 0..<1000)) }
+        let hy = DeliverySignal.highest(y, length: 50, full: false)
+        for i in y.indices { XCTAssertEqual(hy[i], y[max(0, i - 49)...i].max()) }
+    }
+}
