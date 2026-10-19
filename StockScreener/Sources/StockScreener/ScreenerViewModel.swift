@@ -138,6 +138,11 @@ final class ScreenerViewModel: ObservableObject {
 
     // My picks
     @Published var picks: [Pick] = PickStore.load() { didSet { PickStore.save(picks) } }
+
+    // Manual / hidden symbols
+    @Published var symbolBook = SymbolBook.load()
+    @Published var isCheckingSymbols = false
+    @Published var symbolStatus: String?
     var flashToken = 0
 
     // E column: per-row status on the Filter screen
@@ -379,7 +384,7 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = withScores(downloaded.renamed(with: settings.columnAliases))
+        let newTable = withScores(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = CellPainter(settings.cellRules, table: newTable)

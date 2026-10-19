@@ -34,6 +34,11 @@ extension ScreenerViewModel {
 
     func chartURL(_ symbol: String, column: Int? = nil) -> URL? {
         let c = column ?? settings.chartLinkColumn
+        let sym = SymbolBook.clean(symbol)
+        if let m = symbolBook.manual.first(where: { $0.symbol == sym }), c < m.links.count,
+           !m.links[c].trimmingCharacters(in: .whitespaces).isEmpty, let u = URL(string: m.links[c].trimmingCharacters(in: .whitespaces)) {
+            return u                                       // your own link for this symbol
+        }
         let sheetCount = max(1, chartBook.columns.count)
         if c >= sheetCount {
             let extras = settings.extraChartTemplates.filter { !$0.isEmpty }

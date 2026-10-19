@@ -70,3 +70,23 @@ final class ChartTemplateTests: XCTestCase {
                        "https://in.tradingview.com/chart/ab/?symbol=NSE:{SYMBOL}&interval=W")
     }
 }
+
+final class SymbolBookTests: XCTestCase {
+    @MainActor func testApplyAndMatch() throws {
+        let t = try SheetService.parse(Data("SYMBOL,SECTOR,RSI\nTCS,IT - Software,60\nINFY,IT - Software,55\n".utf8)).table
+        var b = SymbolBook()
+        b.manual = [ManualSymbol(symbol: "PCJEWELLER", name: "PC Jeweller", industry: "Gems, Jewellery And Watches"),
+                    ManualSymbol(symbol: "TCS")]                                        // already in the sheet → not duplicated
+        b.hidden = ["INFY"]
+        let out = b.apply(to: t, label: 0, sector: 1, name: nil)
+        XCTAssertEqual(out.rows.map { $0.text(0) }, ["TCS", "PCJEWELLER"])
+        XCTAssertEqual(out.rows[1].text(1), "Gems, Jewellery And Watches")
+        XCTAssertNil(out.rows[1].number(2))
+        XCTAssertEqual(Set(out.rows.map(\.id)).count, 2)
+        XCTAssertEqual(SymbolBook.clean(" nse:m&m "), "M&M")
+        XCTAssertEqual(SymbolBook.clean("tcs.ns"), "TCS")
+        XCTAssertEqual(ScreenerViewModel.matchIndustry("Luxury Goods", "Consumer Cyclical", in: ["Gems, Jewellery And Watches", "IT - Software"]),
+                       "Luxury Goods")
+        XCTAssertEqual(ScreenerViewModel.matchIndustry("Software—Infrastructure", "Technology", in: ["IT - Software", "Banks"]), "IT - Software")
+    }
+}

@@ -140,6 +140,10 @@ extension ScreenerViewModel {
             self?.shotSymbol = sym
             openWindow(id: "shots")
         }))
+        items.append(("Hide \(targets.count > 1 ? "\(targets.count) symbols" : sym) from the app…", { [weak self] in
+            guard let self else { return }
+            self.hideSymbols(targets.map { self.rowKey($0) })
+        }))
         items.append(("Copy \(targets.count > 1 ? "\(targets.count) symbols" : sym)", { [weak self] in
             guard let self else { return }
             NSPasteboard.general.clearContents()

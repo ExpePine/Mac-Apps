@@ -100,6 +100,13 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 980, minHeight: 520)
         }
         .keyboardShortcut("p", modifiers: [.command, .option])
+
+        Window("Symbols", id: "symbols") {
+            SymbolsView()
+                .environmentObject(vm)
+                .frame(minWidth: 980, minHeight: 520)
+        }
+        .keyboardShortcut("y", modifiers: [.command, .option])
         .commands { ToolsCommands() }
     }
 }
@@ -121,6 +128,7 @@ struct ToolsCommands: Commands {
             Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
             Button("Chart viewer (⇧⌘K)") { openWindow(id: "chart") }
             Button("My Picks (⌥⌘P)") { openWindow(id: "picks") }
+            Button("Symbols — add / hide (⌥⌘Y)") { openWindow(id: "symbols") }
             Button("Email & Rules") { openWindow(id: "alerts") }
             Button("Alerts") { openWindow(id: "alertlog") }
             Button("Neural Net") { openWindow(id: "nn") }

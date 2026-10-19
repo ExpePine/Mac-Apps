@@ -84,6 +84,13 @@ struct ImportView: View {
                 }
                 .help("Cards showing what changed since the previous day (⇧⌘8)")
                 Button {
+                    openWindow(id: "symbols")
+                } label: {
+                    Label("Symbols", systemImage: "plus.rectangle.on.rectangle")
+                }
+                .help("Add NSE symbols by hand, or hide sheet symbols (⌥⌘Y)")
+
+                Button {
                     openWindow(id: "gainers")
                 } label: {
                     Label("Gainers", systemImage: "flame")

@@ -102,6 +102,12 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### Symbols — add or hide (⌥⌘Y)
+- **Adding symbols:** add NSE symbols by hand (TCS, NSE:M&M…). Each is checked on Yahoo, and a year of prices, the company name and the industry are filled in. Pick one of your sheet's industry names from ▾ so Sectors groups the symbol correctly.
+- **Chart links:** these follow your chart sheet's pattern, or you can paste your own link for Chart 1 and Chart 2 for each symbol.
+- **Where they appear:** added symbols show up as rows in Data, Filter, Gainers, Sectors, Performance and Charts. Their sheet columns stay blank.
+- **Hiding symbols:** hide sheet symbols from the app, here or by right-clicking any stock → *Hide from the app*. Restore them any time. The Google Sheet itself isn't changed.
+
 ### My Picks (⌥⌘P)
 - **Marking picks:** in Daily Gainers, the **P** column marks your picks. Click to cycle **grey** (not my pick) → **green** (my pick) → **orange** (OK selection). You can also select rows and press **My pick** or **OK**.
 - **The My Picks window:** every pick in one place, with its day, that day's move, entry price, return since, best rise since, comparison with the Nifty, sector, the news reason at the time, and your note.
