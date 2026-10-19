@@ -35,7 +35,8 @@ struct ChartViewer: View {
             }
         }
         .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
-        .onAppear { load() }
+        .onAppear { load(); vm.refreshChartLinksIfStale() }
+        .onChange(of: vm.chartBook.importedAt) { _ in load() }
         .onChange(of: vm.chartSymbol) { _ in load() }
         .onChange(of: vm.settings.chartLinkColumn) { _ in load() }
         .sheet(isPresented: $showSettings) { ChartLinkSettings().environmentObject(vm) }
@@ -57,11 +58,16 @@ struct ChartViewer: View {
                 .textFieldStyle(.roundedBorder).frame(width: 130)
                 .onSubmit { if !typed.isEmpty { vm.chartSymbol = typed.uppercased() } }
             Text(symbol).font(.headline)
-            if vm.chartBook.columns.count > 1 {
-                Picker("", selection: $vm.settings.chartLinkColumn) {
-                    ForEach(Array(vm.chartBook.columns.enumerated()), id: \.offset) { i, c in Text(c).tag(i) }
-                }
-                .labelsHidden().frame(width: 110)
+            Picker("", selection: Binding(get: { min(vm.settings.chartLinkColumn, vm.chartCount - 1) },
+                                          set: { vm.settings.chartLinkColumn = $0 })) {
+                ForEach(0..<vm.chartCount, id: \.self) { i in Text("Chart \(i + 1)").tag(i).help(vm.chartName(i)) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help(vm.chartCount > 1 ? "Switch chart layout (⌘1, ⌘2…)" : "Add a Link2 column to your chart sheet (or an extra layout in Chart settings) for Chart 2")
+            ForEach(0..<min(vm.chartCount, 9), id: \.self) { i in
+                Button("") { vm.settings.chartLinkColumn = i }
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                    .frame(width: 0, height: 0).opacity(0)
             }
             Spacer()
             Button { web.view.goBack() } label: { Image(systemName: "arrow.backward") }.help("Back")
@@ -220,6 +226,22 @@ struct ChartLinkSettings: View {
                 TextField("Symbol column", text: $vm.settings.chartSymbolColumn)
             } header: { Text("Chart links") } footer: {
                 Text("A Google Sheet with a Symbol column and one or more link columns (Link1, Link2…), shared as “Anyone with the link can view”. For stocks not in the sheet, the app reuses the sheet's link pattern with the stock's symbol.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                ForEach(Array(vm.settings.extraChartTemplates.enumerated()), id: \.offset) { i, _ in
+                    HStack {
+                        Text("Chart \(max(1, vm.chartBook.columns.count) + i + 1)").frame(width: 60, alignment: .leading)
+                        TextField("https://in.tradingview.com/chart/XXXX/?symbol=NSE%3ATCS", text: Binding(
+                            get: { vm.settings.extraChartTemplates.indices.contains(i) ? vm.settings.extraChartTemplates[i] : "" },
+                            set: { v in if vm.settings.extraChartTemplates.indices.contains(i) { vm.settings.extraChartTemplates[i] = ScreenerViewModel.templateFromLink(v) } }))
+                            .font(.caption.monospaced())
+                        Button { vm.settings.extraChartTemplates.remove(at: i) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                    }
+                }
+                Button("Add a chart layout") { vm.settings.extraChartTemplates.append("") }
+            } header: { Text("Extra chart layouts") } footer: {
+                Text("Paste a TradingView chart link of any stock in another layout; the app swaps in each stock's symbol. These appear after the sheet's columns as Chart 2, Chart 3…")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Learned patterns") {

@@ -265,6 +265,7 @@ struct AppSettings: Codable {
     var chartFallbackTemplate = "https://in.tradingview.com/chart/?symbol=NSE%3A{SYMBOL}"
     var chartOpenInApp = true
     var chartLinkColumn = 0                     // which link column to open (Link1, Link2…)
+    var extraChartTemplates: [String] = []      // extra chart layouts (links with {SYMBOL}), after the sheet's columns
 
     // Alerts
     var email = EmailSettings()
@@ -330,6 +331,7 @@ struct AppSettings: Codable {
         chartFallbackTemplate = v(.chartFallbackTemplate, d.chartFallbackTemplate)
         chartOpenInApp = v(.chartOpenInApp, d.chartOpenInApp)
         chartLinkColumn = v(.chartLinkColumn, d.chartLinkColumn)
+        extraChartTemplates = v(.extraChartTemplates, d.extraChartTemplates)
         email           = v(.email, d.email)
         mv2             = v(.mv2, d.mv2)
         buyTriggers     = v(.buyTriggers, d.buyTriggers)

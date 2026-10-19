@@ -61,3 +61,12 @@ final class PickTests: XCTestCase {
         XCTAssertEqual(back, [p])
     }
 }
+
+final class ChartTemplateTests: XCTestCase {
+    func testTemplateFromLink() {
+        XCTAssertEqual(ScreenerViewModel.templateFromLink("https://in.tradingview.com/chart/vnr7IqQO/?symbol=NSE%3ATCS"),
+                       "https://in.tradingview.com/chart/vnr7IqQO/?symbol=NSE%3A{SYMBOL}")
+        XCTAssertEqual(ScreenerViewModel.templateFromLink("https://in.tradingview.com/chart/ab/?symbol=NSE:INFY&interval=W"),
+                       "https://in.tradingview.com/chart/ab/?symbol=NSE:{SYMBOL}&interval=W")
+    }
+}
