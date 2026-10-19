@@ -8,6 +8,7 @@ struct NeuralNetView: View {
     @State private var tab = 0
     @State private var comboSearch = ""
     @State private var showColumns = false
+    @State private var onlySignificant = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -144,6 +145,8 @@ struct NeuralNetView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 TextField("Search combinations", text: $comboSearch).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
+                Toggle("Only significant (q < 0.10)", isOn: $onlySignificant).toggleStyle(.checkbox)
+                    .help("q = false-discovery rate (Benjamini–Hochberg) across every combination tried: the expected share of flukes among those shown")
                 Spacer()
                 Text("Hit rate = share of stocks with the combination that became gainers · Lift = hit rate ÷ base rate")
                     .font(.caption).foregroundStyle(.secondary)
@@ -162,6 +165,13 @@ struct NeuralNetView: View {
                 TableColumn("Lift") { c in
                     Text(String(format: "%.1f×", c.lift)).monospacedDigit().fontWeight(.semibold)
                         .foregroundStyle(c.lift >= 3 ? .green : (c.lift >= 1.5 ? .orange : .secondary))
+                }
+                .width(55)
+                TableColumn("q") { c in
+                    Text(c.qValue.map { $0 < 0.001 ? "<0.001" : String(format: "%.3f", $0) } ?? "—")
+                        .monospacedDigit()
+                        .foregroundStyle((c.qValue ?? 1) < 0.1 ? Color.green : Color.secondary)
+                        .help(c.pValue.map { String(format: "p = %.2g (binomial vs base rate); q corrects for all combinations tried", $0) } ?? "")
                 }
                 .width(55)
                 TableColumn("Test lift") { c in
@@ -271,8 +281,9 @@ struct NeuralNetView: View {
 
     private func filteredCombos(_ r: NNReport) -> [PatternCombo] {
         let q = comboSearch.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return r.combos }
-        return r.combos.filter { c in
+        let base = onlySignificant ? r.combos.filter { ($0.qValue ?? 1) < 0.1 } : r.combos
+        guard !q.isEmpty else { return base }
+        return base.filter { c in
             (c.items.map { $0.describe(r.featureNames) } + c.examples).joined(separator: " ").localizedCaseInsensitiveContains(q)
         }
     }

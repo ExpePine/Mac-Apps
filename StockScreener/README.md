@@ -142,6 +142,11 @@ The results show summary figures, a chart of the average and median move after t
 - The factors used: the stock's and the Nifty's move before the signal, sector, indicator, weekday, number of indicators that flagged the stock, and the move 3 and 5 days after the signal (marked *after entry*, an early-warning sign rather than an entry filter).
 - A small decision tree turns these into "IF … AND …" rules, learned on older signals and checked on newer ones.
 
+**How patterns are tested:**
+- **Good vs bad incidents:** a gradient-boosted tree model is trained on entry-time factors and scored walk-forward (trained on earlier signals, tested on the next block, three times). Each factor's influence is explained with exact Shapley values.
+- **Strategies:** each strategy gets a **Deflated Sharpe Ratio** (Bailey & López de Prado), the probability that its edge is real after allowing for the 960 combinations tried. **Robust** means it held up on newer signals and its Deflated Sharpe is at least 95%.
+- **Neural Net combinations:** each combination gets a binomial p-value and a Benjamini–Hochberg **q-value** (false-discovery rate across every combination tried), and you can show only the significant ones.
+
 **Experiments sheet:** paste a second sheet's link under *Sheet & columns…*, choose its stock-name column and the columns you want, then use them as a study's event column or as the group-by column.
 
 ### Changes — cards (⇧⌘8)

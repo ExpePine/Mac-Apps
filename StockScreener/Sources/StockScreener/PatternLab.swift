@@ -67,6 +67,8 @@ struct PatternCombo: Identifiable {
     let examples: [String]     // gainers that had it
     var testLift: Double? = nil   // lift on later days it never saw (ranking model only)
     var heldUp: Bool? = nil       // beat luck in training AND kept a lift on the test days
+    var pValue: Double? = nil     // one-sided binomial test: this many gainers by chance?
+    var qValue: Double? = nil     // Benjamini–Hochberg false-discovery rate across every combination tried
 }
 
 enum PatternMiner {
@@ -124,10 +126,12 @@ enum PatternMiner {
         }
 
         var results: [PatternCombo] = []
+        var tested = 0
         func consider(_ idx: [Int], _ bits: [UInt64]) {
             let total = popcount(bits)
             let g = popcount(and(bits, gainerBits))
             guard g >= minGainers, total > 0 else { return }
+            tested += 1
             let hit = Double(g) / Double(total)
             let lift = hit / base
             guard lift > 1.05 else { return }
@@ -137,8 +141,10 @@ enum PatternMiner {
                 examples.append(s.symbol)
                 if examples.count == 12 { break }
             }
-            results.append(PatternCombo(items: idx.map { items[$0] }, gainersWith: g, totalWith: total,
-                                        hitRate: hit, lift: lift, examples: examples))
+            var combo = PatternCombo(items: idx.map { items[$0] }, gainersWith: g, totalWith: total,
+                                     hitRate: hit, lift: lift, examples: examples)
+            combo.pValue = Stats.binomialUpperTail(k: g, n: total, p: base)
+            results.append(combo)
         }
 
         // Size 1, 2, 3 (no two conditions on the same column).
@@ -158,6 +164,9 @@ enum PatternMiner {
             }
         }
 
+        // False-discovery control over everything tried (not just what was kept)
+        let q = Stats.benjaminiHochberg(results.map { $0.pValue ?? 1 }, totalTests: tested)
+        for k in results.indices { results[k].qValue = q[k] }
         // Most useful first: strong lift with enough gainers behind it.
         return Array(results.sorted {
             let sa = $0.lift * log(Double($0.gainersWith) + 1), sb = $1.lift * log(Double($1.gainersWith) + 1)

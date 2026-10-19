@@ -84,7 +84,12 @@ struct StrategyResult: Identifiable {
     let trainMean: Double
     let testMean: Double?
     let testTrades: Int
+    var sharpe = 0.0             // per-trade mean ÷ sd
+    var skew = 0.0, kurtosis = 3.0
+    var dsr: Double?             // Deflated Sharpe: P(true Sharpe > 0) after allowing for every strategy tried
+    var trials = 0
     var heldUp: Bool { (testMean ?? -1) > 0 && testTrades >= 10 && (testMean ?? 0) >= trainMean * 0.4 }
+    var robust: Bool { heldUp && (dsr ?? 0) >= 0.95 }
 }
 
 enum StrategyFinder {
@@ -123,11 +128,25 @@ enum StrategyFinder {
                     let train = trades.filter { !$0.newer }, test = trades.filter(\.newer)
                     guard train.count >= max(15, rows.count / 20) else { continue }
                     let all = stats(trades), tr = stats(train)
-                    candidates.append(StrategyResult(
+                    let mo = Stats.moments(trades.map(\.ret))
+                    var c = StrategyResult(
                         scope: name, filter: filter, rule: rule, trades: trades.count, mean: all.mean, median: all.median,
                         winRate: all.win, profitFactor: all.pf, avgHold: all.hold, perDay: all.mean / max(1, all.hold),
-                        worst5: all.worst5, trainMean: tr.mean, testMean: test.isEmpty ? nil : stats(test).mean, testTrades: test.count))
+                        worst5: all.worst5, trainMean: tr.mean, testMean: test.isEmpty ? nil : stats(test).mean, testTrades: test.count)
+                    c.sharpe = mo.sd > 0 ? mo.mean / mo.sd : 0
+                    c.skew = mo.skew; c.kurtosis = mo.kurt
+                    candidates.append(c)
                 }
+            }
+            // Deflated Sharpe for every candidate: penalises the luck of picking the best of many tries
+            let srs = candidates.map(\.sharpe)
+            let srMean = srs.reduce(0, +) / Double(max(1, srs.count))
+            let srVar = srs.reduce(0) { $0 + ($1 - srMean) * ($1 - srMean) } / Double(max(1, srs.count - 1))
+            for k in candidates.indices {
+                candidates[k].trials = candidates.count
+                candidates[k].dsr = Stats.deflatedSharpe(sr: candidates[k].sharpe, observations: candidates[k].trades,
+                                                         skew: candidates[k].skew, kurtosis: candidates[k].kurtosis,
+                                                         trials: candidates.count, sharpeVarianceAcrossTrials: srVar)
             }
             // rank on the OLDER half only, then report what happened on the newer half
             let ranked = candidates.sorted { $0.trainMean > $1.trainMean }
@@ -167,7 +186,18 @@ struct TreeLeaf: Identifiable {
     let testGoodRate: Double?
 }
 
+struct ShapFeature: Identifiable {
+    let id = UUID()
+    let name: String
+    let meanAbs: Double          // average |Shapley value| in log-odds: how much it moves the prediction
+    let direction: String        // e.g. "higher → good" or "best: IT · worst: Metals"
+    let positive: Bool?          // nil for categories
+}
+
 struct IncidentStudy {
+    var modelAUC: Double?            // boosted trees, walk-forward (later signals only)
+    var foldAUCs: [Double] = []
+    var shap: [ShapFeature] = []
     var horizon = 21
     var goodCut = 0.0, badCut = 0.0
     var good = 0, bad = 0
@@ -177,7 +207,7 @@ struct IncidentStudy {
 }
 
 enum IncidentAnalyzer {
-    struct Item { let num: [Double?]; let cat: [String]; let good: Bool; let newer: Bool }
+    struct Item { let num: [Double?]; let cat: [String]; let good: Bool; let newer: Bool; var day = "" }
 
     /// Good = top 25% of returns after H days, bad = bottom 25% (the middle is left out to sharpen the contrast).
     static func study(_ runs: [PerfRun], horizon h: Int, sectors: [String: String]) -> IncidentStudy {
@@ -206,7 +236,7 @@ enum IncidentAnalyzer {
             let weekday = HistoryStore.date(fromKey: r.eventDay).map { wd.string(from: $0) } ?? ""
             items.append(Item(num: [r.preMove, r.marketPre, Double(flagged[r.symbol] ?? 1), r.path[3], r.path[5]],
                               cat: [sectors[r.symbol] ?? "", ind, weekday, r.group],
-                              good: ret >= out.goodCut, newer: r.eventDay >= split))
+                              good: ret >= out.goodCut, newer: r.eventDay >= split, day: r.eventDay))
         }
         out.good = items.filter(\.good).count
         out.bad = items.count - out.good
@@ -255,7 +285,82 @@ enum IncidentAnalyzer {
         // Shallow decision tree on the older half (entry-time features only), leaves checked on the newer half
         let train = items.filter { !$0.newer }, test = items.filter(\.newer)
         out.leaves = tree(train, test: test, numNames: numNames, catNames: catNames, minLeaf: max(25, train.count / 20))
+        boosted(items, numNames: numNames, catNames: catNames, into: &out)
         return out
+    }
+
+    /// Gradient-boosted trees on entry-time factors: walk-forward AUC (train on earlier signals, test on the next block),
+    /// then exact Shapley values per factor on the newest signals.
+    static func boosted(_ items: [Item], numNames: [(String, Bool)], catNames: [String], into out: inout IncidentStudy) {
+        guard items.count >= 120 else { return }
+        let numIdx = numNames.indices.filter { !numNames[$0].1 }               // entry-time numeric factors
+        // one-hot blocks for categories (top 10 values each)
+        var catValues: [[String]] = []
+        for c in catNames.indices {
+            var counts: [String: Int] = [:]
+            for it in items where !it.cat[c].isEmpty { counts[it.cat[c], default: 0] += 1 }
+            catValues.append(counts.filter { $0.value >= 10 }.sorted { $0.value > $1.value }.prefix(10).map(\.key))
+        }
+        var groupNames: [String] = numIdx.map { numNames[$0].0 }
+        var groupOf: [Int] = numIdx.indices.map { $0 }
+        for (c, vals) in catValues.enumerated() where vals.count >= 2 {
+            let g = groupNames.count
+            groupNames.append(catNames[c])
+            groupOf += vals.map { _ in g }
+        }
+        func encode(_ it: Item) -> [Double?] {
+            var x: [Double?] = numIdx.map { it.num[$0] }
+            for (c, vals) in catValues.enumerated() where vals.count >= 2 {
+                x += vals.map { it.cat[c] == $0 ? 1 : 0 }
+            }
+            return x
+        }
+        let sorted = items.sorted { $0.day < $1.day }
+        let X = sorted.map(encode), Y = sorted.map(\.good)
+        let minLeaf = max(15, items.count / 40)
+
+        // walk-forward: 4 time blocks; train on blocks before k, test on block k
+        let block = sorted.count / 4
+        for k in 1..<4 {
+            let trainEnd = k * block, testEnd = k == 3 ? sorted.count : (k + 1) * block
+            let m = GBM.train(Array(X[0..<trainEnd]), Array(Y[0..<trainEnd]), rounds: 80, minLeaf: minLeaf)
+            let ys = Array(Y[trainEnd..<testEnd])
+            guard ys.contains(true), ys.contains(false) else { continue }
+            out.foldAUCs.append(ModelMetrics.auc(X[trainEnd..<testEnd].map { m.predict($0) }, ys))
+        }
+        if !out.foldAUCs.isEmpty { out.modelAUC = out.foldAUCs.reduce(0, +) / Double(out.foldAUCs.count) }
+
+        // final model on everything → Shapley values on the newest 300 signals
+        let model = GBM.train(X, Y, rounds: 100, minLeaf: minLeaf)
+        let sample = Array(zip(sorted, X).suffix(300))
+        let G = groupNames.count
+        guard G <= 12 else { return }
+        var phis: [[Double]] = []
+        for (_, x) in sample { phis.append(model.shap(x, groupOf: groupOf, groups: G)) }
+        for g in 0..<G {
+            let col = phis.map { $0[g] }
+            let meanAbs = col.reduce(0) { $0 + abs($1) } / Double(max(1, col.count))
+            var direction = "", positive: Bool?
+            if g < numIdx.count {
+                let vals = sample.map { $0.0.num[numIdx[g]] }
+                let pairs = zip(vals, col).compactMap { v, p in v.map { ($0, p) } }
+                if pairs.count >= 10 {
+                    let r = PanelTrainer.spearman(pairs.map(\.0), pairs.map(\.1))
+                    positive = r >= 0
+                    direction = abs(r) < 0.15 ? "mixed / non-linear" : (r > 0 ? "higher → good" : "lower → good")
+                }
+            } else {
+                let c = catNames.firstIndex(of: groupNames[g]) ?? 0
+                var byValue: [String: [Double]] = [:]
+                for ((it, _), p) in zip(sample, col) where !it.cat[c].isEmpty { byValue[it.cat[c], default: []].append(p) }
+                let means = byValue.filter { $0.value.count >= 5 }.map { ($0.key, $0.value.reduce(0, +) / Double($0.value.count)) }
+                if let best = means.max(by: { $0.1 < $1.1 }), let worst = means.min(by: { $0.1 < $1.1 }), best.0 != worst.0 {
+                    direction = "best: \(best.0) · worst: \(worst.0)"
+                }
+            }
+            out.shap.append(ShapFeature(name: groupNames[g], meanAbs: meanAbs, direction: direction, positive: positive))
+        }
+        out.shap.sort { $0.meanAbs > $1.meanAbs }
     }
 
     private struct Split { let desc: String; let left: (Item) -> Bool; let gain: Double }

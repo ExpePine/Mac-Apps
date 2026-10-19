@@ -368,12 +368,14 @@ struct CompareView: View {
                     GridRow {
                         Text("Indicator").gridColumnAlignment(.leading); Text("Entry").gridColumnAlignment(.leading)
                         Text("Exit").gridColumnAlignment(.leading); Text("Trades"); Text("Avg / trade"); Text("Win"); Text("PF")
-                        Text("Avg hold"); Text("Per day"); Text("Worst 5%"); Text("Older half"); Text("Newer half"); Text("")
+                        Text("Avg hold"); Text("Per day"); Text("Worst 5%"); Text("Older half"); Text("Newer half")
+                        Text("Deflated Sharpe").help("Probability the strategy's true Sharpe is above zero after allowing for all strategies tried (Bailey & López de Prado)")
+                        Text("")
                     }
                     .font(.caption.bold()).foregroundStyle(.secondary)
                     ForEach(Array(r.strategies.enumerated()), id: \.offset) { i, s in
                         let isBase = s.filter == .all && s.rule.target == nil && s.rule.stop == nil && s.rule.trail == nil && s.rule.hold == 21
-                        if i > 0 && r.strategies[i - 1].scope != s.scope { GridRow { Divider().gridCellColumns(13) } }
+                        if i > 0 && r.strategies[i - 1].scope != s.scope { GridRow { Divider().gridCellColumns(14) } }
                         GridRow {
                             Text(i == 0 || r.strategies[i - 1].scope != s.scope ? s.scope : "").fontWeight(.semibold).lineLimit(1)
                             Text(s.filter.rawValue).font(.caption).lineLimit(2).frame(maxWidth: 180, alignment: .leading)
@@ -387,17 +389,23 @@ struct CompareView: View {
                             Text(pct(s.worst5)).foregroundStyle(.red)
                             Text(pct(s.trainMean)).foregroundStyle(.secondary)
                             Text(s.testMean.map(pct) ?? "—").foregroundStyle((s.testMean ?? 0) >= 0 ? Color.green : Color.red)
+                            Text(s.dsr.map { String(format: "%.0f%%", $0 * 100) } ?? "—")
+                                .foregroundStyle((s.dsr ?? 0) >= 0.95 ? Color.green : ((s.dsr ?? 0) >= 0.5 ? Color.orange : Color.red))
+                                .help("Out of \(s.trials) strategies tried for \(s.scope)")
                             if isBase { Text("") } else {
-                                Text(s.heldUp ? "held up" : "faded").font(.caption2.bold())
+                                let label = s.robust ? "robust" : (s.heldUp ? "held up" : "faded")
+                                let col: Color = s.robust ? .green : (s.heldUp ? .teal : .orange)
+                                Text(label).font(.caption2.bold())
                                     .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Capsule().fill((s.heldUp ? Color.green : Color.orange).opacity(0.15)))
-                                    .foregroundStyle(s.heldUp ? Color.green : Color.orange)
+                                    .background(Capsule().fill(col.opacity(0.15)))
+                                    .foregroundStyle(col)
+                                    .help("robust = held up on newer signals AND Deflated Sharpe ≥ 95%; held up = profitable on newer signals; faded = not")
                             }
                         }
                         .font(.callout.monospacedDigit())
                     }
                 }
-                Text("Per day = average return ÷ average days held: how hard the money works. Exits use daily closes (real fills, gaps and costs will be worse). Not financial advice.")
+                Text("robust = profitable on newer signals AND Deflated Sharpe ≥ 95% (survives the multiple-testing penalty for \(r.strategies.first?.trials ?? 0)+ tries). Per day = average return ÷ average days held: how hard the money works. Exits use daily closes (real fills, gaps and costs will be worse). Not financial advice.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -412,6 +420,34 @@ struct CompareView: View {
             } else {
                 Text("Good = top 25% of returns after \(st.horizon) days (≥ \(pct(st.goodCut))), bad = bottom 25% (≤ \(pct(st.badCut))); \(st.good) good and \(st.bad) bad signals, the middle half left out to sharpen the contrast.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if !st.shap.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("Boosted-tree model · what drives good vs bad (Shapley values)").font(.subheadline.bold())
+                            if let auc = st.modelAUC {
+                                Text(String(format: "walk-forward AUC %.2f", auc))
+                                    .font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(Capsule().fill((auc >= 0.6 ? Color.green : Color.orange).opacity(0.15)))
+                                    .foregroundStyle(auc >= 0.6 ? Color.green : Color.orange)
+                                    .help("Trained on earlier signals, tested on the next block, 3 times: " + st.foldAUCs.map { String(format: "%.2f", $0) }.joined(separator: ", ") + ". 0.5 = coin flip.")
+                            }
+                        }
+                        let top = st.shap.first?.meanAbs ?? 1
+                        ForEach(st.shap) { f in
+                            HStack(spacing: 8) {
+                                Text(f.name).font(.callout).frame(width: 230, alignment: .leading).lineLimit(1)
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(f.positive == nil ? Color.purple.opacity(0.7) : (f.positive! ? Color.green.opacity(0.75) : Color.red.opacity(0.75)))
+                                    .frame(width: max(2, 220 * f.meanAbs / max(1e-9, top)), height: 10)
+                                Text(String(format: "%.3f", f.meanAbs)).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 46)
+                                Text(f.direction).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("Bar = average impact on the model's prediction (|Shapley value|, exact, computed on the newest 300 signals). Green: higher value → good, red: higher → bad, purple: category. Entry-time factors only, so these can be used as entry filters.")
+                            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Divider()
+                }
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Single factors, strongest first").font(.subheadline.bold())
