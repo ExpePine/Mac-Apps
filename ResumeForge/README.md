@@ -23,6 +23,7 @@ The extension captures job descriptions from Naukri, Wellfound and LinkedIn. The
 ## Use
 
 1. **Profile ▸ Import from my existing resume…** — paste your CV text to fill in your roles and education and seed your story bank.
+   **Stories ▸ Import…** brings in stories you've already written, from Word, PDF, text/Markdown, RTF, CSV or JSON files, or pasted text. You can drop files onto the window, and one file can hold many stories. Groq splits the text into separate stories without rewriting your wording; without a key, the app splits on headings instead. You review and untick before anything is added, and duplicates are flagged. Each story stays fully editable in the Stories tab. The **⋯** menu exports your stories to Markdown or JSON, so you can back them up or edit them elsewhere and re-import.
 2. **Capture while you browse.** On any job page on Naukri, Wellfound or LinkedIn, **click the ResumeForge toolbar icon**. That's it. There's no popup, and the app stays in the background.
 
    The icon's badge tells you what happened:

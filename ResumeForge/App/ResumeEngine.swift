@@ -219,4 +219,28 @@ extension AppStore {
         let stories = J.dicts(o, "stories").map { Story(json: $0, origin: "import") }.filter { !$0.text.isEmpty }
         data.stories.insert(contentsOf: stories, at: 0)
     }
+
+    // MARK: Import stories from files / pasted text
+
+    /// Splits free text into stories. With AI: Groq finds the stories and keeps your wording.
+    /// Without AI (or no key): one story per heading / block.
+    func parseStories(from text: String, source: String, useAI: Bool,
+                      progress: @escaping (String) -> Void = { _ in }) async throws -> [Story] {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return [] }
+        guard useAI, !Keychain.load().isEmpty else { return StoryImport.splitByHeadings(clean) }
+
+        let companies = Array(Set(data.profile.roles.map(\.company).filter { !$0.isEmpty })).sorted()
+        let parts = StoryImport.chunks(clean)
+        var out: [Story] = []
+        for (i, part) in parts.enumerated() {
+            progress(parts.count > 1 ? "Finding stories in \(source) (part \(i + 1) of \(parts.count))…" : "Finding stories in \(source)…")
+            let o = try await client.json(system: Prompts.system,
+                                          user: Prompts.splitStories(text: part, source: source, part: i + 1,
+                                                                     of: parts.count, companies: companies),
+                                          temperature: 0.1)
+            out += J.dicts(o, "stories").map { Story(json: $0, origin: "file") }.filter { !$0.text.isEmpty }
+        }
+        return out
+    }
 }

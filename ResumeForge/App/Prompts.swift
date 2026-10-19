@@ -257,6 +257,34 @@ enum Prompts {
         """
     }
 
+    // MARK: Import stories the candidate already wrote
+
+    static func splitStories(text: String, source: String, part: Int, of total: Int, companies: [String]) -> String {
+        """
+        TASK: The candidate is importing STORIES they already wrote about their own work. \
+        Split the text into separate stories — one per initiative, project, achievement or problem solved.
+
+        Return:
+        {"stories": [{"title": "", "company": "", "role": "", "period": "", "text": "", "metrics": [], "skills": []}]}
+
+        RULES:
+        - "text" must be the candidate's ORIGINAL wording for that story. Copy their sentences; you may only drop \
+        headings/numbering and re-join lines broken by the file format. Never rewrite, shorten, summarise, embellish or add facts.
+        - "title": their heading if there is one, otherwise a short name (max 8 words) for the initiative.
+        - "company", "role", "period": only when stated in or around the story (headings count). Prefer the exact \
+        spelling from KNOWN COMPANIES when the text clearly refers to one. Otherwise "".
+        - "metrics": numbers and results exactly as written (e.g. "reduced RMA by 40%", "team of 12").
+        - "skills": skills/tools/methods the story demonstrates, as written or obvious (max 8).
+        - Skip anything that isn't a work story: contact details, tables of contents, page headers/footers, generic notes.
+        - If a story continues from a previous part of the file, still return it (the app merges duplicates).
+
+        KNOWN COMPANIES: \(companies.isEmpty ? "(none yet)" : companies.joined(separator: "; "))
+
+        TEXT (from "\(source)", part \(part) of \(total)):
+        \(text)
+        """
+    }
+
     // MARK: - Helpers
 
     static func jobBlock(_ j: JobPosting) -> String {

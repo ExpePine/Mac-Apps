@@ -3,6 +3,7 @@ import SwiftUI
 struct StoriesView: View {
     @EnvironmentObject var store: AppStore
     @State private var search = ""
+    @State private var showImport = false
 
     private var filtered: [Story] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -22,7 +23,7 @@ struct StoriesView: View {
                             Text([s.company, s.period].filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.subheadline).foregroundStyle(.secondary)
                             HStack(spacing: 6) {
-                                Pill(text: s.origin, color: s.origin == "interview" ? .purple : .accentColor)
+                                Pill(text: s.origin, color: s.origin == "interview" ? .purple : (s.origin == "file" ? .teal : .accentColor))
                                 if !s.metrics.isEmpty { Pill(text: "\(s.metrics.count) metrics", color: .green) }
                             }
                         }
@@ -34,9 +35,17 @@ struct StoriesView: View {
                 .searchable(text: $search, placement: .sidebar, prompt: "Search stories")
                 Divider()
                 HStack {
-                    Button { store.newStory() } label: { Label("New story", systemImage: "plus") }
+                    Button { store.newStory() } label: { Label("New", systemImage: "plus") }
+                    Button { showImport = true } label: { Label("Import…", systemImage: "square.and.arrow.down") }
                     Spacer()
-                    Button { store.startInterview(jobID: nil, gapID: nil) } label: { Label("Interview me", systemImage: "bubble.left.and.bubble.right") }
+                    Menu {
+                        Button("Interview me") { store.startInterview(jobID: nil, gapID: nil) }
+                        Divider()
+                        Button("Export stories as Markdown…") { StoryExport.export(store.data.stories, asMarkdown: true) }
+                        Button("Export stories as JSON (backup)…") { StoryExport.export(store.data.stories, asMarkdown: false) }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
                 .buttonStyle(.borderless)
                 .padding(8)
@@ -50,13 +59,26 @@ struct StoriesView: View {
                         set: { v in if let i = store.storyIndex(id) { store.data.stories[i] = v } }
                     )).id(id)
                 } else {
-                    EmptyHint(icon: "book",
-                              title: store.data.stories.isEmpty ? "Your story bank is empty" : "Pick a story",
-                              message: "Write down what you actually did — the situation, your actions, the numbers. Messy is fine. The app turns stories into resume bullets, and never adds facts you didn't give it.")
+                    VStack(spacing: 12) {
+                        EmptyHint(icon: "book",
+                                  title: store.data.stories.isEmpty ? "Your story bank is empty" : "Pick a story",
+                                  message: "Write down what you actually did — the situation, your actions, the numbers. Messy is fine. The app turns stories into resume bullets, and never adds facts you didn't give it.")
+                            .frame(maxHeight: 280)
+                        if store.data.stories.isEmpty {
+                            HStack {
+                                Button { showImport = true } label: { Label("Import stories I already wrote…", systemImage: "square.and.arrow.down") }
+                                    .buttonStyle(.borderedProminent)
+                                Button { store.newStory() } label: { Label("Write a new one", systemImage: "square.and.pencil") }
+                            }
+                            .controlSize(.large)
+                        }
+                        Spacer()
+                    }
                 }
             }
             .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
         }
+        .sheet(isPresented: $showImport) { ImportStoriesSheet() }
     }
 }
 
