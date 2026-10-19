@@ -224,7 +224,7 @@ struct GBM {
     }
 
     /// E[f(x) | features in `known` fixed to x] using the trees' training covers (path-dependent expectation).
-    private func conditional(_ x: [Double?], known: (Int) -> Bool) -> Double {
+    func conditional(_ x: [Double?], known: (Int) -> Bool) -> Double {
         var s = base
         for t in trees {
             func walk(_ k: Int) -> Double {

@@ -50,8 +50,8 @@ final class StatsTests: XCTestCase {
         let groups = [0, 1, 2, 2]
         let x = xs[700]
         let phi = m.shap(x, groupOf: groups, groups: 3)
-        let none = m.shap(x, groupOf: groups, groups: 3).reduce(0, +)
-        XCTAssertEqual(none, phi.reduce(0, +), accuracy: 1e-12)
+        let expected = m.conditional(x, known: { _ in false })
+        XCTAssertEqual(phi.reduce(0, +), m.rawScore(x) - expected, accuracy: 1e-9)
         // the strongest real driver gets the biggest average |φ|
         var imp = [0.0, 0.0, 0.0]
         for xi in xs[600..<700] { let p = m.shap(xi, groupOf: groups, groups: 3); for g in 0..<3 { imp[g] += abs(p[g]) } }
