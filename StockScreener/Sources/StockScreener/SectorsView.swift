@@ -149,9 +149,10 @@ struct SectorsView: View {
     // MARK: Rotation map
 
     private func rotationMap(_ r: SectorReport) -> some View {
-        let xs = r.sectors.flatMap { s in s.tail.map(\.ratio) } + [100]
-        let ys = r.sectors.flatMap { s in s.tail.map(\.momentum) } + [100]
-        let xr = (xs.min()! - 0.5)...(xs.max()! + 0.5), yr = (ys.min()! - 0.5)...(ys.max()! + 0.5)
+        var xs: [Double] = [100], ys: [Double] = [100]
+        for sec in r.sectors { for p in sec.tail { xs.append(p.ratio); ys.append(p.momentum) } }
+        let xr: ClosedRange<Double> = ((xs.min() ?? 100) - 0.5)...((xs.max() ?? 100) + 0.5)
+        let yr: ClosedRange<Double> = ((ys.min() ?? 100) - 0.5)...((ys.max() ?? 100) + 0.5)
         return VStack(alignment: .leading, spacing: 6) {
             Chart {
                 RectangleMark(xStart: .value("x", xr.lowerBound), xEnd: .value("x", 100), yStart: .value("y", 100), yEnd: .value("y", yr.upperBound))
