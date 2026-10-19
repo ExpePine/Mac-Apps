@@ -33,6 +33,9 @@ struct SheetTableView: NSViewRepresentable {
     /// When set, an "S" (screenshots) column follows E: its color per row, and what a click does.
     var sColor: ((SheetRow) -> NSColor)? = nil
     var onSClick: ((SheetRow) -> Void)? = nil
+    /// When set, a "P" (my pick) column: its colour per row, and what a click does.
+    var pColor: ((SheetRow) -> NSColor)? = nil
+    var onPClick: ((SheetRow) -> Void)? = nil
     /// Find (⌘F): cells containing this text are outlined; `findCurrent` (row index, column) is focused.
     var findQuery = ""
     var findCurrent: FindMatch? = nil
@@ -101,12 +104,17 @@ struct SheetTableView: NSViewRepresentable {
         let scrolling = Array(visible.dropFirst(frozenCount))
 
         // Rebuild columns only when the column set changes.
-        let signature = "E\(eColor != nil)S\(sColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
+        let signature = "E\(eColor != nil)S\(sColor != nil)P\(pColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
             + "#" + originalHeaders.joined(separator: "|")
         if signature != c.columnSignature {
             c.columnSignature = signature
             c.setColumns(frozen, on: left, parent: self)
             c.setColumns(scrolling, on: right, parent: self)
+            if pColor != nil {
+                c.addBadgeColumn(Coordinator.pID, title: "P",
+                                 tip: "P — My pick. Grey: not my pick · Green: my pick · Orange: OK selection. Click to change.",
+                                 to: frozen.isEmpty ? right : left)
+            }
             if sColor != nil {
                 c.addBadgeColumn(Coordinator.sID, title: "S",
                                  tip: "S — Screenshots of this stock. Grey: none · Orange: saved · Green: newest is under 7 days old",
@@ -281,6 +289,8 @@ struct SheetTableView: NSViewRepresentable {
 
         static let eID = NSUserInterfaceItemIdentifier("E")
         static let sID = NSUserInterfaceItemIdentifier("S")
+        static let pID = NSUserInterfaceItemIdentifier("P")
+        private let pCellID = NSUserInterfaceItemIdentifier("PCell")
         private let sCellID = NSUserInterfaceItemIdentifier("SCell")
 
         func addBadgeColumn(_ id: NSUserInterfaceItemIdentifier, title: String, tip: String, to table: NSTableView) {
@@ -328,6 +338,12 @@ struct SheetTableView: NSViewRepresentable {
                 parent.onSClick?(parent.rows[row])
                 return
             }
+            if let parent, row >= 0, row < parent.rows.count, col >= 0, col < sender.tableColumns.count,
+               sender.tableColumns[col].identifier == Self.pID {
+                parent.onPClick?(parent.rows[row])
+                sender.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: col))
+                return
+            }
             guard let parent, let build = parent.ePanel, row >= 0, row < parent.rows.count,
                   col >= 0, col < sender.tableColumns.count,
                   sender.tableColumns[col].identifier == Self.eID else { return }
@@ -349,6 +365,15 @@ struct SheetTableView: NSViewRepresentable {
                     return v
                 }()
                 cell.configure(color: parent.eColor?(parent.rows[row]) ?? .clear)
+                return cell
+            }
+            if let tableColumn, tableColumn.identifier == Self.pID, let parent, row < parent.rows.count {
+                let cell = (tableView.makeView(withIdentifier: pCellID, owner: nil) as? ECellView) ?? {
+                    let v = ECellView(letter: "P", tip: "Click: not my pick → my pick (green) → OK (orange)")
+                    v.identifier = pCellID
+                    return v
+                }()
+                cell.configure(color: parent.pColor?(parent.rows[row]) ?? .clear)
                 return cell
             }
             if let tableColumn, tableColumn.identifier == Self.sID, let parent, row < parent.rows.count {

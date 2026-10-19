@@ -102,6 +102,12 @@ Once at least 3 stored snapshots are 5 or more trading days old, **Learn pattern
 ### What changed since yesterday
 When the Filter opens, or new data arrives, cells that changed since the previous stored day flash for about 2 seconds: green for up, red for down, blue for stocks that are new to the list. A short summary appears on top.
 
+### My Picks (⌥⌘P)
+- **Marking picks:** in Daily Gainers, the **P** column marks your picks. Click to cycle **grey** (not my pick) → **green** (my pick) → **orange** (OK selection). You can also select rows and press **My pick** or **OK**.
+- **The My Picks window:** every pick in one place, with its day, that day's move, entry price, return since, best rise since, comparison with the Nifty, sector, the news reason at the time, and your note.
+- **Summary:** average return and % up for green picks vs orange OKs.
+- **Filtering and export:** filter by grade, period and symbol or sector; export a CSV, copy symbols for TradingView, or add picks to a watchlist.
+
 ### Charts (⇧⌘K)
 - **Chart links:** in the Chart window, open ⋯ → *Chart settings* and import a Google Sheet with a **Symbol** column and link columns (e.g. TradingView chart links). For stocks not in the sheet, the app reuses the sheet's link pattern.
 - **Opening a chart:** **double-click** a stock in the Data, Filter or Gainers tables, or **right-click** any stock (also in Watchlists, Changes, Performance and Sectors) → *Open chart*. It opens in the in-app **Chart viewer**. Log in to TradingView there once and it stays logged in. ◀ ▶ (⌥⌘← / ⌥⌘→) steps through the list you opened it from.

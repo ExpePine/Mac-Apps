@@ -135,6 +135,9 @@ final class ScreenerViewModel: ObservableObject {
     @Published var chartQueue: [String] = []        // the list the chart was opened from (for ◀ ▶)
     @Published var chartStatus: String?
     @Published var isImportingCharts = false
+
+    // My picks
+    @Published var picks: [Pick] = PickStore.load() { didSet { PickStore.save(picks) } }
     var flashToken = 0
 
     // E column: per-row status on the Filter screen

@@ -282,3 +282,36 @@ enum TextDocStore {
 
     """
 }
+
+
+// MARK: - My picks (Daily Gainers "P")
+
+enum PickGrade: String, Codable, CaseIterable {
+    case pick = "My pick"
+    case ok = "OK"
+}
+
+struct Pick: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var symbol: String
+    var day: String                  // the gainers day it was picked from
+    var grade: PickGrade
+    var change: Double?              // that day's % move
+    var close: Double?               // that day's close (entry for returns)
+    var sector = ""
+    var why = ""                     // the news reason at the time, if any
+    var note = ""
+    var createdAt = Date()
+}
+
+enum PickStore {
+    private static var url: URL { AppFolders.base.appendingPathComponent("picks.json") }
+    static func load() -> [Pick] {
+        guard let d = try? Data(contentsOf: url), let v = try? JSONDecoder().decode([Pick].self, from: d) else { return [] }
+        return v
+    }
+    static func save(_ v: [Pick]) {
+        try? FileManager.default.createDirectory(at: AppFolders.base, withIntermediateDirectories: true)
+        if let d = try? JSONEncoder().encode(v) { try? d.write(to: url, options: .atomic) }
+    }
+}

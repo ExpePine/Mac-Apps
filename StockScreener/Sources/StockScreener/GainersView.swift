@@ -47,6 +47,7 @@ struct GainersView: View {
         .onChange(of: vm.settings.gainersShowFilterColumns) { _ in version += 1 }
         .onChange(of: vm.settings.gainersColumnFilters) { _ in version += 1 }
         .onChange(of: vm.settings.gainersOnlyFilterList) { _ in version += 1 }
+        .onChange(of: vm.picks.count) { _ in version += 1 }
     }
 
     // MARK: Index mini charts
@@ -125,6 +126,16 @@ struct GainersView: View {
                 Text("\(p.0)/\(p.1)").font(.caption.monospacedDigit())
             }
             if let s = vm.newsStatus { Text(s).font(.caption).foregroundStyle(.orange).lineLimit(1) }
+            Button { markSelection(.pick, gainers: gainers, day: day) } label: { Label("My pick", systemImage: "checkmark.circle.fill") }
+                .tint(.green)
+                .disabled(selection.isEmpty)
+                .help("Mark the selected stocks as my pick (green P). Or click P on a row to cycle grey → green → orange.")
+            Button { markSelection(.ok, gainers: gainers, day: day) } label: { Label("OK", systemImage: "circle.lefthalf.filled") }
+                .tint(.orange)
+                .disabled(selection.isEmpty)
+                .help("Mark the selected stocks as an OK selection (orange P)")
+            Button { openWindow(id: "picks") } label: { Label("My Picks", systemImage: "star.square.on.square") }
+                .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
                 .disabled(vm.isExplaining)
                 .help("Fetch recent headlines for each gainer and ask Groq for a 5–10 word reason (cached per day)")
@@ -157,6 +168,9 @@ struct GainersView: View {
                  note: br.up + br.down > 0 ? String(format: "%.0f%% up", Double(br.up) / Double(br.up + br.down) * 100) : "")
             stat("In your Filter list", "\(inFilter)", .blue)
             stat("Reasons", "\(explained)/\(gainers.count)", .purple)
+            let mine = vm.picks.filter { $0.day == day }
+            stat("My picks · OK", "\(mine.filter { $0.grade == .pick }.count) · \(mine.filter { $0.grade == .ok }.count)", .green,
+                 note: "click P in the table")
             if !bySector.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Sectors among gainers").font(.caption).foregroundStyle(.secondary)
@@ -184,6 +198,7 @@ struct GainersView: View {
                                  originalHeaders: base.originalHeaders + extraNames)
         let n = base.headers.count
         let dayCol = n, closeCol = n + 1, whyCol = n + 2
+        let byID = Dictionary(gainers.map { ($0.row.id, $0) }, uniquingKeysWith: { a, _ in a })
         var cols: [Int] = [vm.labelIndex ?? 0, dayCol, closeCol, whyCol]
         if let sc = vm.sectorColumnIndex { cols.append(sc) }
         if vm.settings.gainersShowFilterColumns {
@@ -219,6 +234,8 @@ struct GainersView: View {
                            markedColumns: marked,
                            sColor: { vm.sColor($0) },
                            onSClick: { row in vm.shotSymbol = vm.rowKey(row); openWindow(id: "shots") },
+                           pColor: { row in vm.pickColor(vm.rowKey(row), day: day) },
+                           onPClick: { row in if let g = byID[row.id] { vm.cyclePick(g, day: day) } },
                            onSelectRows: { selection = $0 },
                            rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow, queue: rows) })
             Divider()
@@ -237,6 +254,12 @@ struct GainersView: View {
     }
 
     // MARK: Helpers
+
+    private func markSelection(_ grade: PickGrade, gainers: [GainerRow], day: String) {
+        let ids = Set(selection.map(\.id))
+        for g in gainers where ids.contains(g.row.id) { vm.setPick(g, day: day, grade: grade) }
+        version += 1
+    }
 
     private func stat(_ title: String, _ value: String, _ color: Color, note: String = "") -> some View {
         VStack(alignment: .leading, spacing: 1) {

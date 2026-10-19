@@ -53,3 +53,11 @@ final class ChartLinkTests: XCTestCase {
         XCTAssertEqual(b.url(for: "M&M", fallbackTemplate: "")?.absoluteString, "https://in.tradingview.com/chart/I7dkKisW/?symbol=NSE%3AM%26M")
     }
 }
+
+final class PickTests: XCTestCase {
+    func testPickRoundTrip() throws {
+        let p = Pick(symbol: "TCS", day: "2026-10-19", grade: .ok, change: 6.2, close: 4100, sector: "IT", why: "Strong Q2", note: "watch 4200")
+        let back = try JSONDecoder().decode([Pick].self, from: JSONEncoder().encode([p]))
+        XCTAssertEqual(back, [p])
+    }
+}
