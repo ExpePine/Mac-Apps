@@ -142,7 +142,7 @@ final class AppStore: ObservableObject {
     }
 
     // Same rules as background.js: same page (ignoring tracking parameters) or same title + company.
-    static func jobKeys(url: String, title: String, company: String) -> [String] {
+    nonisolated static func jobKeys(url: String, title: String, company: String) -> [String] {
         var keys: [String] = []
         let u = urlKey(url)
         if !u.isEmpty { keys.append("u:" + u) }
@@ -151,7 +151,7 @@ final class AppStore: ObservableObject {
         return keys
     }
 
-    static func urlKey(_ s: String) -> String {
+    nonisolated static func urlKey(_ s: String) -> String {
         guard let comps = URLComponents(string: s), let host = comps.host else { return "" }
         let keep: Set<String> = ["job_listing_slug", "jobid", "currentjobid", "jk", "jid"]
         let params = (comps.queryItems ?? []).compactMap { q -> String? in
@@ -165,7 +165,7 @@ final class AppStore: ObservableObject {
         return (h + path + (params.isEmpty ? "" : "?" + params.joined(separator: "&"))).lowercased()
     }
 
-    static func norm(_ s: String) -> String {
+    nonisolated static func norm(_ s: String) -> String {
         s.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
