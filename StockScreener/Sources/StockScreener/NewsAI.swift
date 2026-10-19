@@ -76,6 +76,19 @@ enum NewsClient {
         return RSSParser.parse(data).prefix(8).map { $0 }
     }
 
+    /// Market-wide headlines (for the Nifty 50 / Sensex reasons).
+    static func market(_ query: String, days: Int = 1) async -> [Headline] {
+        var comps = URLComponents(string: "https://news.google.com/rss/search")!
+        comps.queryItems = [URLQueryItem(name: "q", value: "\(query) when:\(days)d"),
+                            URLQueryItem(name: "hl", value: "en-IN"), URLQueryItem(name: "gl", value: "IN"),
+                            URLQueryItem(name: "ceid", value: "IN:en")]
+        guard let url = comps.url else { return [] }
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)", forHTTPHeaderField: "User-Agent")
+        guard let result = try? await URLSession.shared.data(for: req) else { return [] }
+        return Array(RSSParser.parse(result.0).prefix(10))
+    }
+
     /// query1.finance.yahoo.com/v1/finance/search — unofficial.
     static func yahoo(symbol: String) async throws -> [Headline] {
         guard let url = URL(string: "https://query1.finance.yahoo.com/v1/finance/search?q=\(YahooClient.yahooSymbol(symbol))&newsCount=8&quotesCount=0") else { return [] }
@@ -192,7 +205,7 @@ enum GroqClient {
         let df = DateFormatter(); df.dateFormat = "d MMM"
         let user = stocks.map { s in
             let lines = s.headlines.prefix(6).map { "- \($0.title)\($0.source.isEmpty ? "" : " (\($0.source)\($0.date.map { ", " + df.string(from: $0) } ?? ""))")" }
-            return "\(s.symbol) rose \(String(format: "%.1f", s.move))% today. Headlines:\n" + (lines.isEmpty ? "- (none found)" : lines.joined(separator: "\n"))
+            return "\(s.symbol) \(s.move >= 0 ? "rose" : "fell") \(String(format: "%.1f", abs(s.move)))% today. Headlines:\n" + (lines.isEmpty ? "- (none found)" : lines.joined(separator: "\n"))
         }.joined(separator: "\n\n")
         let text = try await chat(model: model, system: system, user: user, json: true)
         // tolerate code fences or extra text around the JSON

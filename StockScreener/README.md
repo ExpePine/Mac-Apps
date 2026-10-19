@@ -120,6 +120,8 @@ When the Filter opens, or new data arrives, cells that changed since the previou
 - **Why (news):** click **Why? (news + Groq)** to fetch recent headlines for each gainer (Google News RSS or Yahoo Finance, both free) and have **Groq** sum up the likely reason in 5–10 words. Groq is told to use only the headlines and to say "No clear news" otherwise. Reasons are cached per day.
 - **Groq setup:** add your API key in *News & AI settings* (kept in the Keychain) and pick a model from Groq's live list.
 - **Filter columns & colours:** this toggle adds the Filter screen's columns, painted with your cell colours.
+- **Index reasons:** **Why?** also writes a 5–10 word reason under the NIFTY 50 and SENSEX charts, from the day's market headlines.
+- **Sector rotation:** each gainer shows its sector's rotation quadrant (🟢 Leading · 🔵 Improving · 🟠 Weakening · 🔴 Lagging), trend and score for that day, plus a breakdown of the day's gainers by quadrant.
 
 ### Sectors & regime alerts (⇧⌘0)
 This screen uses the sheet's **Sector** column. You can pick a different column in *Alerts & settings*. It also uses Yahoo daily closes, which are fetched once and then topped up once a day after new sheet data arrives.

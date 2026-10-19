@@ -115,3 +115,68 @@ extension ScreenerViewModel {
         }
     }
 }
+
+// MARK: - Index reasons & sector rotation for gainers
+
+extension ScreenerViewModel {
+    static let indexNames: [(name: String, symbol: String, query: String)] = [
+        ("NIFTY 50", ScreenerViewModel.benchmarkSymbol, "Nifty 50 today stock market"),
+        ("SENSEX", ScreenerViewModel.sensexSymbol, "Sensex today stock market"),
+    ]
+
+    /// The index's move on `day` (today's live move when it's the latest day).
+    func indexMove(_ symbol: String, day: String) -> Double? {
+        let daily = priceBook.series(for: symbol)
+        if day == daily?.lastDay || gainersDay == nil, let live = indexIntraday[symbol]?.change { return live }
+        return daily?.dailyChange(on: day)
+    }
+
+    /// 5–10 word reasons for the NIFTY 50 and SENSEX moves (news + Groq), cached per day.
+    func explainIndices(day: String, force: Bool = false) {
+        guard !settings.groqModel.isEmpty, !GroqClient.apiKey.isEmpty else { return }
+        let todo = Self.indexNames.filter { force || reason($0.name, day: day) == nil }
+        guard !todo.isEmpty else { return }
+        let model = settings.groqModel
+        Task { [weak self] in
+            guard let self else { return }
+            var batch: [(symbol: String, move: Double, headlines: [Headline])] = []
+            for ix in todo {
+                let key = "\(day)|\(ix.name)"
+                var heads = self.newsCache.headlines[key] ?? []
+                if heads.isEmpty || force {
+                    heads = await NewsClient.market(ix.query)
+                    self.newsCache.headlines[key] = heads
+                }
+                batch.append((ix.name, self.indexMove(ix.symbol, day: day) ?? 0, heads))
+            }
+            do {
+                let reasons = try await GroqClient.explain(model: model, stocks: batch)
+                for ix in todo {
+                    self.newsCache.reasons["\(day)|\(ix.name)"] = reasons[ix.name.uppercased()] ?? reasons[ix.name] ?? "No clear news; likely global or flow-driven move"
+                }
+                self.newsCache.save()
+            } catch {
+                self.newsStatus = error.localizedDescription
+            }
+        }
+    }
+
+    /// The gainer's sector on the rotation map that day: quadrant, trend, score, and (latest day only) rank.
+    func sectorRotation(_ sector: String, day: String) -> (quadrant: Quadrant, trend: Trend, score: Double, rank: Int?)? {
+        guard let s = sectorReport?.sectors.first(where: { $0.name == sector }) else { return nil }
+        let isLatest = day >= (s.history.last?.day ?? "")
+        if let st = s.history.last(where: { $0.day <= day }) {
+            return (st.quadrant, st.trend, st.score, isLatest ? s.rank : nil)
+        }
+        return (s.quadrant, s.trend, s.score, s.rank)
+    }
+
+    static func quadrantLabel(_ q: Quadrant) -> String {
+        switch q {
+        case .leading: return "🟢 Leading"
+        case .improving: return "🔵 Improving"
+        case .weakening: return "🟠 Weakening"
+        case .lagging: return "🔴 Lagging"
+        }
+    }
+}

@@ -43,6 +43,8 @@ struct GainersView: View {
             }
         }
         .sheet(isPresented: $showSettings) { NewsAISettings().environmentObject(vm) }
+        .onAppear { if vm.sectorReport == nil { Task { await vm.computeSectors(notify: false) } } }
+        .onChange(of: vm.sectorReport?.asOf) { _ in version += 1 }
         .onChange(of: vm.newsCache.reasons.count) { _ in version += 1 }
         .onChange(of: vm.settings.gainersShowFilterColumns) { _ in version += 1 }
         .onChange(of: vm.settings.gainersColumnFilters) { _ in version += 1 }
@@ -78,7 +80,9 @@ struct GainersView: View {
         let last = intra?.last ?? daily?.closes.last
         let up = (change ?? 0) >= 0
         let prev = chartRange == 0 ? intra?.previousClose : nil
-        return HStack(spacing: 10) {
+        let why = vm.reason(name, day: vm.currentGainerDay)
+        return VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.caption.bold()).foregroundStyle(.secondary)
                 Text(last.map { $0.formatted(.number.precision(.fractionLength(0...2))) } ?? "—").font(.title3.bold().monospacedDigit())
@@ -98,6 +102,14 @@ struct GainersView: View {
             .chartYScale(domain: .automatic(includesZero: false))
             .chartYAxis { AxisMarks(position: .trailing) { _ in AxisValueLabel().font(.system(size: 8)) } }
             .frame(height: 70)
+        }
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles").font(.caption2).foregroundStyle(.purple)
+                Text(why ?? "Why? — click “Why? (news + Groq)” for the reason")
+                    .font(.caption).foregroundStyle(why == nil ? .secondary : .primary).lineLimit(2)
+                    .help(why.map { "Groq's summary of today's market headlines: \($0)" } ?? "")
+                Spacer()
+            }
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
@@ -136,11 +148,11 @@ struct GainersView: View {
                 .help("Mark the selected stocks as an OK selection (orange P)")
             Button { openWindow(id: "picks") } label: { Label("My Picks", systemImage: "star.square.on.square") }
                 .help("All your picks in one place, with returns since (⌥⌘P)")
-            Button { vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
+            Button { vm.explainIndices(day: day); vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
                 .disabled(vm.isExplaining)
                 .help("Fetch recent headlines for each gainer and ask Groq for a 5–10 word reason (cached per day)")
             Menu {
-                Button("Re-fetch all reasons for this day") { vm.explainGainers(gainers, day: day, force: true) }
+                Button("Re-fetch all reasons for this day") { vm.explainIndices(day: day, force: true); vm.explainGainers(gainers, day: day, force: true) }
                 Button("Update Yahoo prices") { Task { await vm.updateSectorPrices() } }
                 Divider()
                 Button("News & AI settings…") { showSettings = true }
@@ -158,6 +170,10 @@ struct GainersView: View {
         let sectorIdx = vm.sectorColumnIndex
         var bySector: [String: Int] = [:]
         if let sc = sectorIdx { for g in gainers { bySector[g.row.text(sc).isEmpty ? "—" : g.row.text(sc), default: 0] += 1 } }
+        var byQuadrant: [Quadrant: Int] = [:]
+        if let sc = sectorIdx {
+            for g in gainers { if let r = vm.sectorRotation(g.row.text(sc), day: day) { byQuadrant[r.quadrant, default: 0] += 1 } }
+        }
         let filterSet = Set(vm.filterRows.map(\.id))
         let inFilter = gainers.filter { filterSet.contains($0.row.id) }.count
         let explained = gainers.filter { vm.reason($0.symbol, day: day) != nil }.count
@@ -176,6 +192,13 @@ struct GainersView: View {
                     Text("Sectors among gainers").font(.caption).foregroundStyle(.secondary)
                     FlowChips(items: bySector.sorted { $0.value > $1.value }.prefix(10).map { "\($0.key) \($0.value)" })
                 }
+                if !byQuadrant.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Gainers by sector rotation").font(.caption).foregroundStyle(.secondary)
+                        FlowChips(items: Quadrant.allCases.compactMap { q in byQuadrant[q].map { "\(ScreenerViewModel.quadrantLabel(q)) \($0)" } })
+                    }
+                    .help("Which rotation-map quadrant each gainer's sector was in that day. Many gainers in Lagging sectors = stock-specific moves; in Leading = sector momentum.")
+                }
             }
             Spacer()
         }
@@ -186,21 +209,26 @@ struct GainersView: View {
 
     private func table(day: String, gainers: [GainerRow]) -> some View {
         let base = vm.table
-        let extraNames = ["Day %", "Close", "Why (news)"]
+        let extraNames = ["Day %", "Close", "Why (news)", "Sector rotation", "Sector trend", "Sector score"]
+        let sc = vm.sectorColumnIndex
         let derived = SheetTable(headers: base.headers + extraNames,
                                  rows: gainers.map { g in
                                      let why = vm.reason(g.symbol, day: day) ?? ""
+                                     let rot = sc.flatMap { vm.sectorRotation(g.row.text($0), day: day) }
                                      return SheetRow(id: g.row.id,
                                                      cells: g.row.cells + [String(format: "%+.2f%%", g.change) + (g.fromYahoo ? "" : " *"),
-                                                                           g.close.map { String(format: "%.2f", $0) } ?? "", why],
-                                                     numbers: g.row.numbers + [g.change, g.close, nil])
+                                                                           g.close.map { String(format: "%.2f", $0) } ?? "", why,
+                                                                           rot.map { ScreenerViewModel.quadrantLabel($0.quadrant) } ?? "",
+                                                                           rot?.trend.rawValue ?? "",
+                                                                           rot.map { String(format: "%.0f", $0.score) + ($0.rank.map { " (#\($0))" } ?? "") } ?? ""],
+                                                     numbers: g.row.numbers + [g.change, g.close, nil, nil, nil, rot?.score])
                                  },
                                  originalHeaders: base.originalHeaders + extraNames)
         let n = base.headers.count
-        let dayCol = n, closeCol = n + 1, whyCol = n + 2
+        let dayCol = n, closeCol = n + 1, whyCol = n + 2, rotCol = n + 3, trendCol = n + 4, scoreCol = n + 5
         let byID = Dictionary(gainers.map { ($0.row.id, $0) }, uniquingKeysWith: { a, _ in a })
         var cols: [Int] = [vm.labelIndex ?? 0, dayCol, closeCol, whyCol]
-        if let sc = vm.sectorColumnIndex { cols.append(sc) }
+        if let sc { cols += [sc, rotCol, trendCol, scoreCol] }
         if vm.settings.gainersShowFilterColumns {
             cols += vm.filterColumnIndices.filter { !cols.contains($0) }
         }
