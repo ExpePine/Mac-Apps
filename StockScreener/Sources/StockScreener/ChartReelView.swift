@@ -331,6 +331,9 @@ struct ChartReelView: View {
             Button { pool.resetZoom(slot: c); zoomTick += 1 } label: { Image(systemName: "arrow.counterclockwise") }
                 .help("Back to the layout's own zoom (reloads this chart)")
             Divider().frame(height: 12)
+            Button { pool.signIn(slot: c) } label: { Image(systemName: "person.crop.circle") }
+                .help("Sign in to TradingView here — \(TVAccounts.name(TVAccounts.account(forChart: c))) (Google pop-ups open in their own window)")
+            Divider().frame(height: 12)
             Button { pool.setPageZoom(slot: c, page - 0.1); zoomTick += 1 } label: { Text("A−").font(.caption2) }
                 .help("Smaller page (more chart fits)")
             Text("\(Int((page * 100).rounded()))%").font(.caption2.monospacedDigit())
@@ -467,7 +470,8 @@ struct ReelItem {
 
 /// Keeps a few loaded chart pages so stepping back and forth is instant, and re-applies your remembered
 /// zoom (time-axis wheel steps + page size) to each chart after it loads.
-final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate {
+final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
+    private var popups: [(window: NSWindow, web: WKWebView, slot: Int)] = []
     private var views: [String: WKWebView] = [:]
     private var slots: [String: Int] = [:]    // url → chart (0 = Chart 1, 1 = Chart 2)
     private var order: [String] = []          // most recent last
@@ -486,10 +490,12 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate {
     private func make(_ url: URL, slot: Int) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = TVAccounts.store(TVAccounts.account(forChart: slot))   // Chart 1 → Account 1, Chart 2 → Account 2
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
         let v = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: config)
         v.customUserAgent = WebHolder.userAgent
         v.pageZoom = Self.pageZoom(slot)
         v.navigationDelegate = self
+        v.uiDelegate = self
         slots[url.absoluteString] = slot
         v.load(URLRequest(url: url))
         return v
@@ -515,6 +521,56 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate {
     }
 
     func reloadAll() { views.values.forEach { $0.reload() } }
+
+    // MARK: Sign-in (Google / Apple pop-ups)
+
+    /// Opens TradingView's sign-in page in the pane showing this chart (its own account).
+    func signIn(slot: Int) {
+        guard let entry = views.first(where: { slots[$0.key] == slot && $0.value.superview != nil }),
+              let u = URL(string: "https://in.tradingview.com/accounts/signin/") else { return }
+        entry.value.load(URLRequest(url: u))
+    }
+
+    private func slot(of web: WKWebView) -> Int {
+        if let k = views.first(where: { $0.value === web })?.key { return slots[k] ?? 0 }
+        return popups.first(where: { $0.web === web })?.slot ?? 0
+    }
+
+    // window.open(...) → a real window sharing that account's cookies, so the login flows back to the chart
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        let slot = slot(of: webView)
+        let popup = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 680), configuration: configuration)
+        popup.customUserAgent = WebHolder.userAgent
+        popup.uiDelegate = self
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
+                         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.title = "Sign in — \(TVAccounts.name(TVAccounts.account(forChart: slot)))"
+        w.contentView = popup
+        w.isReleasedWhenClosed = false
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        popups.append((w, popup, slot))
+        return popup
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        guard let i = popups.firstIndex(where: { $0.web === webView }) else { return }
+        let slot = popups[i].slot
+        popups[i].window.close()
+        popups.remove(at: i)
+        for (k, v) in views where slots[k] == slot { v.reload() }       // pick up the new login
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let a = NSAlert(); a.messageText = message; a.runModal(); completionHandler()
+    }
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let a = NSAlert(); a.messageText = message; a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        completionHandler(a.runModal() == .alertFirstButtonReturn)
+    }
 
     // MARK: Zoom
 
