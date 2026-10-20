@@ -318,6 +318,7 @@ struct CommandCard: View {
                     Text("Days between two date columns").tag("gap")
                     Text("Describe columns").tag("describe")
                     Text("Does a higher value mean better returns?").tag("relation")
+                    Text("Invest ₹ in each entry — best / worst case").tag("invest")
                 }.frame(width: 360)
                 Spacer()
                 Button("Run with this plan") { ec.run(exp.id, cmd.id, base: vm.priceBook) }.buttonStyle(.borderedProminent).controlSize(.small)
@@ -365,6 +366,30 @@ struct CommandCard: View {
             switch cmd.plan.task {
             case "gap":
                 HStack { Text("From").font(.caption); pick($cmd.plan.gapFrom, none: false); Text("to").font(.caption); pick($cmd.plan.gapTo, none: false) }
+            case "invest":
+                Text("Entries (none = buy on the row date)").font(.caption.bold())
+                ForEach($cmd.plan.triggers) { $t in
+                    HStack {
+                        pick($t.column, none: false)
+                        Picker("", selection: $t.kind) {
+                            Text("cell = date").tag("date")
+                            Text("cell = bars ago (trading days before the row date)").tag("barsAgo")
+                            Text("non-empty / 1 = on the row date").tag("flag")
+                            Text("cell = entry price (on the row date)").tag("price")
+                        }.labelsHidden().fixedSize()
+                        Button { cmd.plan.triggers.removeAll { $0.id == t.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                    }
+                }
+                Button { cmd.plan.triggers.append(ExpTrigger(column: headers.first ?? "", kind: "barsAgo")) } label: { Label("Add entry", systemImage: "plus.circle") }.buttonStyle(.borderless).font(.caption)
+                HStack {
+                    Text("₹ per entry").font(.caption)
+                    TextField("", value: $cmd.plan.investAmount, format: .number).frame(width: 90).textFieldStyle(.roundedBorder)
+                    Text("entries from the last").font(.caption)
+                    TextField("", value: $cmd.plan.lookbackDays, format: .number).frame(width: 50).textFieldStyle(.roundedBorder)
+                    Text("trading days (252 ≈ 1 year) · sell after").font(.caption)
+                    TextField("", value: $cmd.plan.holdDays, format: .number).frame(width: 50).textFieldStyle(.roundedBorder)
+                    Text("days (0 = hold till today)").font(.caption)
+                }
             case "describe", "relation":
                 Text(cmd.plan.task == "relation" ? "Number column(s)" : "Columns").font(.caption.bold())
                 HStack {

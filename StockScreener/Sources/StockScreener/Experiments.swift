@@ -43,6 +43,9 @@ struct ExpPlan: Codable, Equatable {
     var gapFrom = ""                   // gap: from this date column…
     var gapTo = ""                     // …to this one
     var columns: [String] = []         // describe: columns · relation: the number column(s)
+    var investAmount = 100_000.0       // invest: ₹ put into each entry
+    var lookbackDays = 252             // invest: entries from the last N trading days (252 ≈ a year)
+    var holdDays = 0                   // invest: sell after N trading days (0 = hold until the latest close)
     var horizons = [5, 10, 21]
     var winPercent = 10.0
     var explanation = ""
@@ -58,6 +61,7 @@ struct ExpPlan: Codable, Equatable {
         entryDelay = v(.entryDelay, d.entryDelay); targetPercent = v(.targetPercent, d.targetPercent); stopPercent = v(.stopPercent, d.stopPercent)
         gapFrom = v(.gapFrom, d.gapFrom); gapTo = v(.gapTo, d.gapTo); columns = v(.columns, d.columns); horizons = v(.horizons, d.horizons)
         winPercent = v(.winPercent, d.winPercent); explanation = v(.explanation, d.explanation)
+        investAmount = v(.investAmount, d.investAmount); lookbackDays = v(.lookbackDays, d.lookbackDays); holdDays = v(.holdDays, d.holdDays)
     }
 }
 
@@ -246,8 +250,13 @@ enum ExperimentEngine {
 
     /// A header from a loose name: exact, else ignoring case / spaces / _ / - ("var 2" → "var2", "COL D" → 4th column).
     static func resolve(_ name: String, in table: SheetTable) -> String? {
-        let n = name.trimmingCharacters(in: .whitespaces)
+        var n = name.trimmingCharacters(in: .whitespaces)
+        if let p = n.firstIndex(of: "("), n.count > 2 { n = String(n[..<p]).trimmingCharacters(in: .whitespaces) }   // "var4 (barsAgo)"
         guard !n.isEmpty else { return nil }
+        if n.count == 1, let a = n.uppercased().first?.asciiValue, (65...90).contains(a) {                        // "F"
+            let i = Int(a - 65); return i < table.headers.count ? table.headers[i] : nil
+        }
+        if n.lowercased().hasPrefix("column "), n.count == 8 { return resolve("COL " + String(n.suffix(1)), in: table) }
         if let i = table.index(of: n) { return table.headers[i] }
         func norm(_ x: String) -> String { x.lowercased().filter { $0.isLetter || $0.isNumber } }
         let k = norm(n)
@@ -257,6 +266,21 @@ enum ExperimentEngine {
             let i = Int(a - 65); if i < table.headers.count { return table.headers[i] }
         }
         return nil
+    }
+
+    /// A column of counts (≥ 90% whole numbers ≥ 0, some above 1) — how "bars ago" columns look.
+    static func looksLikeCounts(_ table: SheetTable, column c: Int) -> Bool {
+        let v = table.rows.prefix(400).map { $0.text(c).replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let n = v.compactMap { Double($0) }
+        guard n.count >= max(3, v.count * 9 / 10), n.allSatisfy({ $0 >= 0 }) else { return false }
+        let whole = n.filter { abs($0 - $0.rounded()) < 0.001 }.count
+        return Double(whole) >= Double(n.count) * 0.9 && n.contains { $0 > 1 }
+    }
+
+    /// Words that say a trigger column counts trading days back ("trading days before", "bars ago", "barssince"…).
+    static func saysBarsAgo(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return ["days before", "bars ago", "days ago", "barssince", "bars since", "bars before", "trading days back", "days back", "candles ago"].contains { t.contains($0) }
     }
 
     static func isOn(_ raw: String) -> Bool {
@@ -364,10 +388,13 @@ enum ExperimentEngine {
         if !issues.isEmpty { r.notes = issues }
         let rows = usableRows(p, table: table)
         r.rowsUsed = rows.count
-        if p.task == "compare", !p.triggers.isEmpty {
+        func analyse(_ q: ExpPlan, into x: inout ExpResult) {
+            if q.task == "invest" { invest(q, table: table, rows: rows, prices: prices, into: &x) } else { compare(q, table: table, rows: rows, prices: prices, into: &x) }
+        }
+        if p.task == "compare" || p.task == "invest" {
             var first = ExpResult()
             first.notes = r.notes
-            compare(p, table: table, rows: rows, prices: prices, into: &first)
+            analyse(p, into: &first)
             let measured = first.entries.contains { $0.returns.contains { $0 != nil } }
             // Every row is too recent to measure "on the row date", but the trigger columns hold whole numbers:
             // read them as bars ago (trading days since the trigger fired) so performance can be computed now.
@@ -376,14 +403,14 @@ enum ExperimentEngine {
                 guard t.kind == "flag" || t.kind == "price", let c = table.index(of: t.column) else { return false }
                 let v = table.rows.prefix(300).map { $0.text(c).replacingOccurrences(of: ",", with: "") }.filter { !$0.isEmpty }
                 let n = v.compactMap { Double($0) }
-                return !n.isEmpty && n.count == v.count && n.allSatisfy { $0 >= 0 && $0 == $0.rounded() } && n.contains { $0 > 1 }
+                _ = n; return looksLikeCounts(table, column: c)
             }
             if !measured && !convertible.isEmpty {
                 var q = p
                 for k in convertible { q.triggers[k].kind = "barsAgo" }
                 var second = ExpResult()
                 second.notes = r.notes
-                compare(q, table: table, rows: rows, prices: prices, into: &second)
+                analyse(q, into: &second)
                 if second.entries.contains(where: { $0.returns.contains { $0 != nil } }) {
                     second.notes.insert("All rows are too recent to measure from the row date, so \(convertible.map { p.triggers[$0].name }.joined(separator: ", ")) were read as BARS AGO (trading days since the trigger fired, counted back from the row date). If that's not what they mean, change the trigger type under Plan.", at: 0)
                     r = second
@@ -548,6 +575,92 @@ enum ExperimentEngine {
         }
     }
 
+    // MARK: invest
+
+    private static func inr(_ v: Double) -> String {
+        let f = NumberFormatter(); f.locale = Locale(identifier: "en_IN"); f.numberStyle = .decimal; f.maximumFractionDigits = 0
+        return "₹" + (f.string(from: NSNumber(value: v)) ?? String(Int(v)))
+    }
+
+    private static func invest(_ p: ExpPlan, table: SheetTable, rows: [(row: SheetRow, shortDay: String?)], prices: PriceBook, into r: inout ExpResult) {
+        guard let sc = table.index(of: p.symbolColumn) else { r.notes.append("Pick the stock column."); return }
+        let bc = rowDateColumn(p, table: table)
+        if p.baseDateColumn.isEmpty, let bc { r.notes.append("Row date: using the “\(table.headers[bc])” column.") }
+        let arms: [ExpTrigger?] = p.triggers.isEmpty ? [nil] : p.triggers.map { Optional($0) }
+        let amt = p.investAmount > 0 ? p.investAmount : 100_000
+        var missing = Set<String>(), noDate = 0, outside = 0, tooRecent = 0
+        struct Pos { let e: ExpEntry; let value: Double; let peak: Double; let low: Double; let exitDay: String }
+        var byArm: [String: [Pos]] = [:]
+        for (row, shortDay) in rows {
+            let sym = cleanSymbol(row.text(sc))
+            guard !sym.isEmpty else { continue }
+            guard let s = prices.series(for: sym), s.days.count > 1 else { missing.insert(sym); continue }
+            let baseDay = bc.flatMap { day(row.text($0)) } ?? shortDay
+            let last = s.closes.count - 1
+            for t in arms {
+                guard let e = entry(p, t, row: row, table: table, baseDay: baseDay) else { noDate += 1; continue }
+                var i: Int
+                if e.back > 0 {
+                    guard let b = s.days.lastIndex(where: { $0 <= e.day }), b - e.back >= 0 else { outside += 1; continue }
+                    i = b - e.back
+                } else {
+                    guard let f = s.days.firstIndex(where: { $0 >= e.day }) else { tooRecent += 1; continue }
+                    i = f
+                }
+                i += max(0, p.entryDelay)
+                guard i < last else { tooRecent += 1; continue }
+                guard last - i <= p.lookbackDays else { outside += 1; continue }        // older than "a year back"
+                let price = (p.entryDelay == 0 ? e.price : nil) ?? s.closes[i]
+                guard price > 0 else { continue }
+                let exit = p.holdDays > 0 ? min(last, i + p.holdDays) : last
+                let path = s.closes[(i + 1)...exit]
+                let value = amt * s.closes[exit] / price
+                let peak = amt * (path.max() ?? price) / price, low = amt * (path.min() ?? price) / price
+                let name = t?.name ?? "Row date"
+                let en = ExpEntry(symbol: sym, arm: name, day: s.days[i], entry: price, returns: [(value / amt - 1) * 100],
+                                  best: [(peak / amt - 1) * 100], worst: [(low / amt - 1) * 100], trade: nil,
+                                  daysAfterShortlist: nil, rowID: row.id)
+                byArm[name, default: []].append(Pos(e: en, value: value, peak: peak, low: low, exitDay: s.days[exit]))
+                r.entries.append(en)
+            }
+        }
+        let hold = p.holdDays > 0 ? "held \(p.holdDays) trading days" : "held until the latest close"
+        var t = ExpTable(title: "\(inr(amt)) put into each entry from the last \(p.lookbackDays) trading days, \(hold)",
+                         columns: ["Entry", "entries", "invested", "worth now", "profit", "avg return", "profitable", "best case", "worst case", "best peak while held", "deepest dip while held"], rows: [])
+        var headline = ""
+        for (name, ps) in byArm.sorted(by: { $0.key < $1.key }) {
+            let inv = amt * Double(ps.count), now = ps.reduce(0) { $0 + $1.value }
+            guard let best = ps.max(by: { $0.value < $1.value }), let worst = ps.min(by: { $0.value < $1.value }),
+                  let peak = ps.max(by: { $0.peak < $1.peak }), let dip = ps.min(by: { $0.low < $1.low }) else { continue }
+            let prof = Double(ps.filter { $0.value > amt }.count) / Double(ps.count) * 100
+            t.rows.append([name, "\(ps.count)", inr(inv), inr(now), (now >= inv ? "+" : "-") + inr(abs(now - inv)),
+                           pct(mean(ps.map { ($0.value / amt - 1) * 100 })), f(prof, 0) + "%",
+                           "\(inr(best.value)) — \(best.e.symbol) from \(best.e.day)", "\(inr(worst.value)) — \(worst.e.symbol) from \(worst.e.day)",
+                           "\(inr(peak.peak)) — \(peak.e.symbol)", "\(inr(dip.low)) — \(dip.e.symbol)"])
+            r.bars.append(ExpBar(series: name, category: "best case", value: best.value))
+            r.bars.append(ExpBar(series: name, category: "average", value: now / Double(ps.count)))
+            r.bars.append(ExpBar(series: name, category: "worst case", value: worst.value))
+            if headline.isEmpty {
+                headline = "\(inr(amt)) in each of \(ps.count) \(name) entries: best \(inr(best.value)) (\(best.e.symbol)), worst \(inr(worst.value)) (\(worst.e.symbol)), average \(inr(now / Double(ps.count)))"
+            }
+            // top / bottom 5
+            let sorted = ps.sorted { $0.value > $1.value }
+            var tb = ExpTable(title: "\(name): 5 best and 5 worst", columns: ["Stock", "bought", "at", "until", "worth", "return"], rows: [])
+            for x in Array(sorted.prefix(5)) + Array(sorted.suffix(min(5, max(0, sorted.count - 5)))) {
+                tb.rows.append([x.e.symbol, x.e.day, String(format: "%.2f", x.e.entry), x.exitDay, inr(x.value), pct((x.value / amt - 1) * 100)])
+            }
+            r.tables.append(tb)
+        }
+        r.tables.insert(t, at: 0)
+        r.barTitle = "Worth of \(inr(amt)) per entry"
+        r.headline = headline.isEmpty ? "Nothing could be measured yet — see why below" : headline
+        if !missing.isEmpty { r.notes.append("No Yahoo prices for \(missing.count) stock\(missing.count == 1 ? "" : "s") (e.g. \(missing.sorted().prefix(4).joined(separator: ", ")))") }
+        if noDate > 0 { r.notes.append("\(noDate) row/entry pair\(noDate == 1 ? "" : "s") had no entry (empty / unreadable cell).") }
+        if outside > 0 { r.notes.append("\(outside) entr\(outside == 1 ? "y is" : "ies are") older than \(p.lookbackDays) trading days (or before the Yahoo history) — not included.") }
+        if tooRecent > 0 { r.notes.append("\(tooRecent) entr\(tooRecent == 1 ? "y is" : "ies are") from today or later — nothing to measure yet.") }
+        r.notes.append("Each entry is bought at its close; no brokerage, taxes or slippage.")
+    }
+
     // MARK: gap
 
     private static func gap(_ p: ExpPlan, table: SheetTable, rows: [(row: SheetRow, shortDay: String?)], calendar: [String], into r: inout ExpResult) {
@@ -680,7 +793,7 @@ enum ExperimentEngine {
         for cl in clauses {
             let cols = colsIn(cl)
             if (cl.contains("shortlist") || cl.contains("short list")), let c = cols.first { p.shortlistColumn = c }
-            if cl.contains("timing") || cl.contains("trigger") || cl.contains("compare") || cl.contains("entry") || cl.contains("better") {
+            if cl.contains("timing") || cl.contains("trigger") || cl.contains("compare") || cl.contains("entry") || cl.contains("better") || cl.contains("event") {
                 compareCols += cols.filter { $0 != p.shortlistColumn && !compareCols.contains($0) }
             }
             if cl.contains("group by") || cl.contains("per ") || cl.contains("by sector") || cl.contains("split by"), let c = cols.last { p.groupBy = c }
@@ -690,8 +803,19 @@ enum ExperimentEngine {
             if cl.contains("describe") || cl.contains("average") || cl.contains("distribution") || cl.contains("count") { if p.task != "gap" { p.task = "describe"; p.columns = cols } }
             if cl.contains("correlat") || cl.contains("relation") || cl.contains("higher") { p.task = "relation"; p.columns = cols }
             if cl.contains("next day") { p.entryDelay = 1 }
+            if cl.contains("invest") || cl.contains("₹") || cl.contains("rs ") || cl.contains("rupees") {
+                p.task = "invest"
+                let nums = cl.replacingOccurrences(of: ",", with: "").split(whereSeparator: { !$0.isNumber && $0 != "." }).compactMap { Double($0) }
+                if let amt = nums.first(where: { $0 >= 1000 }) { p.investAmount = amt }
+                if cl.contains("2 year") || cl.contains("two year") { p.lookbackDays = 504 }
+                else if cl.contains("6 month") || cl.contains("six month") { p.lookbackDays = 126 }
+                else if cl.contains("3 month") || cl.contains("three month") { p.lookbackDays = 63 }
+                else if cl.contains("month") { p.lookbackDays = 21 }
+                else if cl.contains("week") { p.lookbackDays = 5 }
+                else { p.lookbackDays = 252 }
+            }
         }
-        if p.task == "compare", !compareCols.isEmpty { p.triggers = compareCols.map { ExpTrigger(column: $0) } }
+        if p.task == "compare" || p.task == "invest", !compareCols.isEmpty { p.triggers = compareCols.map { ExpTrigger(column: $0) } }
         if p.symbolColumn.isEmpty || table.index(of: p.symbolColumn) == nil {
             p.symbolColumn = table.headers.first { ["symbol", "nse symbol", "stock", "ticker", "nse", "scrip"].contains($0.lowercased()) } ?? ""
         }
@@ -707,8 +831,8 @@ enum ExperimentEngine {
                 let sample = table.rows.prefix(30).map { $0.text(c) }.filter { !$0.isEmpty }
                 let nums = sample.compactMap { Double($0.replacingOccurrences(of: ",", with: "")) }
                 p.triggers[k].kind = sample.contains { day($0) != nil } ? "date"
-                    : (nums.count == sample.count && !nums.isEmpty && nums.allSatisfy { $0 == $0.rounded() && $0 >= 0 } && nums.contains { $0 > 1 } ? "barsAgo"
-                       : (nums.count == sample.count && nums.allSatisfy { $0 > 1.5 } ? "price" : "flag"))
+                    : (saysBarsAgo(lower) || looksLikeCounts(table, column: c) ? "barsAgo"
+                       : (nums.count == sample.count && !nums.isEmpty && nums.allSatisfy { $0 > 1.5 } ? "price" : "flag"))
             }
         }
         p.explanation = "Read without Groq — check the columns below."
@@ -731,11 +855,14 @@ enum ExperimentEngine {
         "gap" = trading days between two date columns (gapFrom → gapTo).
         "describe" = numbers / value counts of some columns.
         "relation" = does a higher value of number column(s) go with better returns later.
+        "invest" = put investAmount (₹) into every entry from the last lookbackDays trading days (252 ≈ a year back) and hold \
+        holdDays (0 = until today): best case, worst case, average, total profit — uses the same trigger columns as compare.
         Any task can be split by groupBy (a column; groupBuckets 3 = Low/Mid/High of a number column, 0 = by value) and restricted \
         by filters [{column, op: "=","≠",">","≥","<","≤","contains","nonempty","empty", value}].
         Reply as JSON: {"task", "symbolColumn", "shortlistColumn" (or ""), "shortlistKind": "flag"|"date"|"symbol", "baseDateColumn" (or ""), \
         "filters": [...], "triggers": [{"column","kind","label"}], "groupBy", "groupBuckets", "entryDelay" (0 = that day's close, 1 = next day), \
         "targetPercent" (0 = off), "stopPercent" (0 = off), "gapFrom", "gapTo", "columns": [...], "horizons": [trading days], "winPercent", \
+        "investAmount", "lookbackDays", "holdDays", \
         "explanation": 1–2 sentences on how you read the command and anything you had to assume}.
         If the command can't be done with these blocks, choose the closest one and say so in explanation.
         """
@@ -747,7 +874,11 @@ enum ExperimentEngine {
         func s(_ k: String) -> String { resolve(j[k] as? String ?? "", in: table) ?? "" }
         func n(_ k: String) -> Double { (j[k] as? Double) ?? (j[k] as? Int).map(Double.init) ?? 0 }
         var p = ExpPlan()
-        p.task = (j["task"] as? String).flatMap { ["compare", "gap", "describe", "relation"].contains($0) ? $0 : nil } ?? "compare"
+        p.task = (j["task"] as? String).flatMap { ["compare", "gap", "describe", "relation", "invest"].contains($0) ? $0 : nil } ?? "compare"
+        if n("investAmount") > 0 { p.investAmount = n("investAmount") }
+        if n("lookbackDays") > 0 { p.lookbackDays = min(1250, Int(n("lookbackDays"))) }
+        p.holdDays = max(0, min(1250, Int(n("holdDays"))))
+        let groqKinds = (j["triggers"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
         p.symbolColumn = s("symbolColumn"); p.shortlistColumn = s("shortlistColumn"); p.baseDateColumn = s("baseDateColumn")
         p.shortlistKind = (j["shortlistKind"] as? String).flatMap { ["flag", "date", "symbol"].contains($0) ? $0 : nil } ?? "flag"
         p.filters = (j["filters"] as? [[String: Any]] ?? []).compactMap { f in
@@ -770,9 +901,14 @@ enum ExperimentEngine {
         let g = guessPlan(text, notes: notes, table: table, previous: nil)
         if p.symbolColumn.isEmpty { p.symbolColumn = g.symbolColumn }
         // Groq named columns that aren't in the sheet → use the ones the command mentions
-        if p.task == "compare" && p.triggers.isEmpty && !g.triggers.isEmpty {
+        if (p.task == "compare" || p.task == "invest") && p.triggers.isEmpty && !g.triggers.isEmpty {
             p.triggers = g.triggers
+            // keep how Groq read each column (e.g. barsAgo) even though its column names didn't match
+            for k in p.triggers.indices where k < groqKinds.count && ["date", "flag", "price", "barsAgo"].contains(groqKinds[k]) { p.triggers[k].kind = groqKinds[k] }
             p.explanation += " (Trigger columns matched from your words: \(g.triggers.map(\.column).joined(separator: ", ")).)"
+        }
+        if saysBarsAgo(text + " " + notes) {
+            for k in p.triggers.indices where p.triggers[k].kind != "date" { p.triggers[k].kind = "barsAgo" }
         }
         return p
     }

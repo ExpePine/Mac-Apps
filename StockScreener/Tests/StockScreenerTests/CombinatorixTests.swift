@@ -307,3 +307,26 @@ final class ExperimentChatTests: XCTestCase {
         XCTAssertTrue(byGroup.contains("Auto: n 1"), byGroup)
     }
 }
+
+final class ExperimentInvestTests: XCTestCase {
+    func testInvestYearBackWithBarsAgo() {
+        let t = SheetTable(headers: ["Symbol", "10/20/2026", "var4"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "10/20/2026", "3.00"], numbers: [nil, nil, 3]),
+            SheetRow(id: 1, cells: ["BBB", "10/20/2026", "2.00"], numbers: [nil, nil, 2]),
+        ])
+        XCTAssertEqual(ExperimentEngine.resolve("F", in: SheetTable(headers: ["a", "b", "c", "d", "e", "var4"], rows: [])), "var4")
+        XCTAssertEqual(ExperimentEngine.resolve("var4 (barsAgo)", in: t), "var4")
+        let plan = ExperimentEngine.guessPlan("Col A = NSE symbol -- COL C = var4 this is trigger in form of trading days before , compute if I invest 100000 a year back what would i a make in the best and worst case", notes: "", table: t, previous: nil)
+        XCTAssertEqual(plan.task, "invest")
+        XCTAssertEqual(plan.investAmount, 100000)
+        XCTAssertEqual(plan.lookbackDays, 252)
+        XCTAssertEqual(plan.triggers.first?.kind, "barsAgo")
+        var b = PriceBook()
+        let days = ["2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19"]
+        b.series["AAA"] = PriceSeries(days: days, closes: [100, 100, 100, 100, 150])
+        b.series["BBB"] = PriceSeries(days: days, closes: [100, 100, 100, 100, 80])
+        let r = ExperimentEngine.run(plan, table: t, prices: b, calendar: [])
+        XCTAssertTrue(r.headline.contains("best ₹1,50,000 (AAA)"), r.headline)
+        XCTAssertTrue(r.headline.contains("worst ₹80,000 (BBB)"), r.headline)
+    }
+}
