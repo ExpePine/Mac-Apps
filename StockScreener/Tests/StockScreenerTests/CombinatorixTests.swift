@@ -264,3 +264,24 @@ final class ExperimentDateTests: XCTestCase {
         XCTAssertTrue(r.notes.contains { $0.contains("Row date: using") })
     }
 }
+
+final class ExperimentAutoBarsTests: XCTestCase {
+    func testTodayRowsWithCountsAreReadAsBarsAgo() {
+        let t = SheetTable(headers: ["Symbol", "date", "var2", "var4"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "10/19/2026", "4", "2"], numbers: [nil, nil, 4, 2]),
+        ])
+        XCTAssertEqual(ExperimentEngine.resolve("var 2", in: t), "var2")
+        XCTAssertEqual(ExperimentEngine.resolve("COL C", in: t), "var2")
+        var b = PriceBook()
+        b.series["AAA"] = PriceSeries(days: ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19"],
+                                      closes: [100, 101, 102, 103, 104, 110])
+        var p = ExpPlan(); p.symbolColumn = "Symbol"; p.horizons = [1]
+        p.triggers = [ExpTrigger(column: "var2", kind: "flag"), ExpTrigger(column: "var4", kind: "flag")]
+        let r = ExperimentEngine.run(p, table: t, prices: b, calendar: [])
+        XCTAssertTrue(r.notes.first?.contains("BARS AGO") ?? false, r.notes.joined(separator: " | "))
+        XCTAssertEqual(r.entries.first { $0.arm == "var2" }?.day, "2026-10-13")
+        XCTAssertEqual(r.entries.first { $0.arm == "var4" }?.day, "2026-10-15")
+        let plan = ExperimentEngine.guessPlan("var 2 is a timing trigger , var 4 is also a timing trigger -- compare which one gives better results", notes: "", table: t, previous: nil)
+        XCTAssertEqual(plan.triggers.map(\.column), ["var2", "var4"])
+    }
+}

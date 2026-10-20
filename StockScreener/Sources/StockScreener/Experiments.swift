@@ -227,6 +227,21 @@ enum ExperimentEngine {
         return nil
     }
 
+    /// A header from a loose name: exact, else ignoring case / spaces / _ / - ("var 2" → "var2", "COL D" → 4th column).
+    static func resolve(_ name: String, in table: SheetTable) -> String? {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { return nil }
+        if let i = table.index(of: n) { return table.headers[i] }
+        func norm(_ x: String) -> String { x.lowercased().filter { $0.isLetter || $0.isNumber } }
+        let k = norm(n)
+        if let h = table.headers.first(where: { norm($0) == k }) { return h }
+        let up = n.uppercased()
+        if up.hasPrefix("COL"), let ch = up.dropFirst(3).trimmingCharacters(in: .whitespaces).first, let a = ch.asciiValue, (65...90).contains(a) {
+            let i = Int(a - 65); if i < table.headers.count { return table.headers[i] }
+        }
+        return nil
+    }
+
     static func isOn(_ raw: String) -> Bool {
         let s = raw.trimmingCharacters(in: .whitespaces).lowercased()
         return !s.isEmpty && !["0", "false", "no", "n", "-", "—", "na", "n/a", "#n/a"].contains(s)
@@ -332,6 +347,35 @@ enum ExperimentEngine {
         if !issues.isEmpty { r.notes = issues }
         let rows = usableRows(p, table: table)
         r.rowsUsed = rows.count
+        if p.task == "compare", !p.triggers.isEmpty {
+            var first = ExpResult()
+            first.notes = r.notes
+            compare(p, table: table, rows: rows, prices: prices, into: &first)
+            let measured = first.entries.contains { $0.returns.contains { $0 != nil } }
+            // Every row is too recent to measure "on the row date", but the trigger columns hold whole numbers:
+            // read them as bars ago (trading days since the trigger fired) so performance can be computed now.
+            let convertible = p.triggers.indices.filter { k in
+                let t = p.triggers[k]
+                guard t.kind == "flag" || t.kind == "price", let c = table.index(of: t.column) else { return false }
+                let v = table.rows.prefix(300).map { $0.text(c).replacingOccurrences(of: ",", with: "") }.filter { !$0.isEmpty }
+                let n = v.compactMap { Double($0) }
+                return !n.isEmpty && n.count == v.count && n.allSatisfy { $0 >= 0 && $0 == $0.rounded() } && n.contains { $0 > 1 }
+            }
+            if !measured && !convertible.isEmpty {
+                var q = p
+                for k in convertible { q.triggers[k].kind = "barsAgo" }
+                var second = ExpResult()
+                second.notes = r.notes
+                compare(q, table: table, rows: rows, prices: prices, into: &second)
+                if second.entries.contains(where: { $0.returns.contains { $0 != nil } }) {
+                    second.notes.insert("All rows are too recent to measure from the row date, so \(convertible.map { p.triggers[$0].name }.joined(separator: ", ")) were read as BARS AGO (trading days since the trigger fired, counted back from the row date). If that's not what they mean, change the trigger type under Plan.", at: 0)
+                    r = second
+                } else { r = first }
+            } else { r = first }
+            r.rowsUsed = rows.count
+            if r.rowsUsed < 30 { r.notes.append("Only \(r.rowsUsed) rows — treat this as a hint, not a result.") }
+            return r
+        }
         switch p.task {
         case "gap": gap(p, table: table, rows: rows, calendar: calendar, into: &r)
         case "describe": describe(p, table: table, rows: rows, into: &r)
@@ -607,7 +651,11 @@ enum ExperimentEngine {
             for part in cl.replacingOccurrences(of: "column", with: "col").components(separatedBy: "col ").dropFirst() {
                 if let ch = part.first, let h = header(ch), !cols.contains(h) { cols.append(h) }
             }
-            for h in table.headers where h.count > 2 && cl.contains(h.lowercased()) && !cols.contains(h) { cols.append(h) }
+            let squashed = cl.filter { $0.isLetter || $0.isNumber }
+            for h in table.headers where h.count > 2 && !cols.contains(h) {
+                let hk = h.lowercased().filter { $0.isLetter || $0.isNumber }
+                if cl.contains(h.lowercased()) || (hk.count > 2 && squashed.contains(hk)) { cols.append(h) }
+            }
             return cols
         }
         let clauses = lower.components(separatedBy: CharacterSet(charactersIn: ".;\n")).flatMap { $0.components(separatedBy: " -- ") }
@@ -679,30 +727,36 @@ enum ExperimentEngine {
         guard let d = reply.data(using: .utf8), let j = try JSONSerialization.jsonObject(with: d) as? [String: Any] else {
             throw GroqClient.Failure(message: "Groq's plan couldn't be read")
         }
-        func s(_ k: String) -> String { let v = j[k] as? String ?? ""; return v.isEmpty || table.index(of: v) != nil ? v : "" }
+        func s(_ k: String) -> String { resolve(j[k] as? String ?? "", in: table) ?? "" }
         func n(_ k: String) -> Double { (j[k] as? Double) ?? (j[k] as? Int).map(Double.init) ?? 0 }
         var p = ExpPlan()
         p.task = (j["task"] as? String).flatMap { ["compare", "gap", "describe", "relation"].contains($0) ? $0 : nil } ?? "compare"
         p.symbolColumn = s("symbolColumn"); p.shortlistColumn = s("shortlistColumn"); p.baseDateColumn = s("baseDateColumn")
         p.shortlistKind = (j["shortlistKind"] as? String).flatMap { ["flag", "date", "symbol"].contains($0) ? $0 : nil } ?? "flag"
         p.filters = (j["filters"] as? [[String: Any]] ?? []).compactMap { f in
-            guard let c = f["column"] as? String, table.index(of: c) != nil else { return nil }
+            guard let c = (f["column"] as? String).flatMap({ resolve($0, in: table) }) else { return nil }
             let v = f["value"].map { "\($0)" } ?? ""
             return ExpFilter(column: c, op: f["op"] as? String ?? "=", value: v)
         }
         p.triggers = (j["triggers"] as? [[String: Any]] ?? []).compactMap { t in
-            guard let c = t["column"] as? String, table.index(of: c) != nil else { return nil }
+            guard let c = (t["column"] as? String).flatMap({ resolve($0, in: table) }) else { return nil }
             let k = (t["kind"] as? String).flatMap { ["date", "flag", "price", "barsAgo"].contains($0) ? $0 : nil } ?? "date"
             return ExpTrigger(column: c, kind: k, label: t["label"] as? String ?? "")
         }
         p.groupBy = s("groupBy"); p.groupBuckets = Int(n("groupBuckets"))
         p.entryDelay = max(0, min(5, Int(n("entryDelay")))); p.targetPercent = max(0, n("targetPercent")); p.stopPercent = max(0, n("stopPercent"))
         p.gapFrom = s("gapFrom"); p.gapTo = s("gapTo")
-        p.columns = (j["columns"] as? [String] ?? []).filter { table.index(of: $0) != nil }
+        p.columns = (j["columns"] as? [String] ?? []).compactMap { resolve($0, in: table) }
         if let h = j["horizons"] as? [Any] { let v = h.compactMap { ($0 as? Int) ?? ($0 as? Double).map { Int($0) } }.filter { (1...250).contains($0) }; if !v.isEmpty { p.horizons = Array(v.prefix(4)) } }
         if n("winPercent") > 0 { p.winPercent = n("winPercent") }
         p.explanation = j["explanation"] as? String ?? ""
-        if p.symbolColumn.isEmpty { p.symbolColumn = guessPlan(text, notes: notes, table: table, previous: nil).symbolColumn }
+        let g = guessPlan(text, notes: notes, table: table, previous: nil)
+        if p.symbolColumn.isEmpty { p.symbolColumn = g.symbolColumn }
+        // Groq named columns that aren't in the sheet → use the ones the command mentions
+        if p.task == "compare" && p.triggers.isEmpty && !g.triggers.isEmpty {
+            p.triggers = g.triggers
+            p.explanation += " (Trigger columns matched from your words: \(g.triggers.map(\.column).joined(separator: ", ")).)"
+        }
         return p
     }
 
