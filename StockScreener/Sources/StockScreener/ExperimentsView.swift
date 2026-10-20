@@ -6,7 +6,7 @@ import Charts
 /// which one did better.
 @MainActor final class ExperimentCenter: ObservableObject {
     static let shared = ExperimentCenter()
-    @Published var experiments: [Experiment] = ExperimentStore.load() { didSet { ExperimentStore.save(experiments) } }
+    @Published var experiments: [Experiment] = ExperimentFile.load() { didSet { ExperimentFile.save(experiments) } }
     @Published var tables: [UUID: SheetTable] = [:]
     @Published var results: [UUID: ExpResult] = [:]
     @Published var busy: [UUID: String] = [:]

@@ -35,7 +35,7 @@ struct Experiment: Codable, Identifiable, Equatable {
     var createdAt = Date()
 }
 
-enum ExperimentStore {
+enum ExperimentFile {
     private static var url: URL { AppFolders.base.appendingPathComponent("experiments.json") }
     static func load() -> [Experiment] {
         guard let d = try? Data(contentsOf: url), let e = try? JSONDecoder().decode([Experiment].self, from: d) else { return [] }
