@@ -10,6 +10,13 @@ struct ChartViewer: View {
     @State private var typed = ""
     @State private var showSettings = false
     @AppStorage("viewer.showDelivery") private var showDelivery = true
+    @AppStorage("viewer.syncDelivery") private var syncDelivery = true
+    @StateObject private var mini = LWChartHolder()
+    @State private var lastTV: String = ""          // last range read from TradingView
+    @State private var pushedToTVAt = Date.distantPast
+    @State private var syncFails = 0
+    @State private var syncNote: String?
+    private let syncTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     private var symbol: String { vm.chartSymbol ?? "" }
 
@@ -31,7 +38,7 @@ struct ChartViewer: View {
                 if showDelivery && !symbol.isEmpty {
                     VSplitView {
                         ReelWebView(web: web.view).frame(minHeight: 260)
-                        DeliveryMiniChart(symbol: symbol).frame(minHeight: 110, idealHeight: 200)
+                        DeliveryMiniChart(symbol: symbol, lw: mini, syncNote: syncNote).frame(minHeight: 110, idealHeight: 200)
                     }
                 } else {
                     ReelWebView(web: web.view)
@@ -57,7 +64,16 @@ struct ChartViewer: View {
         .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
         .onAppear { load(); vm.refreshChartLinksIfStale() }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
-        .onChange(of: vm.chartSymbol) { _ in load() }
+        .onChange(of: vm.chartSymbol) { _ in load(); lastTV = "" }
+        .onReceive(syncTimer) { _ in pollTVRange() }
+        .onAppear {
+            mini.onUserRange = { from, to in
+                guard UserDefaults.standard.object(forKey: "viewer.syncDelivery") as? Bool ?? true,
+                      let f = TVRange.unix(from), let t = TVRange.unix(to) else { return }
+                pushedToTVAt = Date()
+                web.view.evaluateJavaScript(TVRange.setJS(from: f, to: t + 86_399), completionHandler: nil)
+            }
+        }
         .onChange(of: vm.settings.chartLinkColumn) { _ in load() }
         .sheet(isPresented: $showSettings) { ChartLinkSettings().environmentObject(vm) }
     }
@@ -95,6 +111,12 @@ struct ChartViewer: View {
             Spacer()
             Toggle(isOn: $showDelivery) { Label("Delivery", systemImage: "shippingbox") }
                 .toggleStyle(.button)
+            if showDelivery {
+                Toggle(isOn: $syncDelivery) { Image(systemName: "link") }
+                    .toggleStyle(.button)
+                    .help("Move the TradingView chart and the delivery chart together")
+                    .onChange(of: syncDelivery) { _ in syncFails = 0; syncNote = nil; lastTV = "" }
+            }
                 .help("Show NSE delivery (with its ta.highest line and signal days) under the chart")
             Button { web.view.goBack() } label: { Image(systemName: "arrow.backward") }.help("Back")
             Button { web.view.reload() } label: { Image(systemName: "arrow.clockwise") }.help("Reload")
@@ -153,6 +175,26 @@ struct ChartViewer: View {
         web.signingIn = false
         web.view.stopLoading()
         web.view.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+
+    /// TradingView → delivery chart: follow TradingView's visible dates (and delivery → TradingView via onUserRange).
+    private func pollTVRange() {
+        guard showDelivery, syncDelivery, !symbol.isEmpty, syncFails < 40,
+              Date().timeIntervalSince(pushedToTVAt) > 0.8 else { return }
+        web.view.evaluateJavaScript(TVRange.getJS) { r, _ in
+            guard let s = r as? String else { return }
+            let parts = s.split(separator: ",").compactMap { Int($0) }
+            guard parts.count == 2 else {
+                syncFails += 1
+                if syncFails >= 40 { syncNote = "Sync unavailable: this TradingView page doesn't expose its chart range" }
+                return
+            }
+            syncFails = 0
+            syncNote = "🔗 synced"
+            guard s != lastTV else { return }
+            lastTV = s
+            mini.setRange(from: TVRange.day(parts[0]), to: TVRange.day(parts[1]))
+        }
     }
 
     private func snapshot() {

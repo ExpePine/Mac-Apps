@@ -204,6 +204,35 @@ enum DeliverySignal {
     }
 }
 
+// MARK: - DLVR and Safety (Filter-table columns)
+
+struct DeliveryColumns {
+    let dlvr: Double?        // ₹ Cr of DELIV_QTY×CLOSE on the latest NSE day, only when the 300-day highest updated that day
+    let safety: Double?      // ta.sma(DELIV_QTY, 100) × 0.05 (shares)
+    let day: String          // the stock's latest NSE day
+
+    static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
+    static var onlyRises: Bool { UserDefaults.standard.object(forKey: "deliv.onlyRises") as? Bool ?? true }
+    static var full: Bool { UserDefaults.standard.object(forKey: "deliv.full") as? Bool ?? true }
+
+    /// Same rules as Pine: ta.highest(DELIV_QTY*close, 300) (na until 300 bars) and ta.sma(DELIV_QTY, 100) (na until 100 bars).
+    static func of(_ s: DeliverySeries, latestDay: String) -> DeliveryColumns {
+        let m = s.metric(value: true)
+        let sig = DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises)
+        let n = s.qty.count
+        let dlvr: Double? = (sig.last == n - 1 && s.days.last == latestDay) ? m[n - 1] / 1e7 : nil
+        let safety: Double? = n >= 100 ? s.qty.suffix(100).reduce(0, +) / 100 * 0.05 : nil
+        return DeliveryColumns(dlvr: dlvr, safety: safety, day: s.days.last ?? "")
+    }
+
+    static func all(_ b: DeliveryBook) -> [String: DeliveryColumns] {
+        let latest = b.days.last ?? ""
+        var out: [String: DeliveryColumns] = [:]
+        for (sym, s) in b.series { out[sym] = of(s, latestDay: latest) }
+        return out
+    }
+}
+
 // MARK: - Shared state (download, daily update, the book)
 
 @MainActor final class DeliveryCenter: ObservableObject {
@@ -216,6 +245,10 @@ enum DeliverySignal {
     @Published var status: String?
     @Published private(set) var progress: (done: Int, total: Int) = (0, 0)
     @Published private(set) var revision = 0
+    /// Per symbol, for the Filter / Data tables: DLVR (₹ Cr when ta.highest(DELIV_QTY×CLOSE, 300) updated on the
+    /// latest NSE day, else nil) and Safety (= ta.sma(DELIV_QTY, 100) × 0.05).
+    @Published private(set) var columns: [String: DeliveryColumns] = [:]
+    var onReload: (() -> Void)?
 
     private var task: Task<Void, Never>?
     private var lastAutoCheck = Date.distantPast
@@ -245,10 +278,13 @@ enum DeliverySignal {
         Task {
             let days = DeliveryFiles.days()
             let b = await Task.detached(priority: .userInitiated) { DeliveryBook.build(days: days, load: DeliveryFiles.load) }.value
+            let cols = await Task.detached(priority: .userInitiated) { DeliveryColumns.all(b) }.value
             self.book = b
             self.storedDays = days
+            self.columns = cols
             self.isLoading = false
             self.revision += 1
+            self.onReload?()
         }
     }
 

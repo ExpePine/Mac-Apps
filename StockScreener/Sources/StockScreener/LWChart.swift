@@ -53,16 +53,27 @@ struct LWChartData: Encodable {
     var json: String { (try? String(data: JSONEncoder().encode(self), encoding: .utf8)) ?? "{}" }
 }
 
-final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate {
+final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     let view: WKWebView
     private var ready = false
     private var pending: String?
     @Published var failed = false
+    /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
+    var onUserRange: ((String, String) -> Void)?
+
+    private final class WeakHandler: NSObject, WKScriptMessageHandler {
+        weak var target: WKScriptMessageHandler?
+        init(_ t: WKScriptMessageHandler) { target = t }
+        func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) { target?.userContentController(c, didReceive: m) }
+    }
 
     override init() {
         let cfg = WKWebViewConfiguration()
+        let ucc = WKUserContentController()
+        cfg.userContentController = ucc
         view = WKWebView(frame: .zero, configuration: cfg)
         super.init()
+        ucc.add(WeakHandler(self), name: "range")
         view.navigationDelegate = self
         view.setValue(false, forKey: "drawsBackground")
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
@@ -71,6 +82,17 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate {
     func show(_ data: LWChartData) {
         let js = "window.setData(\(data.json))"
         if ready { view.evaluateJavaScript(js) { [weak self] r, _ in if (r as? String) == "nolib" { self?.failed = true } } } else { pending = js }
+    }
+
+    func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+        guard let a = m.body as? [String], a.count == 2 else { return }
+        onUserRange?(a[0], a[1])
+    }
+
+    /// Shows the days `from`…`to` (moved by the other chart; doesn't echo back).
+    func setRange(from: String, to: String) {
+        guard ready else { return }
+        view.evaluateJavaScript("window.setRange && window.setRange('\(from)','\(to)')", completionHandler: nil)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -111,6 +133,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate {
       candle=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
       hist=chart.addHistogramSeries({priceScaleId:'deliv',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       high=chart.addLineSeries({priceScaleId:'deliv',color:'#2962FF',lineWidth:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
+      chart.timeScale().subscribeVisibleTimeRangeChange(function(r){
+        if(!r || window._quiet) return;
+        clearTimeout(window._rt);
+        window._rt=setTimeout(function(){
+          if(window.webkit && window.webkit.messageHandlers.range) window.webkit.messageHandlers.range.postMessage([day(r.from), day(r.to)]);
+        },120);
+      });
       chart.subscribeCrosshairMove(function(p){
         if(!last) return;
         var c=p&&p.seriesData?p.seriesData.get(candle):null, h=p&&p.seriesData?p.seriesData.get(hist):null, x=p&&p.seriesData?p.seriesData.get(high):null;
@@ -118,6 +147,11 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate {
       });
       return true;
     }
+    function day(t){ if(typeof t==='string') return t; if(typeof t==='number'){ var d=new Date(t*1000); return d.toISOString().slice(0,10); }
+      return t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'); }
+    window.setRange=function(f,t){ if(!chart) return; window._quiet=true;
+      try{ chart.timeScale().setVisibleRange({from:f,to:t}); }catch(e){}
+      clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350); };
     function legend(c,h,x,t){
       var s='<b>'+last.title+'</b> ';
       if(t) s+=(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0')))+' ';
@@ -140,7 +174,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate {
       if(hasCandles) hist.setMarkers([]); else candle.setMarkers([]);
       var n={'6M':126,'1Y':252,'2Y':504}[d.range];
       var len=Math.max(d.candles.length,d.deliv.length);
+      window._quiet=true;
       if(n && len>n) chart.timeScale().setVisibleLogicalRange({from:len-n,to:len+4}); else chart.timeScale().fitContent();
+      clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350);
       legend(d.candles[d.candles.length-1],d.deliv[d.deliv.length-1],d.high[d.high.length-1],null);
       return 'ok';
     };
@@ -198,4 +234,25 @@ enum DeliveryPine {
         """
         return out
     }
+}
+
+
+// MARK: - Keeping the TradingView page and the delivery chart on the same dates
+
+/// Reads / sets the visible date range of the TradingView chart page through the chart API that tradingview.com
+/// exposes in the page (window.TradingViewApi). Not an official, documented interface — it may be missing.
+enum TVRange {
+    static let getJS = """
+    (function(){ try { var a = window.TradingViewApi; if (!a || !a.activeChart) return 'noapi';
+      var r = a.activeChart().getVisibleRange(); return r ? (Math.round(r.from) + ',' + Math.round(r.to)) : 'none'; } catch (e) { return 'err'; } })()
+    """
+    static func setJS(from: Int, to: Int) -> String {
+        "(function(){ try { window.TradingViewApi.activeChart().setVisibleRange({from: \(from), to: \(to)}); return 'ok'; } catch (e) { return 'err'; } })()"
+    }
+
+    private static let f: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+    static func day(_ unix: Int) -> String { f.string(from: Date(timeIntervalSince1970: TimeInterval(unix))) }
+    static func unix(_ day: String) -> Int? { f.date(from: day).map { Int($0.timeIntervalSince1970) } }
 }

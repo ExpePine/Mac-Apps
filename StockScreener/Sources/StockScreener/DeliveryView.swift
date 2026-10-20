@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UniformTypeIdentifiers
 
 /// Delivery Analysis: NSE delivery quantity history per stock (from the daily bhavdata files) and the
 /// Pine-style signal "ta.highest(DELIV_QTY, 300) updated", highlighted on a Yahoo candle chart.
@@ -19,7 +20,9 @@ struct DeliveryView: View {
 
     @State private var search = ""
     @State private var selected: String?
-    @State private var rows: [DelivRow] = []
+    @State private var rows: [DelivRow] = []          // signal in the last N days, in scope
+    @State private var allRows: [DelivRow] = []       // every stock with delivery data (for search)
+    @AppStorage("deliv.pane") private var pane = "Chart"
     @State private var computing = false
     @State private var candles: [YahooClient.Candle] = []
     @State private var chartError: String?
@@ -115,7 +118,7 @@ struct DeliveryView: View {
                 Spacer()
                 Button { copyPine() } label: { Label("Copy Pine Script", systemImage: "doc.on.clipboard") }
                     .help("A TradingView indicator that paints these exact signal days (orange + ▲DQ) on your TradingView charts — for the stocks in the selected scope")
-                TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 130)
+                TextField("Search any NSE stock", text: $search).textFieldStyle(.roundedBorder).frame(width: 170)
             }
             .controlSize(.small)
         }
@@ -145,15 +148,19 @@ struct DeliveryView: View {
 
     // MARK: List
 
+    /// No search: the signal list. Searching: every NSE stock with delivery data (any scope, any date).
     private var shownRows: [DelivRow] {
         let q = search.trimmingCharacters(in: .whitespaces).uppercased()
-        return q.isEmpty ? rows : rows.filter { $0.symbol.contains(q) }
+        guard !q.isEmpty else { return rows }
+        return allRows.filter { $0.symbol.contains(q) }
+            .sorted { ($0.symbol.hasPrefix(q) ? 0 : 1, $0.symbol) < ($1.symbol.hasPrefix(q) ? 0 : 1, $1.symbol) }
     }
 
     private var list: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("\(shownRows.count) stocks with a signal in the last \(within) trading day\(within == 1 ? "" : "s")").font(.caption.bold())
+                Text(search.isEmpty ? "\(shownRows.count) stocks with a signal in the last \(within) trading day\(within == 1 ? "" : "s")"
+                                    : "\(shownRows.count) of \(allRows.count) NSE stocks match “\(search)” (all stocks, any date)").font(.caption.bold())
                 if computing { ProgressView().controlSize(.mini) }
                 Spacer()
             }
@@ -192,14 +199,22 @@ struct DeliveryView: View {
                     if let c = candles.last { Text(String(format: "%.2f", c.close)).font(.headline.monospacedDigit()) }
                     Text("scroll / pinch = zoom · drag = pan · double-click the date axis = reset").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
+                    Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
+                        .pickerStyle(.segmented).labelsHidden().fixedSize()
                     Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
+                        .opacity(pane == "Chart" ? 1 : 0.4)
                     Button("TradingView") { vm.openChart(s, queue: shownRows.map(\.symbol), openWindow: openWindow) }.controlSize(.small)
                 }
+                if let series = dc.book.series[s] { stats(series) }
                 if loadingChart { ProgressView("Yahoo prices…").controlSize(.small) }
                 if let e = chartError { Text("Yahoo: \(e) — showing delivery only").font(.caption).foregroundStyle(.orange) }
-                LWChartView(holder: lw)
-                    .frame(minHeight: 380)
+                if pane == "Data", let series = dc.book.series[s] {
+                    DeliveryDataTable(symbol: s, series: series, useValue: useValue, length: max(2, length), full: full, onlyRises: onlyRises)
+                } else {
+                    LWChartView(holder: lw)
+                        .frame(minHeight: 380)
+                }
                 Text("Orange bands + ▲DQ = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated") · bars at the bottom = \(metricName) · blue = the rolling highest")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
@@ -215,6 +230,26 @@ struct DeliveryView: View {
         .onChange(of: onlyRises) { _ in pushChart() }
         .onChange(of: full) { _ in pushChart() }
         .onChange(of: colorScheme) { _ in pushChart() }
+    }
+
+    /// One-line summary of the stock's delivery pattern.
+    private func stats(_ s: DeliverySeries) -> some View {
+        let c = DeliveryColumns.of(s, latestDay: dc.book.days.last ?? "")
+        let m = s.metric(value: useValue)
+        let h = DeliverySignal.highest(m, length: max(2, length), full: full).last ?? nil
+        let sig = DeliverySignal.signals(m, length: max(2, length), full: full, onlyRises: onlyRises)
+        let p20 = s.per.suffix(20), p100 = s.per.suffix(100)
+        let avg20 = p20.isEmpty ? 0 : p20.reduce(0, +) / Double(p20.count)
+        let avg100 = p100.isEmpty ? 0 : p100.reduce(0, +) / Double(p100.count)
+        return HStack(spacing: 14) {
+            Text("\(s.days.count) days (\(s.days.first ?? "") → \(s.days.last ?? ""))")
+            Text("Deliv % 20d \(String(format: "%.0f", avg20))% · 100d \(String(format: "%.0f", avg100))%")
+            if let h, let last = m.last, h > 0 { Text("today = \(String(format: "%.0f", last / h * 100))% of the \(length)-day high") }
+            Text("\(sig.count) signal\(sig.count == 1 ? "" : "s")").foregroundStyle(.orange)
+            if let sf = c.safety { Text("Safety \(Self.short(sf))") }
+            if let d = c.dlvr { Text("DLVR \(String(format: "%.2f", d)) Cr today").foregroundStyle(.orange).bold() }
+        }
+        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
     }
 
     private func pushChart() {
@@ -300,26 +335,30 @@ struct DeliveryView: View {
         let dayIndex = Dictionary(uniqueKeysWithValues: book.days.enumerated().map { ($1, $0) })
         computing = true
         Task {
-            let out = await Task.detached(priority: .userInitiated) { () -> [DelivRow] in
-                var res: [DelivRow] = []
+            let both = await Task.detached(priority: .userInitiated) { () -> ([DelivRow], [DelivRow]) in
+                var res: [DelivRow] = [], every: [DelivRow] = []
                 for (sym, s) in book.series {
-                    if let allowed, !allowed.contains(sym) { continue }
                     let m = s.metric(value: val)
                     let sig = DeliverySignal.signals(m, length: len, full: fl, onlyRises: rises)
-                    guard let last = sig.last, let di = dayIndex[s.days[last]] else { continue }
-                    let ago = lastIndex - di
-                    guard ago < win else { continue }
-                    let lo = max(0, last - len + 1)
-                    let window = m[lo...last]
+                    let at = sig.last ?? (m.count - 1)
+                    guard at >= 0 else { continue }
+                    let ago = sig.last.flatMap { dayIndex[s.days[$0]] }.map { lastIndex - $0 }
+                    let lo = max(0, at - len + 1)
+                    let window = m[lo...at]
                     let avg = window.reduce(0, +) / Double(window.count)
-                    res.append(DelivRow(symbol: sym, lastSignal: s.days[last], barsAgo: ago, qty: m[last], per: s.per[last],
-                                        xAvg: avg > 0 ? m[last] / avg : nil, signals: sig.count, latestQty: m.last ?? 0))
+                    let r = DelivRow(symbol: sym, lastSignal: sig.last.map { s.days[$0] }, barsAgo: ago, qty: m[at], per: s.per[at],
+                                     xAvg: avg > 0 ? m[at] / avg : nil, signals: sig.count, latestQty: m.last ?? 0)
+                    every.append(r)
+                    if let allowed, !allowed.contains(sym) { continue }
+                    if let ago, ago < win { res.append(r) }
                 }
-                return res.sorted { ($0.barsAgo ?? 999, -($0.xAvg ?? 0)) < ($1.barsAgo ?? 999, -($1.xAvg ?? 0)) }
+                return (res.sorted { ($0.barsAgo ?? 999, -($0.xAvg ?? 0)) < ($1.barsAgo ?? 999, -($1.xAvg ?? 0)) }, every)
             }.value
+            let out = both.0
             rows = out
+            allRows = both.1
             computing = false
-            if selected == nil || !out.contains(where: { $0.symbol == selected }) { selected = out.first?.symbol }
+            if selected == nil || !(out + allRows).contains(where: { $0.symbol == selected }) { selected = out.first?.symbol }
         }
     }
 
@@ -338,8 +377,9 @@ struct DeliveryView: View {
 /// ta.highest line and its signal days — zoom / pan like TradingView.
 struct DeliveryMiniChart: View {
     let symbol: String
+    @ObservedObject var lw: LWChartHolder
+    var syncNote: String? = nil
     @ObservedObject private var dc = DeliveryCenter.shared
-    @StateObject private var lw = LWChartHolder()
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("deliv.length") private var length = 300
     @AppStorage("deliv.useValue") private var useValue = true
@@ -363,6 +403,7 @@ struct DeliveryMiniChart: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if let n = syncNote { Text(n).font(.caption2).foregroundStyle(.secondary) }
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
             }
@@ -382,5 +423,73 @@ struct DeliveryMiniChart: View {
         guard let s = dc.book.series[sym] else { return }
         lw.show(LWChartData.make(symbol: sym, series: s, candles: [], useValue: useValue, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark))
+    }
+}
+
+
+/// Every stored NSE day for one stock, newest first, with the signal and Safety columns — exportable to CSV.
+struct DeliveryDataTable: View {
+    let symbol: String
+    let series: DeliverySeries
+    let useValue: Bool
+    let length: Int
+    let full: Bool
+    let onlyRises: Bool
+
+    struct Row: Identifiable {
+        var id: String { day }
+        let day: String, close: Double, qty: Double, per: Double, value: Double
+        let highest: Double?, signal: Bool, safety: Double?, overSafety: Bool?
+    }
+
+    private var rows: [Row] {
+        let m = series.metric(value: useValue)
+        let h = DeliverySignal.highest(m, length: length, full: full)
+        let sig = Set(DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises))
+        var out: [Row] = []
+        var sum = 0.0
+        for i in series.days.indices {
+            sum += series.qty[i]
+            if i >= 100 { sum -= series.qty[i - 100] }
+            let safety: Double? = i >= 99 ? sum / 100 * 0.05 : nil
+            out.append(Row(day: series.days[i], close: series.close[i], qty: series.qty[i], per: series.per[i],
+                           value: series.qty[i] * series.close[i], highest: h[i], signal: sig.contains(i),
+                           safety: safety, overSafety: safety.map { series.qty[i] > $0 }))
+        }
+        return out.reversed()
+    }
+
+    var body: some View {
+        let r = rows
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("\(r.count) days · \(r.filter(\.signal).count) signal days").font(.caption.bold())
+                Spacer()
+                Button("Export CSV…") { export(r) }.controlSize(.small)
+            }
+            Table(r) {
+                TableColumn("Date") { x in Text(x.day).monospacedDigit().foregroundStyle(x.signal ? Color.orange : Color.primary) }.width(min: 80, ideal: 90)
+                TableColumn("Close") { x in Text(String(format: "%.2f", x.close)).monospacedDigit() }.width(min: 55, ideal: 65)
+                TableColumn("DELIV_QTY") { x in Text(DeliveryView.short(x.qty)).monospacedDigit() }.width(min: 65, ideal: 75)
+                TableColumn("Deliv %") { x in Text(String(format: "%.1f", x.per)).monospacedDigit() }.width(min: 45, ideal: 55)
+                TableColumn("QTY×CLOSE") { x in Text(DeliveryView.short(x.value)).monospacedDigit() }.width(min: 70, ideal: 80)
+                TableColumn("Highest(\(length))") { x in Text(x.highest.map { DeliveryView.short($0) } ?? "—").monospacedDigit().foregroundStyle(.blue) }.width(min: 75, ideal: 85)
+                TableColumn("Signal") { x in Text(x.signal ? "▲ DQ" : "").foregroundStyle(.orange).bold() }.width(min: 40, ideal: 50)
+                TableColumn("Safety") { x in Text(x.safety.map { DeliveryView.short($0) } ?? "—").monospacedDigit() }.width(min: 55, ideal: 65)
+                TableColumn("QTY > Safety") { x in Text(x.overSafety.map { $0 ? "yes" : "no" } ?? "—").foregroundStyle(x.overSafety == false ? Color.red : Color.secondary) }.width(min: 60, ideal: 75)
+            }
+        }
+    }
+
+    private func export(_ r: [Row]) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(symbol)_delivery.csv"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var s = "Date,Close,DELIV_QTY,DELIV_PER,DELIV_QTY*CLOSE,Highest_\(length),Signal,Safety\n"
+        for x in r.reversed() {
+            s += "\(x.day),\(x.close),\(Int(x.qty)),\(x.per),\(Int(x.value)),\(x.highest.map { String(Int($0)) } ?? ""),\(x.signal ? 1 : 0),\(x.safety.map { String(Int($0)) } ?? "")\n"
+        }
+        try? s.write(to: url, atomically: true, encoding: .utf8)
     }
 }

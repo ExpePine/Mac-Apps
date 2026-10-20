@@ -225,6 +225,16 @@ final class ScreenerViewModel: ObservableObject {
     /// for a background app), it wakes every 20 seconds and checks the wall clock.
     func startAutoRefresh() {
         keepAwakeForChecks()
+        // NSE delivery data → DLVR / Safety columns, refreshed whenever new days arrive
+        DeliveryCenter.shared.onReload = { [weak self] in
+            guard let self else { return }
+            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAdded") {
+                UserDefaults.standard.set(true, forKey: "deliv.colsAdded")
+                for n in ["DLVR", "Safety"] where !self.settings.filterColumns.contains(n) { self.settings.filterColumns.append(n) }
+            }
+            self.setTableKeepingRaw()
+        }
+        DeliveryCenter.shared.loadIfNeeded()
         observeWakeAndActivation()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
@@ -366,6 +376,23 @@ final class ScreenerViewModel: ObservableObject {
     /// Rebuilds the table from the last download (e.g. after new NN scores).
     func setTableKeepingRaw() { setTable(rawTable) }
 
+    /// Adds DLVR (₹ Cr on the day ta.highest(DELIV_QTY×CLOSE, 300) updated — the latest NSE day — else blank)
+    /// and Safety (ta.sma(DELIV_QTY, 100) × 0.05) from the stored NSE delivery data.
+    private func withDeliveryColumns(_ t: SheetTable) -> SheetTable {
+        let cols = DeliveryCenter.shared.columns
+        guard !cols.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let dName = t.index(of: "DLVR") == nil ? "DLVR" : "DLVR (NSE)"
+        let sName = t.index(of: "Safety") == nil ? "Safety" : "Safety (NSE)"
+        let rows = t.rows.map { row -> SheetRow in
+            let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
+            let d = c?.dlvr, sf = c?.safety
+            return SheetRow(id: row.id,
+                            cells: row.cells + [d.map { String(format: "%.2f", $0) } ?? "", sf.map { String(format: "%.0f", $0) } ?? ""],
+                            numbers: row.numbers + [d, sf])
+        }
+        return SheetTable(headers: t.headers + [dName, sName], rows: rows, originalHeaders: t.originalHeaders + [dName, sName])
+    }
+
     /// Adds the neural net's NN_score column (0–100) when a model has been trained.
     private func withScores(_ t: SheetTable) -> SheetTable {
         guard !nnScores.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
@@ -388,7 +415,7 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = withScores(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))
+        let newTable = withScores(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases))))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = CellPainter(settings.cellRules, table: newTable)

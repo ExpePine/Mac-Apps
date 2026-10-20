@@ -120,3 +120,19 @@ final class MultibaggerTests: XCTestCase {
         XCTAssertEqual(MultibaggerCenter.monthBefore("2023-01", 2), "2022-11")
     }
 }
+
+final class DeliveryColumnTests: XCTestCase {
+    func testSafetyAndDLVR() {
+        let days = (0..<320).map { String(format: "2025-%03d", $0) }
+        var qty = [Double](repeating: 1000, count: 320)
+        qty[319] = 5000                                    // a new 300-day high of qty×close on the last day
+        let s = DeliverySeries(days: days, qty: qty, per: Array(repeating: 50, count: 320), close: Array(repeating: 100, count: 320))
+        UserDefaults.standard.removeObject(forKey: "deliv.length")
+        let c = DeliveryColumns.of(s, latestDay: days.last!)
+        XCTAssertEqual(c.dlvr ?? 0, 5000 * 100 / 1e7, accuracy: 1e-9)
+        XCTAssertEqual(c.safety ?? 0, (99 * 1000 + 5000) / 100 * 0.05, accuracy: 1e-9)
+        // not the latest NSE day → no DLVR
+        XCTAssertNil(DeliveryColumns.of(s, latestDay: "2099-01-01").dlvr)
+        XCTAssertEqual(TVRange.day(TVRange.unix("2026-07-29")!), "2026-07-29")
+    }
+}
