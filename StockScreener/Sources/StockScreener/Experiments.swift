@@ -243,7 +243,7 @@ enum ExperimentEngine {
         let skip = Set(p.triggers.compactMap { table.index(of: $0.column) })
         for c in table.headers.indices where !skip.contains(c) {
             let v = table.rows.prefix(200).map { $0.text(c) }.filter { !$0.isEmpty }
-            if v.count >= 5, Double(v.filter { day($0) != nil }.count) / Double(v.count) >= 0.8 { return c }
+            if !v.isEmpty, Double(v.filter { day($0) != nil }.count) / Double(v.count) >= 0.8 { return c }
         }
         return nil
     }
@@ -272,7 +272,7 @@ enum ExperimentEngine {
     static func looksLikeCounts(_ table: SheetTable, column c: Int) -> Bool {
         let v = table.rows.prefix(400).map { $0.text(c).replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let n = v.compactMap { Double($0) }
-        guard n.count >= max(3, v.count * 9 / 10), n.allSatisfy({ $0 >= 0 }) else { return false }
+        guard !n.isEmpty, n.count >= v.count * 9 / 10, n.allSatisfy({ $0 >= 0 }) else { return false }
         let whole = n.filter { abs($0 - $0.rounded()) < 0.001 }.count
         return Double(whole) >= Double(n.count) * 0.9 && n.contains { $0 > 1 }
     }
