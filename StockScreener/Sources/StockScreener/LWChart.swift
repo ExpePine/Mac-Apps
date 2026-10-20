@@ -73,13 +73,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     private final class WeakHandler: NSObject, WKScriptMessageHandler {
         weak var target: WKScriptMessageHandler?
         init(_ t: WKScriptMessageHandler) { target = t }
-        private func handle(_ r: Any?, _ e: Error?) {
-        let s = (r as? String) ?? e?.localizedDescription ?? ""
-        failed = s == "nolib"
-        lastError = s.hasPrefix("err:") || e != nil ? "Chart: \(s)" : nil
-    }
-
-    func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) { target?.userContentController(c, didReceive: m) }
+        func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) { target?.userContentController(c, didReceive: m) }
     }
 
     override init() {
@@ -108,6 +102,12 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
         guard let a = m.body as? [String], a.count == 2 else { return }
         onUserRange?(a[0], a[1])
+    }
+
+    private func handle(_ r: Any?, _ e: Error?) {
+        let s = (r as? String) ?? e?.localizedDescription ?? ""
+        failed = s == "nolib"
+        lastError = s.hasPrefix("err:") || e != nil ? "Chart: \(s)" : nil
     }
 
     /// Shows the days `from`…`to` (moved by the other chart; doesn't echo back).
