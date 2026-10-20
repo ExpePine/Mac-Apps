@@ -92,6 +92,32 @@ import Charts
         }
     }
 
+    /// Chat about a command's results.
+    func chat(_ exp: UUID, _ cid: UUID, question: String, model: String, base: PriceBook) {
+        guard let i = index(exp), let cmd = experiments[i].commands.first(where: { $0.id == cid }),
+              let r = results[cid], let t = tables[exp] else { errors[cid] = "Run the command first."; return }
+        guard !model.isEmpty, !GroqClient.apiKey.isEmpty else { errors[cid] = "Chat needs Groq (Daily Gainers → News & AI settings)."; return }
+        update(exp, cid) { $0.chat.append(ExpChat(fromUser: true, text: question)) }
+        let notes = experiments[i].notes
+        var withQ = cmd; withQ.chat.append(ExpChat(fromUser: true, text: question))
+        busy[cid] = "Thinking…"
+        Task {
+            do {
+                switch try await ExperimentChatEngine.ask(question, command: withQ, result: r, notes: notes, table: t, model: model) {
+                case .answer(let a, let table):
+                    update(exp, cid) { $0.chat.append(ExpChat(fromUser: false, text: a, table: table)) }
+                case .newCommand(let c, let why):
+                    update(exp, cid) { $0.chat.append(ExpChat(fromUser: false, text: "That needs a new analysis — running it as a new card: “\(c)”" + (why.isEmpty ? "" : " (\(why))"))) }
+                    busy[cid] = nil
+                    ask(exp, text: c, model: model, base: base)
+                }
+            } catch {
+                update(exp, cid) { $0.chat.append(ExpChat(fromUser: false, text: "⚠️ \(error.localizedDescription)")) }
+            }
+            busy[cid] = nil
+        }
+    }
+
     func summarize(_ exp: UUID, _ cid: UUID, model: String) {
         guard let i = index(exp), let cmd = experiments[i].commands.first(where: { $0.id == cid }), let r = results[cid] else { return }
         guard !model.isEmpty, !GroqClient.apiKey.isEmpty else { errors[cid] = "Groq isn't set up (Daily Gainers → News & AI settings)."; return }
@@ -245,6 +271,8 @@ struct CommandCard: View {
     let onDelete: () -> Void
     @State private var showPlan = false
     @State private var showEntries = false
+    @State private var question = ""
+    @State private var showChat = true
 
     private var table: SheetTable? { ec.tables[exp.id] }
     private var headers: [String] { table?.headers ?? [] }
@@ -393,6 +421,64 @@ struct CommandCard: View {
 
     // MARK: Results
 
+    private static let chatIdeas = [
+        "Which 10 stocks did best after 10 days?",
+        "Which entries lost more than 10%?",
+        "Is it better when var1 = 1?",
+        "Results by sector",
+        "Do earlier triggers (bigger numbers) work better? Split low / mid / high",
+    ]
+
+    private var chatBox: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { showChat.toggle() } label: {
+                Label("Chat with these results" + (cmd.chat.isEmpty ? "" : " (\(cmd.chat.filter(\.fromUser).count))"), systemImage: showChat ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
+                    .font(.callout.bold())
+            }
+            .buttonStyle(.plain)
+            if showChat {
+                ForEach(cmd.chat) { m in
+                    HStack(alignment: .top) {
+                        if m.fromUser { Spacer(minLength: 60) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(m.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            if let t = m.table {
+                                DisclosureGroup("What the app computed") {
+                                    Text(t).font(.caption.monospaced()).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(m.fromUser ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.12)))
+                        if !m.fromUser { Spacer(minLength: 60) }
+                    }
+                }
+                if cmd.chat.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack { ForEach(Self.chatIdeas, id: \.self) { q in Button(q) { question = q }.controlSize(.small) } }
+                    }
+                }
+                HStack {
+                    TextField("Ask about these results — e.g. which stocks did best? is it better when var1 = 1?", text: $question, axis: .vertical)
+                        .textFieldStyle(.roundedBorder).lineLimit(1...3)
+                        .onSubmit(sendQuestion)
+                    Button("Ask", action: sendQuestion).disabled(question.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if !cmd.chat.isEmpty { Button { cmd.chat = [] } label: { Image(systemName: "trash") }.buttonStyle(.borderless).help("Clear this chat") }
+                }
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.3)))
+    }
+
+    private func sendQuestion() {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        ec.chat(exp.id, cmd.id, question: q, model: vm.settings.groqModel, base: vm.priceBook)
+        question = ""
+    }
+
     private func results(_ r: ExpResult) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if !r.headline.isEmpty { Label(r.headline, systemImage: "lightbulb.fill").font(.title3.bold()).foregroundStyle(.green) }
@@ -428,6 +514,7 @@ struct CommandCard: View {
                 Text(cmd.summary).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
             }
+            chatBox
             if showEntries {
                 let hs = cmd.plan.horizons
                 Table(r.entries) {

@@ -285,3 +285,25 @@ final class ExperimentAutoBarsTests: XCTestCase {
         XCTAssertEqual(plan.triggers.map(\.column), ["var2", "var4"])
     }
 }
+
+final class ExperimentChatTests: XCTestCase {
+    func testQueries() {
+        let t = SheetTable(headers: ["Symbol", "Sector"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "IT"], numbers: [nil, nil]), SheetRow(id: 1, cells: ["BBB", "Auto"], numbers: [nil, nil]),
+            SheetRow(id: 2, cells: ["CCC", "IT"], numbers: [nil, nil]),
+        ])
+        var r = ExpResult()
+        func e(_ s: String, _ id: Int, _ ret: Double) -> ExpEntry {
+            ExpEntry(symbol: s, arm: "Trigger", day: "2026-01-05", entry: 100, returns: [ret], best: [ret], worst: [min(0, ret)], trade: nil, daysAfterShortlist: nil, rowID: id)
+        }
+        r.entries = [e("AAA", 0, 12), e("BBB", 1, -4), e("CCC", 2, 3)]
+        var p = ExpPlan(); p.horizons = [10]
+        let top = ExperimentChatEngine.run(ExperimentChatEngine.parseQuery(["kind": "top", "limit": 1], table: t), result: r, plan: p, table: t)
+        XCTAssertTrue(top.contains("AAA"), top)
+        XCTAssertFalse(top.contains("BBB ·"), top)
+        let it = ExperimentChatEngine.run(ExperimentChatEngine.parseQuery(["kind": "stats", "filters": [["column": "sector", "op": "=", "value": "IT"]]], table: t), result: r, plan: p, table: t)
+        XCTAssertTrue(it.contains("n 2") && it.contains("+7.5%"), it)
+        let byGroup = ExperimentChatEngine.run(ExperimentChatEngine.parseQuery(["kind": "stats", "groupBy": "Sector"], table: t), result: r, plan: p, table: t)
+        XCTAssertTrue(byGroup.contains("Auto: n 1"), byGroup)
+    }
+}

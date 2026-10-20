@@ -61,12 +61,28 @@ struct ExpPlan: Codable, Equatable {
     }
 }
 
+struct ExpChat: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var fromUser: Bool
+    var text: String
+    var table: String? = nil       // what the app computed for this answer (shown under it)
+}
+
 struct ExpCommand: Codable, Identifiable, Equatable {
     var id = UUID()
     var text = ""
     var plan = ExpPlan()
     var summary = ""
     var createdAt = Date()
+    var chat: [ExpChat] = []
+
+    init(text: String = "", plan: ExpPlan = ExpPlan(), summary: String = "") { self.text = text; self.plan = plan; self.summary = summary }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func v<T: Decodable>(_ k: CodingKeys, _ x: T) -> T { (try? c.decodeIfPresent(T.self, forKey: k)) ?? x }
+        id = v(.id, UUID()); text = v(.text, ""); plan = v(.plan, ExpPlan()); summary = v(.summary, "")
+        createdAt = v(.createdAt, Date()); chat = v(.chat, [])
+    }
 }
 
 struct Experiment: Codable, Identifiable, Equatable {
@@ -139,6 +155,7 @@ struct ExpEntry: Identifiable {
     let worst: [Double?]
     let trade: Double?             // with target / stop
     let daysAfterShortlist: Int?
+    var rowID: Int = -1            // the sheet row it came from (for questions about other columns)
 }
 
 struct ExpResult {
@@ -458,7 +475,7 @@ enum ExperimentEngine {
                 }
                 let armName = (t?.name ?? "Row date") + (grp[row.id].map { " · " + $0 } ?? "")
                 let after = shortDay.flatMap { sd in s.days.firstIndex(where: { $0 >= sd }) }.map { i - $0 }
-                let en = ExpEntry(symbol: sym, arm: armName, day: s.days[i], entry: price, returns: rets, best: best, worst: worst, trade: trade, daysAfterShortlist: after)
+                let en = ExpEntry(symbol: sym, arm: armName, day: s.days[i], entry: price, returns: rets, best: best, worst: worst, trade: trade, daysAfterShortlist: after, rowID: row.id)
                 byArm[armName, default: []].append(en)
                 byRow[row.id, default: [:]][t?.name ?? "Row date"] = en
                 r.entries.append(en)
@@ -768,5 +785,162 @@ enum ExperimentEngine {
         """
         return try await GroqClient.chat(model: model, system: system,
                                          user: "Column notes: \(notes)\nCommand: \(command)\n\nResults:\n\(r.text)", json: false)
+    }
+}
+
+
+// MARK: - Chat with the results
+//
+// Groq never calculates. It answers either directly from the result tables, or asks the app for a QUERY over the
+// entries (top / bottom stocks, a subset's stats, stats per group of any sheet column); the app computes it and Groq
+// answers from those numbers. It can also propose a new command (a new analysis card).
+
+enum ExperimentChatEngine {
+
+    struct Query {
+        var kind = "stats"                 // stats · top · entries
+        var metric = "return"              // return · best · worst · trade
+        var horizon: Int?                  // trading days (one of the plan's horizons)
+        var order = "desc"
+        var limit = 10
+        var arm = ""                       // entry type ("" = all)
+        var symbol = ""
+        var filters: [ExpFilter] = []      // on sheet columns
+        var minValue: Double?              // metric ≥
+        var maxValue: Double?              // metric ≤
+        var groupBy = ""                   // a sheet column
+        var buckets = 0
+    }
+
+    static func parseQuery(_ j: [String: Any], table: SheetTable) -> Query {
+        var q = Query()
+        func n(_ k: String) -> Double? { (j[k] as? Double) ?? (j[k] as? Int).map(Double.init) ?? (j[k] as? String).flatMap(Double.init) }
+        q.kind = (j["kind"] as? String).flatMap { ["stats", "top", "entries"].contains($0) ? $0 : nil } ?? "stats"
+        q.metric = (j["metric"] as? String).flatMap { ["return", "best", "worst", "trade"].contains($0) ? $0 : nil } ?? "return"
+        q.horizon = n("horizon").map { Int($0) }
+        q.order = (j["order"] as? String) == "asc" ? "asc" : "desc"
+        q.limit = max(1, min(50, Int(n("limit") ?? 10)))
+        q.arm = j["arm"] as? String ?? ""
+        q.symbol = SymbolBook.clean(j["symbol"] as? String ?? "")
+        q.filters = (j["filters"] as? [[String: Any]] ?? []).compactMap { f in
+            guard let c = (f["column"] as? String).flatMap({ ExperimentEngine.resolve($0, in: table) }) else { return nil }
+            return ExpFilter(column: c, op: f["op"] as? String ?? "=", value: f["value"].map { "\($0)" } ?? "")
+        }
+        q.minValue = n("min"); q.maxValue = n("max")
+        q.groupBy = (j["groupBy"] as? String).flatMap { ExperimentEngine.resolve($0, in: table) } ?? ""
+        q.buckets = Int(n("buckets") ?? 0)
+        return q
+    }
+
+    /// Computes a query over the entries; returns a small text table.
+    static func run(_ q: Query, result: ExpResult, plan: ExpPlan, table: SheetTable) -> String {
+        let hs = plan.horizons.filter { $0 > 0 }
+        guard !hs.isEmpty else { return "No horizons in the plan." }
+        let k = q.horizon.flatMap { h in hs.firstIndex(of: h) ?? hs.enumerated().min { abs($0.element - h) < abs($1.element - h) }?.offset } ?? hs.count / 2
+        let h = hs[k]
+        let rowsByID = Dictionary(table.rows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let filters = q.filters.compactMap { f in table.index(of: f.column).map { ($0, f) } }
+        func value(_ e: ExpEntry) -> Double? {
+            switch q.metric {
+            case "best": return e.best[k]
+            case "worst": return e.worst[k]
+            case "trade": return e.trade
+            default: return e.returns[k]
+            }
+        }
+        var es = result.entries.filter { e in
+            (q.arm.isEmpty || e.arm.localizedCaseInsensitiveContains(q.arm)) && (q.symbol.isEmpty || e.symbol == q.symbol)
+                && filters.allSatisfy { f in rowsByID[e.rowID].map { ExperimentEngine.passes($0, f.0, f.1) } ?? false }
+        }
+        es = es.filter { e in
+            guard let v = value(e) else { return false }
+            return (q.minValue.map { v >= $0 } ?? true) && (q.maxValue.map { v <= $0 } ?? true)
+        }
+        let label = q.metric == "return" ? "\(h)d return" : (q.metric == "trade" ? "trade result" : "\(q.metric) within \(h)d")
+        var desc = "Entries: \(es.count)" + (q.arm.isEmpty ? "" : " · type \(q.arm)") + (q.symbol.isEmpty ? "" : " · \(q.symbol)")
+            + (q.filters.isEmpty ? "" : " · " + q.filters.map { "\($0.column) \($0.op) \($0.value)" }.joined(separator: ", "))
+            + (q.minValue.map { " · \(label) ≥ \($0)" } ?? "") + (q.maxValue.map { " · \(label) ≤ \($0)" } ?? "")
+        func stats(_ v: [Double]) -> String {
+            guard !v.isEmpty else { return "n 0" }
+            let m = ExperimentEngine.mean(v)!, md = ExperimentEngine.median(v)!
+            let win = Double(v.filter { $0 > 0 }.count) / Double(v.count) * 100
+            return "n \(v.count) · mean \(ExperimentEngine.pct(m)) · median \(ExperimentEngine.pct(md)) · win \(Int(win.rounded()))% · min \(ExperimentEngine.pct(v.min())) · max \(ExperimentEngine.pct(v.max()))"
+        }
+        switch q.kind {
+        case "top", "entries":
+            let sorted = es.sorted { (value($0) ?? 0) > (value($1) ?? 0) }
+            let pick = q.order == "asc" ? Array(sorted.reversed().prefix(q.limit)) : Array(sorted.prefix(q.limit))
+            desc += "\n" + (q.order == "asc" ? "Lowest" : "Highest") + " \(label):\n"
+            for e in pick {
+                desc += "\(e.symbol) · \(e.arm) · entry \(e.day) at \(String(format: "%.2f", e.entry)) · \(label) \(ExperimentEngine.pct(value(e)))"
+                    + (e.daysAfterShortlist.map { " · \($0)d after shortlist" } ?? "") + "\n"
+            }
+            desc += "All of them: " + stats(es.compactMap(value))
+        default:
+            if !q.groupBy.isEmpty, let g = table.index(of: q.groupBy) {
+                var groups: [String: [Double]] = [:]
+                if q.buckets >= 2 {
+                    let vals = es.compactMap { rowsByID[$0.rowID]?.number(g) }.sorted()
+                    if vals.count >= 3 {
+                        let q1 = vals[vals.count / 3], q2 = vals[vals.count * 2 / 3]
+                        for e in es { if let x = rowsByID[e.rowID]?.number(g), let v = value(e) { groups[x <= q1 ? "Low ≤\(ExperimentEngine.f(q1, 2))" : (x <= q2 ? "Mid" : "High >\(ExperimentEngine.f(q2, 2))"), default: []].append(v) } }
+                    }
+                } else {
+                    for e in es { if let v = value(e) { let t = rowsByID[e.rowID]?.text(g).trimmingCharacters(in: .whitespaces) ?? ""; groups[t.isEmpty ? "(blank)" : t, default: []].append(v) } }
+                }
+                desc += "\n\(label) by \(q.groupBy):\n"
+                for (name, v) in groups.sorted(by: { (ExperimentEngine.mean($0.value) ?? 0) > (ExperimentEngine.mean($1.value) ?? 0) }).prefix(25) {
+                    desc += "\(name): " + stats(v) + "\n"
+                }
+            } else {
+                desc += "\n\(label): " + stats(es.compactMap(value))
+            }
+        }
+        return desc
+    }
+
+    enum Reply { case answer(String, table: String?), newCommand(String, why: String) }
+
+    static func ask(_ question: String, command: ExpCommand, result: ExpResult, notes: String, table: SheetTable, model: String) async throws -> Reply {
+        let cols = table.headers.enumerated().map { "\(ExperimentEngine.columnLetter($0)) = \($1)" }.joined(separator: ", ")
+        let history = command.chat.suffix(8).map { ($0.fromUser ? "User: " : "Assistant: ") + $0.text }.joined(separator: "\n")
+        let arms = Array(Set(result.entries.map(\.arm))).sorted().joined(separator: ", ")
+        let system = """
+        You help a trader explore the results of an analysis of their stock sheet. You NEVER invent or estimate numbers. \
+        Reply as JSON in ONE of these forms:
+        1) {"answer": "..."} — only if the RESULTS text already contains the numbers needed.
+        2) {"query": {...}} — to have the app compute from every entry: {"kind": "stats" | "top" | "entries", \
+        "metric": "return" | "best" | "worst" | "trade", "horizon": one of the plan's horizons, "order": "desc" | "asc", "limit": n, \
+        "arm": entry type name or "", "symbol": "" or a stock, "filters": [{"column": sheet header, "op": "="|"≠"|">"|"≥"|"<"|"≤"|"contains"|"nonempty"|"empty", "value": ...}], \
+        "min": metric ≥ x or null, "max": metric ≤ x or null, "groupBy": sheet header or "", "buckets": 0 or 3}. \
+        "top" lists the best (or worst with order asc) entries; "stats" gives n / mean / median / win%, optionally per group.
+        3) {"command": "...", "why": "..."} — when the question needs a different analysis (other trigger columns, \
+        days between two dates, a relation…); write it as a short plain-English command.
+        """
+        let base = """
+        Sheet columns: \(cols)
+        Column notes: \(notes)
+        Analysis command: \(command.text)
+        Plan horizons: \(command.plan.horizons.map(String.init).joined(separator: ", ")) trading days · entry types: \(arms)
+        RESULTS:
+        \(result.text)
+        Conversation so far:
+        \(history)
+        """
+        let first = try await GroqClient.chat(model: model, system: system, user: base + "\nQuestion: " + question, json: true)
+        guard let d = first.data(using: .utf8), let j = try JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+            return .answer(first, table: nil)
+        }
+        if let c = j["command"] as? String, !c.isEmpty { return .newCommand(c, why: j["why"] as? String ?? "") }
+        if let qj = j["query"] as? [String: Any] {
+            let q = parseQuery(qj, table: table)
+            let computed = run(q, result: result, plan: command.plan, table: table)
+            let answer = try await GroqClient.chat(model: model, system: """
+                You answer a trader's question using ONLY the computed numbers given (never invent any). Be short and direct: \
+                the answer first, then 1–3 bullets with the key numbers, and a caution when n < 30.
+                """, user: "Question: \(question)\n\nComputed by the app:\n\(computed)", json: false)
+            return .answer(answer, table: computed)
+        }
+        return .answer(j["answer"] as? String ?? first, table: nil)
     }
 }
