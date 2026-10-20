@@ -24,6 +24,8 @@ struct DeliveryView: View {
     @State private var candles: [YahooClient.Candle] = []
     @State private var chartError: String?
     @State private var loadingChart = false
+    @StateObject private var lw = LWChartHolder()
+    @Environment(\.colorScheme) private var colorScheme
 
     struct DelivRow: Identifiable {
         var id: String { symbol }
@@ -52,14 +54,14 @@ struct DeliveryView: View {
         }
         .navigationTitle("Delivery Analysis")
         .onAppear { dc.loadIfNeeded(); recompute() }
-        .onChange(of: dc.revision) { _ in recompute() }
+        .onChange(of: dc.revision) { _ in recompute(); pushChart() }
         .onChange(of: length) { _ in recompute() }
         .onChange(of: onlyRises) { _ in recompute() }
         .onChange(of: full) { _ in recompute() }
         .onChange(of: useValue) { _ in recompute() }
         .onChange(of: within) { _ in recompute() }
         .onChange(of: scope) { _ in recompute() }
-        .onChange(of: selected) { s in loadCandles(s) }
+        .onChange(of: selected) { s in loadCandles(s); pushChart() }
     }
 
     // MARK: Header
@@ -111,6 +113,8 @@ struct DeliveryView: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer()
+                Button { copyPine() } label: { Label("Copy Pine Script", systemImage: "doc.on.clipboard") }
+                    .help("A TradingView indicator that paints these exact signal days (orange + ▲DQ) on your TradingView charts — for the stocks in the selected scope")
                 TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 130)
             }
             .controlSize(.small)
@@ -182,58 +186,62 @@ struct DeliveryView: View {
 
     private var chartArea: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let s = selected, let series = dc.book.series[s] {
-                let pts = points(series)
-                let shown = visible(pts)
-                let from = shown.first?.date ?? .distantPast
-                let cs = candles.filter { $0.date >= from }
-                let sigDates = shown.filter(\.signal).map(\.date)
+            if let s = selected, dc.book.series[s] != nil {
                 HStack {
                     Text(s).font(.title3.bold())
-                    if let c = cs.last { Text(String(format: "%.2f", c.close)).font(.headline.monospacedDigit()) }
-                    Text("\(sigDates.count) signal\(sigDates.count == 1 ? "" : "s") in view").font(.caption).foregroundStyle(.orange)
+                    if let c = candles.last { Text(String(format: "%.2f", c.close)).font(.headline.monospacedDigit()) }
+                    Text("scroll / pinch = zoom · drag = pan · double-click the date axis = reset").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                     Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                     Button("TradingView") { vm.openChart(s, queue: shownRows.map(\.symbol), openWindow: openWindow) }.controlSize(.small)
                 }
                 if loadingChart { ProgressView("Yahoo prices…").controlSize(.small) }
-                if let e = chartError { Text("Yahoo: \(e)").font(.caption).foregroundStyle(.orange) }
-                Chart {
-                    ForEach(sigDates, id: \.self) { d in
-                        RuleMark(x: .value("Day", d, unit: .day)).foregroundStyle(Color.orange.opacity(0.28)).lineStyle(StrokeStyle(lineWidth: 5))
-                    }
-                    ForEach(cs) { c in
-                        RuleMark(x: .value("Day", c.date, unit: .day), yStart: .value("Low", c.low), yEnd: .value("High", c.high))
-                            .foregroundStyle(c.close >= c.open ? Color.green : Color.red).lineStyle(StrokeStyle(lineWidth: 1))
-                        BarMark(x: .value("Day", c.date, unit: .day), yStart: .value("Open", c.open), yEnd: .value("Close", c.close == c.open ? c.open * 1.0005 : c.close), width: .fixed(3))
-                            .foregroundStyle(c.close >= c.open ? Color.green : Color.red)
-                    }
-                }
-                .chartYScale(domain: priceDomain(cs))
-                .chartXScale(domain: from...(Date().addingTimeInterval(86_400)))
-                .frame(minHeight: 260)
-                Text("\(metricName) — orange = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated"); blue line = the rolling highest")
+                if let e = chartError { Text("Yahoo: \(e) — showing delivery only").font(.caption).foregroundStyle(.orange) }
+                LWChartView(holder: lw)
+                    .frame(minHeight: 380)
+                Text("Orange bands + ▲DQ = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated") · bars at the bottom = \(metricName) · blue = the rolling highest")
                     .font(.caption).foregroundStyle(.secondary)
-                Chart {
-                    ForEach(shown) { p in
-                        BarMark(x: .value("Day", p.date, unit: .day), y: .value("Delivery", p.qty))
-                            .foregroundStyle(p.signal ? Color.orange : Color.gray.opacity(0.55))
-                    }
-                    ForEach(shown.filter { $0.high != nil }) { p in
-                        LineMark(x: .value("Day", p.date, unit: .day), y: .value("Highest", p.high ?? 0))
-                            .interpolationMethod(.stepEnd).foregroundStyle(Color.blue.opacity(0.7)).lineStyle(StrokeStyle(lineWidth: 1))
-                    }
-                }
-                .chartXScale(domain: from...(Date().addingTimeInterval(86_400)))
-                .chartYAxis { AxisMarks { v in AxisGridLine(); AxisValueLabel { if let d = v.as(Double.self) { Text(Self.short(d)) } } } }
-                .frame(minHeight: 150, maxHeight: 220)
             } else {
                 Text("Select a stock to see its candles with delivery highs marked.").foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .padding(10)
+        .onChange(of: candles.count) { _ in pushChart() }
+        .onChange(of: range) { _ in pushChart() }
+        .onChange(of: useValue) { _ in pushChart() }
+        .onChange(of: length) { _ in pushChart() }
+        .onChange(of: onlyRises) { _ in pushChart() }
+        .onChange(of: full) { _ in pushChart() }
+        .onChange(of: colorScheme) { _ in pushChart() }
+    }
+
+    private func pushChart() {
+        guard let s = selected else { return }
+        lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, useValue: useValue, length: max(2, length),
+                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark))
+    }
+
+    /// Pine Script that paints the same signal days on your TradingView charts (for the stocks in scope).
+    private func copyPine() {
+        let book = dc.book
+        let len = max(2, length)
+        var allowed: Set<String>? = nil
+        if let label = vm.labelIndex, scope != "All NSE" {
+            let rows = scope == "My Filter" ? vm.filterRows : vm.table.rows
+            allowed = Set(rows.map { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() })
+        }
+        var sigs: [(symbol: String, days: [String])] = []
+        for (sym, s) in book.series {
+            if let allowed, !allowed.contains(sym) { continue }
+            let idx = DeliverySignal.signals(s.metric(value: useValue), length: len, full: full, onlyRises: onlyRises)
+            if !idx.isEmpty { sigs.append((sym, idx.map { s.days[$0] })) }
+        }
+        let script = DeliveryPine.script(signals: sigs, metric: useValue ? "DELIV_QTY*CLOSE_PRICE" : "DELIV_QTY", length: len)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(script, forType: .string)
+        dc.status = "Pine Script copied: \(sigs.count) stocks, \(sigs.reduce(0) { $0 + $1.days.count }) signal days (\(script.count / 1024) KB). In TradingView: Pine Editor → paste → Add to chart (on both layouts)."
     }
 
     private func points(_ s: DeliverySeries) -> [DelivPoint] {
@@ -322,5 +330,57 @@ struct DeliveryView: View {
         case 1e3...: return String(format: "%.1f K", v / 1e3)
         default: return String(format: "%.0f", v)
         }
+    }
+}
+
+
+/// Delivery panel under the TradingView chart in the Chart viewer: the stock's delivery bars, the rolling
+/// ta.highest line and its signal days — zoom / pan like TradingView.
+struct DeliveryMiniChart: View {
+    let symbol: String
+    @ObservedObject private var dc = DeliveryCenter.shared
+    @StateObject private var lw = LWChartHolder()
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("deliv.length") private var length = 300
+    @AppStorage("deliv.useValue") private var useValue = true
+    @AppStorage("deliv.onlyRises") private var onlyRises = true
+    @AppStorage("deliv.full") private var full = true
+    @AppStorage("viewer.delivRange") private var range = "1Y"
+
+    var body: some View {
+        let s = dc.book.series[symbol.uppercased()]
+        let sig = s.map { DeliverySignal.signals($0.metric(value: useValue), length: max(2, length), full: full, onlyRises: onlyRises) } ?? []
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Delivery").font(.caption.bold())
+                Text(useValue ? "DELIV_QTY × CLOSE" : "DELIV_QTY").font(.caption.monospaced()).foregroundStyle(.secondary)
+                if let s, let last = sig.last {
+                    let ago = dc.book.days.count - 1 - (dc.book.days.firstIndex(of: s.days[last]) ?? dc.book.days.count - 1)
+                    Text("last \(length)-day high: \(s.days[last]) (\(ago == 0 ? "today" : "\(ago)d ago")) · \(sig.count) in history")
+                        .font(.caption).foregroundStyle(.orange)
+                } else if s == nil {
+                    Text(dc.storedDays.isEmpty ? "No NSE delivery data yet — open Delivery Analysis (⌥⌘D) to download it." : "No NSE delivery data for \(symbol).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            if s != nil { LWChartView(holder: lw) }
+        }
+        .onAppear { dc.loadIfNeeded(); push() }
+        .onChange(of: symbol) { _ in push() }
+        .onChange(of: dc.revision) { _ in push() }
+        .onChange(of: range) { _ in push() }
+        .onChange(of: useValue) { _ in push() }
+        .onChange(of: colorScheme) { _ in push() }
+    }
+
+    private func push() {
+        let sym = symbol.uppercased()
+        guard let s = dc.book.series[sym] else { return }
+        lw.show(LWChartData.make(symbol: sym, series: s, candles: [], useValue: useValue, length: max(2, length),
+                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark))
     }
 }

@@ -9,6 +9,7 @@ struct ChartViewer: View {
     @StateObject private var web = WebHolder()
     @State private var typed = ""
     @State private var showSettings = false
+    @AppStorage("viewer.showDelivery") private var showDelivery = true
 
     private var symbol: String { vm.chartSymbol ?? "" }
 
@@ -27,7 +28,14 @@ struct ChartViewer: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ReelWebView(web: web.view)
+                if showDelivery && !symbol.isEmpty {
+                    VSplitView {
+                        ReelWebView(web: web.view).frame(minHeight: 260)
+                        DeliveryMiniChart(symbol: symbol).frame(minHeight: 110, idealHeight: 200)
+                    }
+                } else {
+                    ReelWebView(web: web.view)
+                }
                 if let s = vm.chartStatus {
                     Divider()
                     HStack {
@@ -85,6 +93,9 @@ struct ChartViewer: View {
                     .frame(width: 0, height: 0).opacity(0)
             }
             Spacer()
+            Toggle(isOn: $showDelivery) { Label("Delivery", systemImage: "shippingbox") }
+                .toggleStyle(.button)
+                .help("Show NSE delivery (with its ta.highest line and signal days) under the chart")
             Button { web.view.goBack() } label: { Image(systemName: "arrow.backward") }.help("Back")
             Button { web.view.reload() } label: { Image(systemName: "arrow.clockwise") }.help("Reload")
             Button { snapshot() } label: { Label("Save snapshot", systemImage: "camera") }
