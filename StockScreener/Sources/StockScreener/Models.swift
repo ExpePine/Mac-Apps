@@ -235,6 +235,8 @@ struct AppSettings: Codable {
     var changeHideEmpty = false
     var changeWatchColumns: [String] = []       // "By stock": the columns whose changes matter to you ([] = Filter columns)
     var changeStockScope = "Filter list"        // "Filter list" / "All stocks" / "Watchlists"
+    var changeConditions: [ChangeCondition] = []   // "By stock": only stocks that moved this way (e.g. MS > 99 became true)
+    var changeConditionsAll = false             // false = any condition, true = all of them
     var changeByStock = true                    // Changes window: one card per stock (else one card per rule)
     // Performance pane
     var perfStudies: [PerfStudy] = [PerfStudy()]
@@ -318,6 +320,8 @@ struct AppSettings: Codable {
         changeWatchColumns = v(.changeWatchColumns, d.changeWatchColumns)
         changeStockScope = v(.changeStockScope, d.changeStockScope)
         changeByStock = v(.changeByStock, d.changeByStock)
+        changeConditions = v(.changeConditions, d.changeConditions)
+        changeConditionsAll = v(.changeConditionsAll, d.changeConditionsAll)
         perfStudies     = v(.perfStudies, d.perfStudies)
         perfSheetLink   = v(.perfSheetLink, d.perfSheetLink)
         perfSymbolColumn = v(.perfSymbolColumn, d.perfSymbolColumn)
@@ -637,4 +641,15 @@ struct ColumnQuickFilter: Codable, Equatable {
         if !q.isEmpty && text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) == nil { return false }
         return true
     }
+}
+
+
+/// A "moved this way" condition for the Changes screen, e.g. MS > 99 that became true since the compared day.
+struct ChangeCondition: Codable, Equatable, Identifiable, Hashable {
+    var id = UUID()
+    var column = ""
+    var op: RuleOperator = .greaterThan
+    var value = ""
+    var became = true          // true = wasn't true on the compared day, is now · false = is true now
+    var label: String { "\(column) \(op.rawValue) \(value)" + (became ? " ↑" : "") }
 }

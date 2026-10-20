@@ -52,6 +52,7 @@ struct ChangesView: View {
         .onChange(of: vm.settings.changeCards) { _ in vm.computeChanges() }
         .onChange(of: vm.settings.changeWatchColumns) { _ in vm.computeChanges() }
         .onChange(of: vm.settings.changeStockScope) { _ in vm.computeChanges() }
+        .onChange(of: vm.settings.changeConditions) { _ in vm.computeChanges() }
         .onChange(of: vm.changeCompareDay) { _ in vm.computeChanges() }
         .sheet(isPresented: $showEditor) { ChangeCardsEditor().environmentObject(vm) }
         .sheet(item: $expanded) { card in
@@ -378,12 +379,47 @@ struct StockChangesView: View {
     @State private var search = ""
     @State private var onlyColumn = ""            // "" = any column
     @State private var alertFor: StockChange?
+    @State private var addingCondition = false
 
     private var shown: [StockChange] {
         let q = search.trimmingCharacters(in: .whitespaces).uppercased()
+        let conds = vm.settings.changeConditions
+        let all = vm.settings.changeConditionsAll
         return vm.stockChanges.filter { c in
-            (q.isEmpty || c.symbol.contains(q)) && (onlyColumn.isEmpty || c.fields.contains { $0.column == onlyColumn })
+            guard q.isEmpty || c.symbol.contains(q), onlyColumn.isEmpty || c.fields.contains(where: { $0.column == onlyColumn }) else { return false }
+            guard !conds.isEmpty else { return true }
+            let met = vm.stockChangeMatches[c.symbol] ?? []
+            return all ? met.count == conds.filter { vm.table.index(of: $0.column) != nil }.count : !met.isEmpty
         }
+    }
+
+    private var conditionsBar: some View {
+        HStack(spacing: 6) {
+            Text("Moved:").font(.caption.bold())
+            ForEach(vm.settings.changeConditions) { c in
+                HStack(spacing: 3) {
+                    Text(c.label).font(.caption.monospacedDigit())
+                        .help(c.became ? "\(c.column) \(c.op.rawValue) \(c.value) now, but not on the compared day" : "\(c.column) \(c.op.rawValue) \(c.value) now")
+                    Button { vm.settings.changeConditions.removeAll { $0.id == c.id } } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                .foregroundStyle(vm.table.index(of: c.column) == nil ? Color.red : Color.primary)
+            }
+            Button { addingCondition = true } label: { Label("Condition", systemImage: "plus.circle") }
+                .buttonStyle(.borderless).font(.caption)
+                .popover(isPresented: $addingCondition, arrowEdge: .bottom) { ChangeConditionEditor().environmentObject(vm) }
+            if vm.settings.changeConditions.count > 1 {
+                Picker("", selection: $vm.settings.changeConditionsAll) { Text("any").tag(false); Text("all").tag(true) }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
+            }
+            if !vm.settings.changeConditions.isEmpty {
+                Button("Clear") { vm.settings.changeConditions = [] }.buttonStyle(.borderless).font(.caption)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14).padding(.bottom, 6)
     }
 
     var body: some View {
@@ -411,6 +447,7 @@ struct StockChangesView: View {
             }
             .controlSize(.small)
             .padding(.horizontal, 14).padding(.vertical, 8)
+            conditionsBar
             if !vm.manualAlerts.isEmpty { ManualAlertsStrip().environmentObject(vm) }
             Divider()
             ScrollView {
@@ -419,7 +456,8 @@ struct StockChangesView: View {
                 }
                 .padding(14)
                 if shown.isEmpty {
-                    Text(vm.stockChanges.isEmpty ? "No stock changed in the columns you picked." : "Nothing matches the search.")
+                    Text(vm.stockChanges.isEmpty ? "No stock changed in the columns you picked."
+                         : (vm.settings.changeConditions.isEmpty ? "Nothing matches the search." : "No stock moved that way since the compared day."))
                         .foregroundStyle(.secondary).padding(30)
                 }
             }
@@ -444,6 +482,9 @@ struct StockChangesView: View {
                 }
                 .buttonStyle(.borderless)
                 .help(alerts.isEmpty ? "Set a manual alert, e.g. \(vm.closeColumnName) > value" : alerts.map(\.name).joined(separator: "\n"))
+            }
+            if let met = vm.stockChangeMatches[c.symbol], !vm.settings.changeConditions.isEmpty {
+                Text("✓ " + met.joined(separator: " · ")).font(.caption.bold()).foregroundStyle(.green).lineLimit(2)
             }
             Divider()
             ForEach(c.fields) { f in
@@ -582,5 +623,60 @@ struct ManualAlertSheet: View {
             column = vm.closeColumnName
             if let i = vm.table.index(of: column) { value = row.text(i) }
         }
+    }
+}
+
+
+/// Add a "moved this way" condition: column, operator, value, and whether it must have just become true.
+struct ChangeConditionEditor: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var c = ChangeCondition()
+    @State private var q = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Show stocks that moved like this").font(.headline)
+            HStack {
+                Picker("", selection: $c.column) {
+                    Text("Column…").tag("")
+                    ForEach(vm.headers, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().frame(width: 170)
+                Picker("", selection: $c.op) {
+                    ForEach([RuleOperator.greaterThan, .greaterOrEqual, .equals, .notEquals, .lessThan, .lessOrEqual], id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                TextField("value", text: $c.value).frame(width: 80).textFieldStyle(.roundedBorder)
+            }
+            Picker("", selection: $c.became) {
+                Text("became true since the compared day (moved into it)").tag(true)
+                Text("is true now (whether new or not)").tag(false)
+            }
+            .pickerStyle(.radioGroup).labelsHidden()
+            HStack(spacing: 6) {
+                Text("Quick:").font(.caption)
+                ForEach(quick, id: \.0) { q in
+                    Button(q.0) { c.column = q.1; c.op = q.2; c.value = q.3 }.controlSize(.small)
+                        .disabled(vm.table.index(of: q.1) == nil)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Add") { vm.settings.changeConditions.append(c); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(c.column.isEmpty || c.value.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(14)
+        .frame(width: 430)
+    }
+
+    private var quick: [(String, String, RuleOperator, String)] {
+        func col(_ n: String) -> String { vm.table.index(of: n).map { vm.headers[$0] } ?? n }
+        return [("MS > 99", col("MS"), .greaterThan, "99"), ("DS > 99", col("DS"), .greaterThan, "99"),
+                ("Count = 5", col("Count"), .equals, "5"), ("LongGreen = 1", col("Long_Green"), .equals, "1")]
+            .map { ($0.0, vm.table.index(of: $0.1) == nil && $0.1 == "Long_Green" ? col("LongGreen") : $0.1, $0.2, $0.3) }
     }
 }

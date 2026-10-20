@@ -99,6 +99,7 @@ final class ScreenerViewModel: ObservableObject {
     // Changes screen
     @Published var changeResults: [UUID: ChangeResult] = [:]
     @Published var stockChanges: [StockChange] = []
+    @Published var stockChangeMatches: [String: [String]] = [:]     // symbol → conditions it met
     @Published var changeCompareDay: String?          // nil = the previous stored day
     @Published var changeComparedDay: String?         // the day actually used
     @Published var changeStatus: String?

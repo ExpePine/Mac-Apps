@@ -229,3 +229,13 @@ final class ExperimentTests: XCTestCase {
         XCTAssertEqual(ExperimentEngine.columnLetter(27), "AB")
     }
 }
+
+final class ChangeConditionTests: XCTestCase {
+    func testMissingColumnsInOldSnapshotAreNotChanges() {
+        let prev = SheetTable(headers: ["Symbol", "MS", "DLVR"], rows: [SheetRow(id: 0, cells: ["AAA", "50", ""], numbers: [nil, 50, nil])])
+        let now = SheetTable(headers: ["Symbol", "MS", "DLVR"], rows: [SheetRow(id: 0, cells: ["AAA", "50", "0"], numbers: [nil, 50, 0])])
+        XCTAssertTrue(ChangeEngine.byStock(current: now, previous: prev, label: 0, columns: [1, 2], scope: nil, filterNow: [], filterBefore: []).isEmpty)
+        // a stock that met a condition is kept even with no column change
+        XCTAssertEqual(ChangeEngine.byStock(current: now, previous: prev, label: 0, columns: [1, 2], scope: nil, filterNow: [], filterBefore: [], include: ["AAA"]).count, 1)
+    }
+}

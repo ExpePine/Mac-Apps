@@ -213,10 +213,13 @@ struct StockChange: Identifiable {
 extension ChangeEngine {
     /// For each stock in `scope` (nil = all): which of `columns` changed between `previous` and `current`.
     static func byStock(current: SheetTable, previous: SheetTable, label: Int, columns: [Int],
-                        scope: Set<String>?, filterNow: Set<String>, filterBefore: Set<String>) -> [StockChange] {
+                        scope: Set<String>?, filterNow: Set<String>, filterBefore: Set<String>, include: Set<String> = []) -> [StockChange] {
         func key(_ r: SheetRow) -> String { r.text(label).trimmingCharacters(in: .whitespaces).uppercased() }
         var before: [String: SheetRow] = [:]
         for r in previous.rows { let k = key(r); if !k.isEmpty, before[k] == nil { before[k] = r } }
+        // Columns the compared day didn't have at all (added later, e.g. computed columns) aren't "changes"
+        let missingBefore = Set(columns.filter { c in !previous.rows.contains { !$0.text(c).trimmingCharacters(in: .whitespaces).isEmpty } })
+        let columns = columns.filter { !missingBefore.contains($0) }
         var out: [StockChange] = []
         var seen = Set<String>()
         for r in current.rows {
@@ -235,7 +238,7 @@ extension ChangeEngine {
             }
             let entered = filterNow.contains(k) && !filterBefore.contains(k)
             let left = !filterNow.contains(k) && filterBefore.contains(k)
-            if !fields.isEmpty || entered || left {
+            if !fields.isEmpty || entered || left || include.contains(k) {
                 out.append(StockChange(symbol: k, row: r, fields: fields, entered: entered, left: left))
             }
         }
