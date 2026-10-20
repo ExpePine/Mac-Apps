@@ -209,7 +209,8 @@ final class ExperimentTests: XCTestCase {
         XCTAssertEqual(r.shortlisted, 2)
         XCTAssertEqual(r.stats.first { $0.name == "TrigB" }?.triggered, 2)
         XCTAssertEqual(r.stats.first { $0.name == "TrigC" }?.triggered, 1)
-        XCTAssertEqual(r.entries.first { $0.symbol == "AAA" && $0.trigger == "TrigB" }?.returns.first ?? nil ?? 0, 5, accuracy: 1e-9)
+        let ret: Double = (r.entries.first { $0.symbol == "AAA" && $0.trigger == "TrigB" }?.returns.first ?? nil) ?? 0
+        XCTAssertEqual(ret, 5, accuracy: 1e-9)
         XCTAssertEqual(ExperimentEngine.columnLetter(0), "A")
         XCTAssertEqual(ExperimentEngine.columnLetter(27), "AB")
     }
