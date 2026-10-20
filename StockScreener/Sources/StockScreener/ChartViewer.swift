@@ -111,13 +111,13 @@ struct ChartViewer: View {
             Spacer()
             Toggle(isOn: $showDelivery) { Label("Delivery", systemImage: "shippingbox") }
                 .toggleStyle(.button)
+                .help("Show NSE delivery (with its ta.highest line and signal days) under the chart")
             if showDelivery {
                 Toggle(isOn: $syncDelivery) { Image(systemName: "link") }
                     .toggleStyle(.button)
                     .help("Move the TradingView chart and the delivery chart together")
                     .onChange(of: syncDelivery) { _ in syncFails = 0; syncNote = nil; lastTV = "" }
             }
-                .help("Show NSE delivery (with its ta.highest line and signal days) under the chart")
             Button { web.view.goBack() } label: { Image(systemName: "arrow.backward") }.help("Back")
             Button { web.view.reload() } label: { Image(systemName: "arrow.clockwise") }.help("Reload")
             Button { snapshot() } label: { Label("Save snapshot", systemImage: "camera") }
