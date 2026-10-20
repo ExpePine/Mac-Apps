@@ -65,7 +65,12 @@ import Charts
             errors[cid] = "Import the sheet first."; return
         }
         errors[cid] = nil
-        let plan = cmd.plan
+        var plan = cmd.plan
+        // an older plan that lost its trigger columns (e.g. "var 2" vs "var2"): take them from the command again
+        if plan.task == "compare" && plan.triggers.isEmpty {
+            let g = ExperimentEngine.guessPlan(cmd.text, notes: experiments[i].notes, table: t, previous: nil)
+            if !g.triggers.isEmpty { plan.triggers = g.triggers; update(exp, cid) { $0.plan.triggers = g.triggers } }
+        }
         var book = prices
         for (k, v) in base.series where book.series[k] == nil { book.series[k] = v }
         for (k, v) in MultibaggerCenter.shared.book.series where (book.series[k]?.days.count ?? 0) < v.days.count { book.series[k] = v }
