@@ -32,6 +32,7 @@ final class AppStore: ObservableObject {
 
     private var saveTask: Task<Void, Never>?
     private var midnightTimer: Timer?
+    private var waitObserver: NSObjectProtocol?
     private var isLoading = true
 
     static let defaultModel = "openai/gpt-oss-120b"
@@ -50,6 +51,10 @@ final class AppStore: ObservableObject {
         // Refresh the Dock count after midnight.
         midnightTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.updateDockBadge() }
+        }        // Show "waiting for Groq's per-minute limit" in the status pill.
+        waitObserver = NotificationCenter.default.addObserver(forName: GroqClient.waitingNotification, object: nil, queue: .main) { [weak self] n in
+            let msg = n.userInfo?["message"] as? String ?? "Waiting for Groq…"
+            Task { @MainActor in self?.busy = msg }
         }
     }
 

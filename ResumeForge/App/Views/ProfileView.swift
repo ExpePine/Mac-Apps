@@ -168,6 +168,12 @@ struct SettingsView: View {
                     Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 TextField("Model ID", text: $model)
+                HStack {
+                    TextField("Tokens per minute (your plan)", value: Binding(
+                        get: { GroqClient.tpmLimit(for: model) },
+                        set: { GroqClient.setTPMLimit($0, for: model) }), format: .number)
+                    Text("learned automatically").font(.caption).foregroundStyle(.secondary)
+                }
                 if !models.isEmpty {
                     Picker("Models on your account", selection: $model) {
                         ForEach(models, id: \.self) { Text($0).tag($0) }
@@ -176,7 +182,7 @@ struct SettingsView: View {
             } header: {
                 Text("Groq")
             } footer: {
-                Text("Get a key at console.groq.com/keys. Groq's model line-up changes — use 'Test & list models' to see what's live and pick a large text model.")
+                Text("Get a key at console.groq.com/keys. Groq's model line-up changes — use 'Test & list models' to see what's live and pick a large text model. On the free tier each request must fit in about 8,000 tokens per minute, so the app sends your most relevant stories (not all of them) and waits when Groq asks it to.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Writing") {

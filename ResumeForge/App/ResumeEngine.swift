@@ -3,17 +3,56 @@ import Foundation
 /// The AI workflows: parse JD → benchmark resume → missing stories → your resume → interview.
 extension AppStore {
 
+    // MARK: Budgeted AI call
+
+    /// Builds the prompt to fit the account's tokens-per-minute limit (free tier: 8,000 per request incl. output),
+    /// shrinking the variable parts until it fits. If Groq still says "too large", it learns the real limit and rebuilds once.
+    func ask(system: String = Prompts.system, output: Int, temperature: Double,
+             build: (Int) -> String) async throws -> [String: Any] {
+        var lastError: Error?
+        for _ in 0..<2 {
+            let limit = GroqClient.tpmLimit(for: model)
+            let out = min(output, Int(Double(limit) * 0.45))
+            let allowed = max(1200, limit - out - 350)
+            var budget = allowed * 3
+            var prompt = build(budget)
+            for _ in 0..<5 {
+                let est = GroqClient.estimateTokens(system) + GroqClient.estimateTokens(prompt) + 20
+                if est <= allowed { break }
+                budget = max(1200, budget - (est - allowed) * 3 - 300)
+                prompt = build(budget)
+            }
+            do {
+                return try await client.json(system: system, user: prompt, temperature: temperature, maxTokens: out)
+            } catch let e as GroqClient.RequestTooLarge {
+                lastError = e      // limit is now learned — loop rebuilds smaller
+            }
+        }
+        throw lastError ?? GroqError(message: "Request too large for your Groq plan.")
+    }
+
+    /// Maps the short story ids used in prompts ("1a2b3c4d") back to full ids.
+    func resolveStoryIDs(_ ids: [String]) -> [String] {
+        let all = data.stories.map(\.id.uuidString)
+        return ids.compactMap { raw in
+            let k = raw.trimmingCharacters(in: CharacterSet(charactersIn: "[] ")).lowercased()
+            guard !k.isEmpty else { return nil }
+            return all.first { $0.lowercased() == k || $0.lowercased().hasPrefix(k) }
+        }
+    }
+
     // MARK: Clean up a captured page into a proper JD
 
     func parseJob(_ id: UUID) async throws {
         guard let i = jobIndex(id) else { return }
         let j = data.jobs[i]
-        let input = j.rawText.count > j.description.count ? j.rawText : j.description
+        // Prefer the extracted description; fall back to the whole page text.
+        let input = j.description.count >= 600 ? j.description : (j.rawText.count > j.description.count ? j.rawText : j.description)
         guard !input.isEmpty else { return }
 
-        let o = try await client.json(system: Prompts.system,
-                                      user: Prompts.parseJob(pageText: String(input.prefix(30000)), hint: j),
-                                      temperature: 0.1)
+        let o = try await ask(output: 2500, temperature: 0.1) { budget in
+            Prompts.parseJob(pageText: String(input.prefix(max(1500, budget - 900))), hint: j)
+        }
         guard let k = jobIndex(id) else { return }
         var job = data.jobs[k]
         func fill(_ kp: WritableKeyPath<JobPosting, String>, _ key: String) {
@@ -36,9 +75,10 @@ extension AppStore {
 
     func generateBenchmark(_ id: UUID) async throws {
         guard let i = jobIndex(id) else { return }
-        let o = try await client.json(system: Prompts.system,
-                                      user: Prompts.benchmark(job: data.jobs[i]),
-                                      temperature: 0.6)
+        let job = data.jobs[i]
+        let o = try await ask(output: 3000, temperature: 0.6) { budget in
+            Prompts.benchmark(job: job, budget: max(1500, budget - 3200))
+        }
         let resumeJSON = J.dict(o, "resume") ?? o
         guard let k = jobIndex(id) else { return }
         data.jobs[k].benchmark = ResumeDoc(json: resumeJSON, mode: "benchmark")
@@ -54,17 +94,17 @@ extension AppStore {
             busy = "Finding missing stories…"
         }
         guard let i = jobIndex(id), let bench = data.jobs[i].benchmark else { return }
-        let o = try await client.json(system: Prompts.system,
-                                      user: Prompts.gaps(job: data.jobs[i], benchmark: bench,
-                                                         profile: data.profile, stories: data.stories),
-                                      temperature: 0.4)
+        let job = data.jobs[i], profile = data.profile, stories = data.stories
+        let o = try await ask(output: 2000, temperature: 0.4) { budget in
+            Prompts.gaps(job: job, benchmark: bench, profile: profile, stories: stories, budget: max(2500, budget - 1500))
+        }
         let gaps = J.dicts(o, "gaps").map {
             StoryGap(theme: J.str($0, "theme"),
                      priority: J.str($0, "priority").lowercased().isEmpty ? "medium" : J.str($0, "priority").lowercased(),
                      whyItMatters: J.str($0, "whyItMatters"),
                      benchmarkExample: J.str($0, "benchmarkExample"),
                      questions: J.strings($0, "questions"),
-                     coveredBy: J.strings($0, "coveredBy"))
+                     coveredBy: resolveStoryIDs(J.strings($0, "coveredBy")))
         }.filter { !$0.theme.isEmpty }
         guard let k = jobIndex(id) else { return }
         // Keep answered/skipped status for gaps that come back with the same theme.
@@ -83,10 +123,11 @@ extension AppStore {
         try requireMaterial()
         guard let i = jobIndex(id) else { return }
         let job = data.jobs[i]
-        let o = try await client.json(system: Prompts.system,
-                                      user: Prompts.tailored(job: job, benchmark: job.benchmark, profile: data.profile,
-                                                             stories: data.stories, allowPlaceholders: allowPlaceholders),
-                                      temperature: 0.35)
+        let profile = data.profile, stories = data.stories
+        let o = try await ask(output: 3000, temperature: 0.35) { budget in
+            Prompts.tailored(job: job, benchmark: job.benchmark, profile: profile, stories: stories,
+                             allowPlaceholders: allowPlaceholders, budget: max(2500, budget - 5200))
+        }
         guard let k = jobIndex(id) else { return }
         data.jobs[k].tailored = finalize(ResumeDoc(json: J.dict(o, "resume") ?? o,
                                                    mode: allowPlaceholders ? "placeholders" : "strict"))
@@ -95,10 +136,11 @@ extension AppStore {
 
     func buildMaster(allowPlaceholders: Bool) async throws {
         try requireMaterial()
-        let o = try await client.json(system: Prompts.system,
-                                      user: Prompts.tailored(job: nil, benchmark: nil, profile: data.profile,
-                                                             stories: data.stories, allowPlaceholders: allowPlaceholders),
-                                      temperature: 0.35)
+        let profile = data.profile, stories = data.stories
+        let o = try await ask(output: 3000, temperature: 0.35) { budget in
+            Prompts.tailored(job: nil, benchmark: nil, profile: profile, stories: stories,
+                             allowPlaceholders: allowPlaceholders, budget: max(2500, budget - 5200))
+        }
         data.masterResume = finalize(ResumeDoc(json: J.dict(o, "resume") ?? o,
                                                mode: allowPlaceholders ? "placeholders" : "strict"))
         data.masterMissing = J.strings(o, "missing")
@@ -128,14 +170,13 @@ extension AppStore {
                 .filter { !$0.1.isEmpty }
                 .map { LabeledLine(label: $0.0, value: $0.1) }
         }
-        let valid = Set(data.stories.map(\.id.uuidString))
         for r in d.experience.indices {
             for b in d.experience[r].bullets.indices {
-                d.experience[r].bullets[b].sources = d.experience[r].bullets[b].sources.filter { valid.contains($0) }
+                d.experience[r].bullets[b].sources = resolveStoryIDs(d.experience[r].bullets[b].sources)
             }
         }
         for a in d.achievements.indices {
-            d.achievements[a].sources = d.achievements[a].sources.filter { valid.contains($0) }
+            d.achievements[a].sources = resolveStoryIDs(d.achievements[a].sources)
         }
         return d
     }
@@ -156,16 +197,29 @@ extension AppStore {
         let job = session.focusJobID.flatMap { id in data.jobs.first { $0.id == id } }
         let gap = session.focusGapID.flatMap { gid in job?.gaps.first { $0.id == gid } }
 
-        var messages = [GroqClient.Message(role: "system",
-                                           content: Prompts.interviewer(profile: data.profile, stories: data.stories,
-                                                                        job: job, gap: gap, draft: session.draft))]
+        let systemPrompt = Prompts.interviewer(profile: data.profile, stories: data.stories,
+                                               job: job, gap: gap, draft: session.draft)
+        var messages = [GroqClient.Message(role: "system", content: systemPrompt)]
         if session.turns.isEmpty {
             messages.append(.init(role: "user", content: "(Start the interview with your first question.)"))
         } else {
-            messages += session.turns.suffix(30).map { .init(role: $0.role, content: $0.text) }
+            // Keep the most recent turns that fit the per-minute budget (the draft carries what was said earlier).
+            let output = 900
+            var room = GroqClient.tpmLimit(for: model) - output - 400 - GroqClient.estimateTokens(systemPrompt)
+            var recent: [GroqClient.Message] = []
+            for t in session.turns.reversed() {
+                let cost = GroqClient.estimateTokens(t.text) + 8
+                if cost > room && !recent.isEmpty { break }
+                room -= cost
+                recent.insert(.init(role: t.role, content: String(t.text.prefix(4000))), at: 0)
+            }
+            if recent.first?.role == "assistant" {
+                recent.insert(.init(role: "user", content: "(Continuing the interview.)"), at: 0)
+            }
+            messages += recent
         }
 
-        let o = try await client.json(messages: messages, temperature: 0.5)
+        let o = try await client.json(messages: messages, temperature: 0.5, maxTokens: 900)
         let reply = J.str(o, "message")
         data.interview.turns.append(ChatTurn(role: "assistant",
                                              text: reply.isEmpty ? "Could you tell me a bit more about that?" : reply))
@@ -193,7 +247,18 @@ extension AppStore {
     // MARK: Import an existing resume
 
     func importResume(text: String) async throws {
-        let o = try await client.json(system: Prompts.system, user: Prompts.importResume(text: text), temperature: 0.1)
+        // Long CVs are read in parts so each request fits the per-minute limit.
+        let limit = GroqClient.tpmLimit(for: model)
+        let chunkChars = max(3000, Int(Double(limit - 1200) / 2.2) * 3 - 2200)
+        let parts = StoryImport.chunks(text, maxChars: chunkChars)
+        var o: [String: Any] = [:]
+        var extraStories: [[String: Any]] = []
+        for (n, part) in parts.enumerated() {
+            if parts.count > 1 { busy = "Reading your resume (part \(n + 1) of \(parts.count))…" }
+            let r = try await ask(output: 3500, temperature: 0.1) { _ in Prompts.importResume(text: part) }
+            if n == 0 { o = r } else { extraStories += J.dicts(r, "stories") }
+        }
+        if !extraStories.isEmpty { o["stories"] = J.dicts(o, "stories") + extraStories }
         let p = J.dict(o, "profile")
         var prof = data.profile
         func fill(_ kp: WritableKeyPath<Profile, String>, _ key: String) {
@@ -231,14 +296,16 @@ extension AppStore {
         guard useAI, !Keychain.load().isEmpty else { return StoryImport.splitByHeadings(clean) }
 
         let companies = Array(Set(data.profile.roles.map(\.company).filter { !$0.isEmpty })).sorted()
-        let parts = StoryImport.chunks(clean)
+        // The reply repeats your text, so each part gets less than half the per-minute budget.
+        let limit = GroqClient.tpmLimit(for: model)
+        let chunkChars = max(2500, Int(Double(limit - 1300) / 2.3) * 3 - 1800)
+        let parts = StoryImport.chunks(clean, maxChars: chunkChars)
         var out: [Story] = []
         for (i, part) in parts.enumerated() {
             progress(parts.count > 1 ? "Finding stories in \(source) (part \(i + 1) of \(parts.count))…" : "Finding stories in \(source)…")
-            let o = try await client.json(system: Prompts.system,
-                                          user: Prompts.splitStories(text: part, source: source, part: i + 1,
-                                                                     of: parts.count, companies: companies),
-                                          temperature: 0.1)
+            let o = try await ask(output: 4000, temperature: 0.1) { _ in
+                Prompts.splitStories(text: part, source: source, part: i + 1, of: parts.count, companies: companies)
+            }
             out += J.dicts(o, "stories").map { Story(json: $0, origin: "file") }.filter { !$0.text.isEmpty }
         }
         return out

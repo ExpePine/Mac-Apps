@@ -20,7 +20,7 @@ enum Prompts {
       "experience": [
         {"company": "COMPANY NAME", "location": "City, Country", "title": "Job Title",
          "dates": "Month YYYY - Present",
-         "bullets": [{"text": "...", "sources": ["<story id>", ...]}]}
+         "bullets": [{"text": "...", "sources": ["<story id from the [brackets]>", ...]}]}
       ],
       "achievements": [
         {"label": "Two-To-Four Word Label", "text": "1–2 sentences.", "subItems": [], "sources": ["<story id>"]}
@@ -59,7 +59,7 @@ enum Prompts {
 
     // MARK: Benchmark ("best resume" for the JD)
 
-    static func benchmark(job: JobPosting) -> String {
+    static func benchmark(job: JobPosting, budget: Int) -> String {
         """
         TASK: Write the BENCHMARK resume for the job below — the resume of the ideal, top-5% candidate this employer \
         would shortlist instantly. It is a TARGET to aim for, not a real person.
@@ -74,14 +74,20 @@ enum Prompts {
         Return: {"resume": <RESUME JSON>, "keywords": [..]}
 
         JOB:
-        \(jobBlock(job))
+        \(jobBlock(job, maxChars: budget))
         """
     }
 
     // MARK: Gap analysis → missing stories
 
-    static func gaps(job: JobPosting, benchmark: ResumeDoc, profile: Profile, stories: [Story]) -> String {
-        """
+    static func gaps(job: JobPosting, benchmark: ResumeDoc, profile: Profile, stories: [Story], budget: Int) -> String {
+        let prof = profileBlock(profile, maxChars: 1200)
+        let jd = jobBlock(job, maxChars: Int(Double(budget) * 0.28))
+        let bench = resumeText(benchmark, maxChars: Int(Double(budget) * 0.22))
+        let storyBudget = max(800, budget - prof.count - jd.count - bench.count)
+        let context: String = job.title + " " + job.description + " " + job.keywords.joined(separator: " ")
+        let storyList = storiesBlock(stories, relevantTo: context, maxChars: storyBudget)
+        return """
         TASK: Compare the CANDIDATE STORIES with what the JOB and the BENCHMARK resume demand. \
         Find the missing or weak stories — evidence the employer will look for that the candidate has NOT yet written down.
 
@@ -94,36 +100,41 @@ enum Prompts {
          "strengths": ["themes the stories already cover well"]}
 
         RULES:
-        - 5–10 gaps, highest priority first. Skip anything the stories already evidence well.
+        - 5–8 gaps, highest priority first. Skip anything the stories already evidence well.
         - Questions must be concrete and answerable from memory, ONE idea each, and reference the candidate's \
         real companies/roles where possible (e.g. "At Mantra Softech, have you ever…?"). Ask for numbers, scale, \
         stakeholders, tools and outcomes. Never assume the answer.
 
         JOB:
-        \(jobBlock(job))
+        \(jd)
 
         BENCHMARK RESUME (target):
-        \(resumeText(benchmark))
+        \(bench)
 
         CANDIDATE PROFILE:
-        \(profileBlock(profile))
+        \(prof)
 
-        CANDIDATE STORIES:
-        \(storiesJSON(stories))
+        CANDIDATE STORIES (most relevant first; [id] in brackets):
+        \(storyList)
         """
     }
 
     // MARK: Your resume from your stories
 
     static func tailored(job: JobPosting?, benchmark: ResumeDoc?, profile: Profile,
-                         stories: [Story], allowPlaceholders: Bool) -> String {
+                         stories: [Story], allowPlaceholders: Bool, budget: Int) -> String {
         let target: String
+        let prof = profileBlock(profile, maxChars: 1500)
         if let job {
+            let benchChars = Int(Double(budget) * 0.12)
+            let bench = (benchmark != nil && benchChars >= 700)
+                ? "BENCHMARK RESUME (use it for emphasis, ordering and vocabulary — NOT as a source of facts):\n" + resumeText(benchmark!, maxChars: benchChars)
+                : ""
             target = """
             TARGET JOB:
-            \(jobBlock(job))
+            \(jobBlock(job, maxChars: Int(Double(budget) * 0.25)))
 
-            \(benchmark.map { "BENCHMARK RESUME (use it for emphasis, ordering and vocabulary — NOT as a source of facts):\n" + resumeText($0) } ?? "")
+            \(bench)
             """
         } else {
             target = """
@@ -153,6 +164,14 @@ enum Prompts {
         STRICT MODE: no placeholders. Leave uncovered requirements out of the resume and list them in "missing".
         """
 
+        let context: String
+        if let job {
+            context = job.title + " " + job.description + " " + job.keywords.joined(separator: " ")
+        } else {
+            context = profile.headline
+        }
+        let storyList = storiesBlock(stories, relevantTo: context, maxChars: max(1500, budget - prof.count - target.count))
+
         return """
         TASK: Write the candidate's resume.
 
@@ -167,10 +186,10 @@ enum Prompts {
         Return: {"resume": <RESUME JSON>, "missing": ["short descriptions of important requirements with no supporting story"]}
 
         CANDIDATE PROFILE:
-        \(profileBlock(profile))
+        \(prof)
 
-        CANDIDATE STORIES:
-        \(storiesJSON(stories))
+        CANDIDATE STORIES (most relevant first; [id] in brackets — use these ids in "sources"):
+        \(storyList)
         """
     }
 
@@ -186,8 +205,9 @@ enum Prompts {
             Starter questions you may adapt: \(gap.questions.joined(separator: " | "))
             """
         }
-        if let job { focus += "\nTARGET JOB: \(job.title) at \(job.company). Key requirements:\n\(job.description.prefix(2500))" }
+        if let job { focus += "\nTARGET JOB: \(job.title) at \(job.company). Key requirements:\n\(job.description.prefix(1500))" }
 
+        let titles = clip(stories.map { "\($0.title) (\($0.company))" }.joined(separator: "; "), 1200)
         let draftJSON: String = {
             guard let d = draft else { return "null" }
             return jsonString(["title": d.title, "company": d.company, "role": d.role, "period": d.period,
@@ -221,9 +241,9 @@ enum Prompts {
         \(focus)
 
         CANDIDATE PROFILE:
-        \(profileBlock(profile))
+        \(profileBlock(profile, maxChars: 1200))
 
-        EXISTING STORY TITLES: \(stories.map { "\($0.title) (\($0.company))" }.joined(separator: "; "))
+        EXISTING STORY TITLES: \(titles)
 
         CURRENT DRAFT: \(draftJSON)
 
@@ -253,7 +273,7 @@ enum Prompts {
         do not embellish or add numbers; "" when unknown.
 
         TEXT:
-        \(text.prefix(30000))
+        \(text)
         """
     }
 
@@ -287,38 +307,95 @@ enum Prompts {
 
     // MARK: - Helpers
 
-    static func jobBlock(_ j: JobPosting) -> String {
-        """
+    static func jobBlock(_ j: JobPosting, maxChars: Int = 12000) -> String {
+        let head = """
         Title: \(j.title)
         Company: \(j.company)
         Location: \(j.location)
         Experience: \(j.experience)
         Skills listed: \(j.skills.joined(separator: ", "))
         Description:
-        \(j.description.prefix(12000))
+
         """
+        return head + clip(j.description, max(400, maxChars - head.count))
     }
 
-    static func profileBlock(_ p: Profile) -> String {
-        jsonString([
-            "name": p.name, "headline": p.headline, "contactLine": p.contactLine,
-            "roles": p.roles.map { ["company": $0.company, "title": $0.title, "location": $0.location,
-                                    "dates": "\($0.start) - \($0.end)"] },
-            "education": p.education.map { ["qualification": $0.qualification, "institution": $0.institution,
-                                            "location": $0.location, "year": $0.year] },
-            "languages": p.languages, "certifications": p.certifications, "technicalSkills": p.technicalSkills
-        ])
+    /// Compact plain-text profile (cheaper in tokens than JSON).
+    static func profileBlock(_ p: Profile, maxChars: Int = 2000) -> String {
+        var lines: [String] = []
+        lines.append("Name: \(p.name)")
+        if !p.headline.isEmpty { lines.append("Headline: \(p.headline)") }
+        if !p.contactLine.isEmpty { lines.append("Contact: \(p.contactLine)") }
+        if !p.roles.isEmpty {
+            lines.append("Roles:")
+            lines += p.roles.map { "- \($0.title) | \($0.company) | \($0.location) | \($0.start) - \($0.end)" }
+        }
+        if !p.education.isEmpty {
+            lines.append("Education:")
+            lines += p.education.map { "- \($0.qualification) | \($0.institution) | \($0.location) | \($0.year)" }
+        }
+        if !p.languages.isEmpty { lines.append("Languages: \(p.languages)") }
+        if !p.certifications.isEmpty { lines.append("Certifications: \(p.certifications)") }
+        if !p.technicalSkills.isEmpty { lines.append("Technical skills: \(p.technicalSkills)") }
+        return clip(lines.joined(separator: "\n"), maxChars)
     }
 
-    static func storiesJSON(_ stories: [Story]) -> String {
-        if stories.isEmpty { return "[] (no stories yet)" }
-        return jsonString(stories.map {
-            ["id": $0.id.uuidString, "title": $0.title, "company": $0.company, "role": $0.role,
-             "period": $0.period, "text": $0.text, "metrics": $0.metrics, "skills": $0.skills] as [String: Any]
-        })
+    /// Short story id used in prompts (first 8 characters of the UUID). Mapped back by the engine.
+    static func shortID(_ s: Story) -> String { String(s.id.uuidString.prefix(8)).lowercased() }
+
+    /// Stories ranked by relevance to `relevantTo`, packed into `maxChars`:
+    /// the most relevant get their full text, then shortened text, then title-only lines.
+    static func storiesBlock(_ stories: [Story], relevantTo context: String, maxChars: Int) -> String {
+        if stories.isEmpty { return "(no stories yet)" }
+        let ranked = rank(stories, by: context)
+        var out = ""
+        var omitted = 0
+        for (i, st) in ranked.enumerated() {
+            let head = "[\(shortID(st))] \(st.title) | \(st.company) | \(st.role) | \(st.period)"
+            let metrics = st.metrics.isEmpty ? "" : "\nMetrics: \(st.metrics.joined(separator: "; "))"
+            let remaining = maxChars - out.count
+            let left = ranked.count - i
+            // Leave room for at least a title line for every remaining story.
+            let share = max(120, (remaining - left * 90) / max(1, min(left, 4)))
+            let full = head + metrics + "\n" + st.text.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n"
+            if full.count <= share {
+                out += full
+            } else if share >= 400 {
+                out += head + metrics + "\n" + clip(st.text, share - head.count - metrics.count - 4) + "\n\n"
+            } else if remaining > head.count + 2 {
+                out += head + "\n"
+            } else {
+                omitted += 1
+            }
+        }
+        if omitted > 0 { out += "(+\(omitted) more stories not shown)" }
+        return out
     }
 
-    static func resumeText(_ r: ResumeDoc) -> String {
+    private static let stopwords: Set<String> = ["with", "that", "this", "from", "have", "will", "your", "their", "they", "them",
+        "were", "been", "into", "about", "which", "while", "would", "should", "could", "there", "what", "when", "where",
+        "also", "more", "than", "such", "able", "work", "working", "team", "role", "experience", "years", "including"]
+
+    static func words(_ s: String) -> Set<String> {
+        Set(s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 3 && !stopwords.contains($0) })
+    }
+
+    static func rank(_ stories: [Story], by context: String) -> [Story] {
+        let ctx = words(context)
+        func score(_ s: Story) -> Double {
+            let w = words(s.title + " " + s.text + " " + s.skills.joined(separator: " "))
+            return Double(w.intersection(ctx).count) + 1.5 * Double(s.metrics.count)
+        }
+        return stories.enumerated()
+            .sorted { (a, b) in
+                let sa = score(a.element), sb = score(b.element)
+                return sa != sb ? sa > sb : a.offset < b.offset
+            }
+            .map(\.element)
+    }
+
+    static func resumeText(_ r: ResumeDoc, maxChars: Int = 8000) -> String {
         var out = "SUMMARY: \(r.summary)\n"
         for role in r.experience {
             out += "\n\(role.company) — \(role.title) (\(role.dates))\n"
@@ -327,7 +404,12 @@ enum Prompts {
         if !r.achievements.isEmpty {
             out += "\n\nKEY ACHIEVEMENTS:\n" + r.achievements.map { "• \($0.label): \($0.text)" }.joined(separator: "\n")
         }
-        return out
+        return clip(out, maxChars)
+    }
+
+    static func clip(_ s: String, _ n: Int) -> String {
+        guard s.count > n else { return s }
+        return String(s.prefix(max(0, n - 1))) + "…"
     }
 
     static func jsonString(_ obj: Any) -> String {

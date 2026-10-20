@@ -64,3 +64,4 @@ To build locally: `cd ResumeForge && ./scripts/build-dmg.sh`. You need Xcode 15 
 - **Duplicate memory.** The extension remembers sent jobs for a year. If you delete a job in the app and want it back, use *Forget sent jobs* on the status page.
 - **Same title, different posting.** Two postings with the same title and company (e.g. different cities) count as duplicates.
 - **Groq models.** Groq's model line-up changes often. Use Settings ▸ Test & list models rather than relying on the default.
+- **Free-tier limits.** On Groq's free tier, each request has to fit within about 8,000 tokens per minute, counting both input and output. The app learns your limit from Groq's responses and sends your most relevant stories in full and the rest as titles. It runs one request at a time and waits when Groq asks it to. A paid Groq tier raises the limit, and the app then uses the extra room automatically.
