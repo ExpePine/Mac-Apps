@@ -52,9 +52,9 @@ struct ScreenshotsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Stock symbol", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { if !search.isEmpty { vm.shotSymbol = search.uppercased(); search = "" } }
+            SymbolField(vm: vm, placeholder: "Stock symbol", text: $search) {
+                if !search.isEmpty { vm.shotSymbol = SymbolBook.clean(search); search = "" }
+            }
             List(selection: Binding(get: { vm.shotSymbol }, set: { if let s = $0 { vm.shotSymbol = s } })) {
                 Section(search.isEmpty ? "Stocks with screenshots" : "Matching stocks") {
                     ForEach(symbolList, id: \.self) { sym in

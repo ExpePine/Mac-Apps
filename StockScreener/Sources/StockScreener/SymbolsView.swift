@@ -26,9 +26,7 @@ struct SymbolsView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: "plus.circle.fill").foregroundStyle(.green)
-                TextField("Add NSE symbols — e.g. TCS, INFY, NSE:M&M (comma or space separated)", text: $input)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { add() }
+                SymbolField(vm: vm, placeholder: "Add NSE symbols — e.g. TCS, INFY, NSE:M&M (comma or space separated)", text: $input, multi: true) { add() }
                 Button("Add") { add() }.keyboardShortcut(.defaultAction).disabled(input.trimmingCharacters(in: .whitespaces).isEmpty)
                 if vm.isCheckingSymbols { ProgressView().controlSize(.small); Text("Checking on Yahoo…").font(.caption) }
             }
@@ -118,8 +116,7 @@ struct SymbolsView: View {
             Text("These sheet symbols are removed everywhere in the app. Your Google Sheet isn't changed.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                TextField("Hide symbols…", text: $hideInput).textFieldStyle(.roundedBorder)
-                    .onSubmit { hide() }
+                SymbolField(vm: vm, placeholder: "Hide symbols…", text: $hideInput, multi: true) { hide() }
                 Button("Hide") { hide() }.disabled(hideInput.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             List(vm.symbolBook.hidden, id: \.self, selection: $hiddenSelection) { s in

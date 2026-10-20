@@ -122,7 +122,7 @@ struct DeliveryView: View {
                 Spacer()
                 Button { copyPine() } label: { Label("Copy Pine Script", systemImage: "doc.on.clipboard") }
                     .help("A TradingView indicator that paints these exact signal days (orange + ▲DQ) on your TradingView charts — for the stocks in the selected scope")
-                TextField("Search any NSE stock", text: $search).textFieldStyle(.roundedBorder).frame(width: 170)
+                SymbolField(vm: vm, placeholder: "Search any NSE stock", text: $search).frame(width: 180)
             }
             .controlSize(.small)
         }
@@ -403,7 +403,7 @@ struct DeliveryMiniChart: View {
     @AppStorage("viewer.delivRange") private var range = "1Y"
 
     var body: some View {
-        let s = dc.book.series[symbol.uppercased()]
+        let s = dc.book.series[SymbolBook.clean(symbol)]
         let sig = s.map { DeliverySignal.signals($0.metric(value: useValue), length: max(2, length), full: full, onlyRises: onlyRises) } ?? []
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -418,6 +418,7 @@ struct DeliveryMiniChart: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
                 if let n = syncNote { Text(n).font(.caption2).foregroundStyle(.secondary) }
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
@@ -426,7 +427,7 @@ struct DeliveryMiniChart: View {
             if s != nil { LWChartView(holder: lw) }
         }
         .onAppear { dc.loadIfNeeded(); push() }
-        .onChange(of: symbol) { _ in push() }
+        .task(id: symbol) { push() }
         .onChange(of: dc.revision) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: useValue) { _ in push() }

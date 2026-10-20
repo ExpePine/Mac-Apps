@@ -441,7 +441,7 @@ struct StockChangesView: View {
                 }
                 .labelsHidden().frame(width: 150)
                 .help("Only stocks where this column changed")
-                TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 120)
+                SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 130)
                 Spacer()
                 Text("\(shown.count) stock\(shown.count == 1 ? "" : "s") changed").font(.caption).foregroundStyle(.secondary)
             }

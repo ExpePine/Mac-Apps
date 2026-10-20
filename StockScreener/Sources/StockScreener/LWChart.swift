@@ -66,13 +66,20 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     private var ready = false
     private var pending: String?
     @Published var failed = false
+    @Published var lastError: String?
     /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
     var onUserRange: ((String, String) -> Void)?
 
     private final class WeakHandler: NSObject, WKScriptMessageHandler {
         weak var target: WKScriptMessageHandler?
         init(_ t: WKScriptMessageHandler) { target = t }
-        func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) { target?.userContentController(c, didReceive: m) }
+        private func handle(_ r: Any?, _ e: Error?) {
+        let s = (r as? String) ?? e?.localizedDescription ?? ""
+        failed = s == "nolib"
+        lastError = s.hasPrefix("err:") || e != nil ? "Chart: \(s)" : nil
+    }
+
+    func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) { target?.userContentController(c, didReceive: m) }
     }
 
     override init() {
@@ -89,7 +96,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
 
     func show(_ data: LWChartData) {
         let js = "window.setData(\(data.json))"
-        if ready { view.evaluateJavaScript(js) { [weak self] r, _ in if (r as? String) == "nolib" { self?.failed = true } } } else { pending = js }
+        if ready { view.evaluateJavaScript(js) { [weak self] r, e in self?.handle(r, e) } } else { pending = js }
+    }
+
+    private func handle(_ r: Any?, _ e: Error?) {
+        let s = (r as? String) ?? e?.localizedDescription ?? ""
+        failed = s == "nolib"
+        lastError = s.hasPrefix("err:") || e != nil ? "Chart: \(s)" : nil
     }
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
@@ -105,7 +118,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         ready = true
-        if let p = pending { pending = nil; webView.evaluateJavaScript(p) { [weak self] r, _ in if (r as? String) == "nolib" { self?.failed = true } } }
+        if let p = pending { pending = nil; webView.evaluateJavaScript(p) { [weak self] r, e in self?.handle(r, e) } }
     }
 
     static let html = """
@@ -180,6 +193,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       document.getElementById('legend').style.color=dark?'#d1d4dc':'#131722';
     }
     window.setData=function(d){
+      try { return window._setData(d); }
+      catch(e) {
+        try { d.deliv=d.deliv.filter(function(x){ return x.value!=null; }); window._setData(d); return 'ok-retry:'+e.message; }
+        catch(e2) { return 'err:'+e2.message; }
+      }
+    };
+    window._setData=function(d){
       if(!window.LightweightCharts){ document.getElementById('err').style.display='flex'; setTimeout(function(){ window.setData(d); },1500); return 'nolib'; }
       document.getElementById('err').style.display='none';
       if(!chart || dark!==d.dark) build(d.dark);

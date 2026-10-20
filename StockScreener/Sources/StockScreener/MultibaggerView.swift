@@ -94,7 +94,7 @@ struct MultibaggerView: View {
                 Picker("", selection: $centerRaw) { ForEach(MBCenter.allCases) { Text($0.rawValue).tag($0.rawValue) } }
                     .labelsHidden().fixedSize()
                     .help("The date the Chart Reel jumps both TradingView charts to (TradingView's Go to date)")
-                TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 110)
+                SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 120)
                 Spacer()
                 if let s = mb.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 Button { openReel(start: nil) } label: { Label("Chart Reel (both charts)", systemImage: "film.stack") }

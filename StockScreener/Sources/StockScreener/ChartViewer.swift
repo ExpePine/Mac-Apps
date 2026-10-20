@@ -97,9 +97,11 @@ struct ChartViewer: View {
             if let p = pos, vm.chartQueue.count > 1 {
                 Text("\(p + 1) / \(vm.chartQueue.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            TextField("Symbol", text: $typed)
-                .textFieldStyle(.roundedBorder).frame(width: 130)
-                .onSubmit { if !typed.isEmpty { vm.chartSymbol = typed.uppercased() } }
+            SymbolField(vm: vm, placeholder: "Symbol", text: $typed) {
+                let s = SymbolBook.clean(typed)
+                if !s.isEmpty { vm.chartSymbol = s }
+            }
+            .frame(width: 150)
             Text(symbol).font(.headline)
             Picker("", selection: Binding(get: { min(vm.settings.chartLinkColumn, vm.chartCount - 1) },
                                           set: { vm.settings.chartLinkColumn = $0 })) {
