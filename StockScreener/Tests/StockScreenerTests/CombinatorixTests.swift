@@ -184,3 +184,33 @@ final class StockChangeTests: XCTestCase {
         XCTAssertEqual(r[0].fields.first?.delta, 1)
     }
 }
+
+final class ExperimentTests: XCTestCase {
+    func testPlanGuessAndRun() {
+        let t = SheetTable(headers: ["Symbol", "TrigB", "TrigC"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "2026-01-05", "2026-01-07"], numbers: [nil, nil, nil]),
+            SheetRow(id: 1, cells: ["BBB", "05-01-2026", ""], numbers: [nil, nil, nil]),
+        ])
+        let plan = ExperimentEngine.guessPlan("COL A is the shortlist trigger -- here the NSE symbol is shortlisted. COL B and COL C are timing triggers -- compare which among COL B or COL C are doing better", table: t)
+        XCTAssertEqual(plan.symbolColumn, "Symbol")
+        XCTAssertEqual(plan.shortlistColumn, "Symbol")
+        XCTAssertEqual(plan.triggers.map(\.column), ["TrigB", "TrigC"])
+        XCTAssertEqual(plan.triggers.first?.kind, "date")
+        XCTAssertEqual(ExperimentEngine.day("05-01-2026"), "2026-01-05")
+        XCTAssertEqual(ExperimentEngine.day("5-Jan-2026"), "2026-01-05")
+
+        var book = PriceBook()
+        let days = (5...30).map { String(format: "2026-01-%02d", $0) }
+        book.series["AAA"] = PriceSeries(days: days, closes: days.indices.map { 100 + Double($0) })
+        book.series["BBB"] = PriceSeries(days: days, closes: days.indices.map { 100 - Double($0) })
+        var p = plan
+        p.horizons = [5]
+        let r = ExperimentEngine.run(p, table: t, prices: book)
+        XCTAssertEqual(r.shortlisted, 2)
+        XCTAssertEqual(r.stats.first { $0.name == "TrigB" }?.triggered, 2)
+        XCTAssertEqual(r.stats.first { $0.name == "TrigC" }?.triggered, 1)
+        XCTAssertEqual(r.entries.first { $0.symbol == "AAA" && $0.trigger == "TrigB" }?.returns.first ?? nil ?? 0, 5, accuracy: 1e-9)
+        XCTAssertEqual(ExperimentEngine.columnLetter(0), "A")
+        XCTAssertEqual(ExperimentEngine.columnLetter(27), "AB")
+    }
+}

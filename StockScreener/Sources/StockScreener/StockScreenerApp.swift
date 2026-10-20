@@ -129,6 +129,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("m", modifiers: [.command, .option])
 
+        Window("Experiments", id: "experiments") {
+            ExperimentsView()
+                .environmentObject(vm)
+                .frame(minWidth: 1050, minHeight: 650)
+        }
+        .keyboardShortcut("e", modifiers: [.command, .option])
+
         Window("Symbols", id: "symbols") {
             SymbolsView()
                 .environmentObject(vm)
@@ -156,6 +163,7 @@ struct ToolsCommands: Commands {
             Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
             Button("Chart viewer (⇧⌘K)") { openWindow(id: "chart") }
             Button("My Picks (⌥⌘P)") { openWindow(id: "picks") }
+            Button("Experiments — compare your triggers (⌥⌘E)") { openWindow(id: "experiments") }
             Button("Multibaggers — ≥30% in a month, 2023 → now (⌥⌘M)") { openWindow(id: "multibaggers") }
             Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
             Button("Chart Reel — flick through charts (⌥⌘R)") { openWindow(id: "reel") }
