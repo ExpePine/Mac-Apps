@@ -425,7 +425,8 @@ enum ExperimentEngine {
             guard let dx = key.date(from: x), let dy = key.date(from: y) else { return 0 }
             let sign = dx <= dy ? 1 : -1
             var n = 0, d = min(dx, dy)
-            let greg = Calendar(identifier: .gregorian)
+            var greg = Calendar(identifier: .gregorian)
+            greg.timeZone = TimeZone(identifier: "Asia/Kolkata") ?? .current
             while d < max(dx, dy) { let w = greg.component(.weekday, from: d); if w != 1 && w != 7 { n += 1 }; d = d.addingTimeInterval(86_400) }
             return n * sign
         }
