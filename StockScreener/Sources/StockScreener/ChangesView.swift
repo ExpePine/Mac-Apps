@@ -674,9 +674,16 @@ struct ChangeConditionEditor: View {
     }
 
     private var quick: [(String, String, RuleOperator, String)] {
-        func col(_ n: String) -> String { vm.table.index(of: n).map { vm.headers[$0] } ?? n }
-        return [("MS > 99", col("MS"), .greaterThan, "99"), ("DS > 99", col("DS"), .greaterThan, "99"),
-                ("Count = 5", col("Count"), .equals, "5"), ("LongGreen = 1", col("Long_Green"), .equals, "1")]
-            .map { ($0.0, vm.table.index(of: $0.1) == nil && $0.1 == "Long_Green" ? col("LongGreen") : $0.1, $0.2, $0.3) }
+        func col(_ names: [String]) -> String {
+            for n in names { if let i = vm.table.index(of: n) { return vm.headers[i] } }
+            return names[0]
+        }
+        let list: [(String, String, RuleOperator, String)] = [
+            ("MS > 99", col(["MS"]), RuleOperator.greaterThan, "99"),
+            ("DS > 99", col(["DS"]), RuleOperator.greaterThan, "99"),
+            ("Count = 5", col(["Count"]), RuleOperator.equals, "5"),
+            ("LongGreen = 1", col(["Long_Green", "LongGreen", "Long Green"]), RuleOperator.equals, "1"),
+        ]
+        return list
     }
 }
