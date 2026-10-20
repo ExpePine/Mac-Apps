@@ -242,7 +242,7 @@ enum DeliverySignal {
         }
         guard let now = pr(i) else { return nil }
         var j = i - 1
-        while j >= max(1, i - length) {
+        while j >= max(1, i - 2 * length) {           // the previous peak, up to two windows back
             if let v = pr(j), let a = pr(j - 1), let b = pr(j + 1), v >= a, v > b, v > 0 { return now / v }
             j -= 1
         }
