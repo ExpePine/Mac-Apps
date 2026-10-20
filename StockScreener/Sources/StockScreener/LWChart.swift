@@ -104,12 +104,6 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         onUserRange?(a[0], a[1])
     }
 
-    private func handle(_ r: Any?, _ e: Error?) {
-        let s = (r as? String) ?? e?.localizedDescription ?? ""
-        failed = s == "nolib"
-        lastError = s.hasPrefix("err:") || e != nil ? "Chart: \(s)" : nil
-    }
-
     /// Shows the days `from`…`to` (moved by the other chart; doesn't echo back).
     func setRange(from: String, to: String) {
         guard ready else { return }
