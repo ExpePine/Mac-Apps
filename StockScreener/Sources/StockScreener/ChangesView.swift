@@ -25,6 +25,8 @@ struct ChangesView: View {
                     Text(status).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.settings.changeByStock {
+                StockChangesView()
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 520), spacing: 14)], spacing: 14) {
@@ -48,6 +50,8 @@ struct ChangesView: View {
         .onAppear { vm.computeChanges() }
         .onChange(of: vm.filterVersion) { _ in if vm.timelineIndex == nil { vm.computeChanges() } }
         .onChange(of: vm.settings.changeCards) { _ in vm.computeChanges() }
+        .onChange(of: vm.settings.changeWatchColumns) { _ in vm.computeChanges() }
+        .onChange(of: vm.settings.changeStockScope) { _ in vm.computeChanges() }
         .onChange(of: vm.changeCompareDay) { _ in vm.computeChanges() }
         .sheet(isPresented: $showEditor) { ChangeCardsEditor().environmentObject(vm) }
         .sheet(item: $expanded) { card in
@@ -64,6 +68,11 @@ struct ChangesView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("", selection: $vm.settings.changeByStock) {
+                Text("By stock").tag(true)
+                Text("By rule").tag(false)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
             Picker("Compare with", selection: $vm.changeCompareDay) {
                 Text("Previous day").tag(String?.none)
                 ForEach(vm.changeDayOptions.prefix(60), id: \.self) { d in Text(dayText(d)).tag(String?.some(d)) }
@@ -72,8 +81,10 @@ struct ChangesView: View {
             Toggle("Hide empty", isOn: $vm.settings.changeHideEmpty).toggleStyle(.checkbox)
             if vm.isComputingChanges { ProgressView().controlSize(.small) }
             Button { vm.computeChanges() } label: { Image(systemName: "arrow.clockwise") }.help("Recompute")
-            Button { showEditor = true } label: { Label("Edit cards", systemImage: "slider.horizontal.3") }
-                .buttonStyle(.borderedProminent)
+            if !vm.settings.changeByStock {
+                Button { showEditor = true } label: { Label("Edit cards", systemImage: "slider.horizontal.3") }
+                    .buttonStyle(.borderedProminent)
+            }
         }
         .padding(12)
     }
@@ -353,5 +364,223 @@ private struct CardEditorRow: View {
         }
         .padding(.vertical, 4)
         .opacity(card.isEnabled ? 1 : 0.5)
+    }
+}
+
+
+// MARK: - By stock
+
+/// One card per stock that changed in the columns you care about, e.g. TATAMOTORS · Count 4 → 5.
+struct StockChangesView: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var showColumns = false
+    @State private var search = ""
+    @State private var onlyColumn = ""            // "" = any column
+    @State private var alertFor: StockChange?
+
+    private var shown: [StockChange] {
+        let q = search.trimmingCharacters(in: .whitespaces).uppercased()
+        return vm.stockChanges.filter { c in
+            (q.isEmpty || c.symbol.contains(q)) && (onlyColumn.isEmpty || c.fields.contains { $0.column == onlyColumn })
+        }
+    }
+
+    var body: some View {
+        let watched = vm.changeWatchColumnIndices.map { vm.headers[$0] }
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button { showColumns = true } label: {
+                    Label("Columns that matter (\(watched.count))", systemImage: "checklist")
+                }
+                .popover(isPresented: $showColumns, arrowEdge: .bottom) { WatchColumnsPicker().environmentObject(vm) }
+                .help(vm.settings.changeWatchColumns.isEmpty ? "Using your Filter columns — pick the ones whose changes you want to see" : watched.joined(separator: ", "))
+                Picker("", selection: $vm.settings.changeStockScope) {
+                    ForEach(["Filter list", "All stocks", "Watchlists"], id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                Picker("", selection: $onlyColumn) {
+                    Text("Any column").tag("")
+                    ForEach(watched, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().frame(width: 150)
+                .help("Only stocks where this column changed")
+                TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 120)
+                Spacer()
+                Text("\(shown.count) stock\(shown.count == 1 ? "" : "s") changed").font(.caption).foregroundStyle(.secondary)
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            if !vm.manualAlerts.isEmpty { ManualAlertsStrip().environmentObject(vm) }
+            Divider()
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260, maximum: 400), spacing: 12)], spacing: 12) {
+                    ForEach(shown) { c in card(c) }
+                }
+                .padding(14)
+                if shown.isEmpty {
+                    Text(vm.stockChanges.isEmpty ? "No stock changed in the columns you picked." : "Nothing matches the search.")
+                        .foregroundStyle(.secondary).padding(30)
+                }
+            }
+        }
+        .sheet(item: $alertFor) { c in
+            ManualAlertSheet(symbol: c.symbol, row: c.row).environmentObject(vm)
+        }
+    }
+
+    private func card(_ c: StockChange) -> some View {
+        let alerts = vm.manualAlerts.filter { $0.symbol.uppercased() == c.symbol }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button(c.symbol) { vm.openChart(c.symbol, queue: shown.map(\.symbol), openWindow: openWindow) }
+                    .buttonStyle(.plain).font(.headline)
+                    .help("Open chart")
+                if c.entered { Text("entered Filter").font(.caption2.bold()).padding(.horizontal, 5).background(Color.green.opacity(0.25), in: Capsule()) }
+                if c.left { Text("left Filter").font(.caption2.bold()).padding(.horizontal, 5).background(Color.red.opacity(0.25), in: Capsule()) }
+                Spacer()
+                Button { alertFor = c } label: {
+                    Image(systemName: alerts.isEmpty ? "bell" : "bell.fill").foregroundStyle(alerts.isEmpty ? Color.secondary : Color.orange)
+                }
+                .buttonStyle(.borderless)
+                .help(alerts.isEmpty ? "Set a manual alert, e.g. \(vm.closeColumnName) > value" : alerts.map(\.name).joined(separator: "\n"))
+            }
+            Divider()
+            ForEach(c.fields) { f in
+                HStack(spacing: 4) {
+                    Text(f.column).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(f.before).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.tertiary)
+                    Text(f.after).font(.caption.monospacedDigit().bold())
+                    if let d = f.delta {
+                        Text(String(format: abs(d) >= 100 ? "%+.0f" : "%+.2f", d)).font(.caption2.monospacedDigit())
+                            .foregroundStyle(d > 0 ? Color.green : Color.red).frame(minWidth: 44, alignment: .trailing)
+                    }
+                }
+            }
+            if c.fields.isEmpty { Text("No watched column changed").font(.caption).foregroundStyle(.secondary) }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(c.entered ? Color.green.opacity(0.6) : (c.left ? Color.red.opacity(0.6) : Color.secondary.opacity(0.2))))
+    }
+}
+
+/// Choose the columns whose changes matter.
+struct WatchColumnsPicker: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @State private var q = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Columns that matter to you").font(.headline)
+            Text("A stock gets a card when any of these changed since the compared day.").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("Search columns", text: $q).textFieldStyle(.roundedBorder)
+                Button("Use Filter columns") { vm.settings.changeWatchColumns = [] }
+                Button("None") { vm.settings.changeWatchColumns = ["__none__"] }
+            }
+            .controlSize(.small)
+            List {
+                ForEach(vm.headers.filter { q.isEmpty || $0.localizedCaseInsensitiveContains(q) }, id: \.self) { h in
+                    Toggle(h, isOn: Binding(
+                        get: { vm.changeWatchColumnIndices.contains { vm.headers[$0] == h } },
+                        set: { on in
+                            var cur = vm.changeWatchColumnIndices.map { vm.headers[$0] }
+                            if on { if !cur.contains(h) { cur.append(h) } } else { cur.removeAll { $0 == h } }
+                            vm.settings.changeWatchColumns = cur.isEmpty ? ["__none__"] : cur
+                        }))
+                    .toggleStyle(.checkbox)
+                }
+            }
+            .frame(width: 320, height: 380)
+        }
+        .padding(12)
+    }
+}
+
+/// All one-stock alerts at a glance (met now = orange).
+struct ManualAlertsStrip: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Image(systemName: "bell.fill").foregroundStyle(.orange).font(.caption)
+                ForEach(vm.manualAlerts) { a in
+                    let met = !vm.buyMatches(a).isEmpty
+                    HStack(spacing: 4) {
+                        Text(a.name).font(.caption.monospacedDigit())
+                        if met { Text("MET").font(.caption2.bold()).foregroundStyle(.orange) }
+                        Button { vm.settings.buyTriggers.removeAll { $0.id == a.id } } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Delete this alert")
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Capsule().fill(met ? Color.orange.opacity(0.25) : Color.secondary.opacity(0.12)))
+                    .opacity(a.isEnabled ? 1 : 0.5)
+                }
+            }
+            .padding(.horizontal, 14).padding(.bottom, 6)
+        }
+    }
+}
+
+/// Set a manual alert for one stock: column (default D_close), operator, value.
+struct ManualAlertSheet: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.dismiss) private var dismiss
+    let symbol: String
+    let row: SheetRow
+    @State private var column = ""
+    @State private var op: RuleOperator = .greaterThan
+    @State private var value = ""
+    @State private var email = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Alert for \(symbol)", systemImage: "bell.badge").font(.title3.bold())
+            HStack {
+                Picker("", selection: $column) { ForEach(vm.headers, id: \.self) { Text($0).tag($0) } }
+                    .labelsHidden().frame(width: 160)
+                Picker("", selection: $op) {
+                    ForEach([RuleOperator.greaterThan, .greaterOrEqual, .lessThan, .lessOrEqual], id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                TextField("value", text: $value).frame(width: 100).textFieldStyle(.roundedBorder)
+            }
+            if let i = vm.table.index(of: column) {
+                Text("Now: \(column) = \(row.text(i))").font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle("Also email me (uses Email settings)", isOn: $email).toggleStyle(.checkbox)
+            Text("Checked every time new data arrives; shows in the app (and emails) when met. Edit or delete it later here, in the Changes window strip, or under the stock's E button.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            let existing = vm.manualAlerts.filter { $0.symbol.uppercased() == symbol }
+            if !existing.isEmpty {
+                Divider()
+                ForEach(existing) { a in
+                    HStack {
+                        Text(a.name).font(.caption.monospacedDigit())
+                        Spacer()
+                        Button("Delete") { vm.settings.buyTriggers.removeAll { $0.id == a.id } }.controlSize(.small)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Set alert") {
+                    vm.addManualAlert(symbol: symbol, column: column, op: op, value: value.trimmingCharacters(in: .whitespaces), email: email)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(Double(value.trimmingCharacters(in: .whitespaces)) == nil || column.isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
+        .onAppear {
+            column = vm.closeColumnName
+            if let i = vm.table.index(of: column) { value = row.text(i) }
+        }
     }
 }

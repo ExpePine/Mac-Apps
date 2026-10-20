@@ -233,6 +233,9 @@ struct AppSettings: Codable {
     var nnFeatures: [String] = []               // model inputs you picked; empty = auto-pick (Filter columns that are features)
     var changeCards: [ChangeCard] = ChangeCard.defaults(trigger: "D_Trigger")   // Changes screen
     var changeHideEmpty = false
+    var changeWatchColumns: [String] = []       // "By stock": the columns whose changes matter to you ([] = Filter columns)
+    var changeStockScope = "Filter list"        // "Filter list" / "All stocks" / "Watchlists"
+    var changeByStock = true                    // Changes window: one card per stock (else one card per rule)
     // Performance pane
     var perfStudies: [PerfStudy] = [PerfStudy()]
     var perfSheetLink = ""                      // the experiments sheet
@@ -312,6 +315,9 @@ struct AppSettings: Codable {
         nnFeatures      = v(.nnFeatures, d.nnFeatures)
         changeCards     = v(.changeCards, ChangeCard.defaults(trigger: triggerColumn))
         changeHideEmpty = v(.changeHideEmpty, d.changeHideEmpty)
+        changeWatchColumns = v(.changeWatchColumns, d.changeWatchColumns)
+        changeStockScope = v(.changeStockScope, d.changeStockScope)
+        changeByStock = v(.changeByStock, d.changeByStock)
         perfStudies     = v(.perfStudies, d.perfStudies)
         perfSheetLink   = v(.perfSheetLink, d.perfSheetLink)
         perfSymbolColumn = v(.perfSymbolColumn, d.perfSymbolColumn)

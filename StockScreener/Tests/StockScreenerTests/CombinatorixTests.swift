@@ -164,3 +164,23 @@ final class DeliveryAsOfTests: XCTestCase {
         XCTAssertNil(DeliveryColumns.index(of: "2026-10-17", in: a.days))
     }
 }
+
+final class StockChangeTests: XCTestCase {
+    func testByStock() {
+        let prev = SheetTable(headers: ["Symbol", "Count", "Name"], rows: [
+            SheetRow(id: 0, cells: ["TATAMOTORS", "4", "Tata"], numbers: [nil, 4, nil]),
+            SheetRow(id: 1, cells: ["INFY", "7", "Infosys"], numbers: [nil, 7, nil]),
+        ])
+        let now = SheetTable(headers: ["Symbol", "Count", "Name"], rows: [
+            SheetRow(id: 0, cells: ["TATAMOTORS", "5", "Tata"], numbers: [nil, 5, nil]),
+            SheetRow(id: 1, cells: ["INFY", "7", "Infosys"], numbers: [nil, 7, nil]),
+        ])
+        let r = ChangeEngine.byStock(current: now, previous: prev, label: 0, columns: [1, 2], scope: nil, filterNow: [], filterBefore: [])
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r[0].symbol, "TATAMOTORS")
+        XCTAssertEqual(r[0].fields.first?.column, "Count")
+        XCTAssertEqual(r[0].fields.first?.before, "4")
+        XCTAssertEqual(r[0].fields.first?.after, "5")
+        XCTAssertEqual(r[0].fields.first?.delta, 1)
+    }
+}

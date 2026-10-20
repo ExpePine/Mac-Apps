@@ -190,3 +190,55 @@ enum ChangeEngine {
             .filter { !$0.isEmpty })
     }
 }
+
+
+// MARK: - By stock: every stock that changed in the columns you care about
+
+struct StockChange: Identifiable {
+    struct Field: Identifiable {
+        var id: String { column }
+        let column: String
+        let before: String
+        let after: String
+        let delta: Double?            // after − before, when both are numbers
+    }
+    var id: String { symbol }
+    let symbol: String
+    let row: SheetRow
+    let fields: [Field]
+    let entered: Bool                 // now passes the Filter, didn't before
+    let left: Bool                    // passed before, not now
+}
+
+extension ChangeEngine {
+    /// For each stock in `scope` (nil = all): which of `columns` changed between `previous` and `current`.
+    static func byStock(current: SheetTable, previous: SheetTable, label: Int, columns: [Int],
+                        scope: Set<String>?, filterNow: Set<String>, filterBefore: Set<String>) -> [StockChange] {
+        func key(_ r: SheetRow) -> String { r.text(label).trimmingCharacters(in: .whitespaces).uppercased() }
+        var before: [String: SheetRow] = [:]
+        for r in previous.rows { let k = key(r); if !k.isEmpty, before[k] == nil { before[k] = r } }
+        var out: [StockChange] = []
+        var seen = Set<String>()
+        for r in current.rows {
+            let k = key(r)
+            guard !k.isEmpty, seen.insert(k).inserted else { continue }
+            if let scope, !scope.contains(k) && !filterBefore.contains(k) { continue }
+            guard let b = before[k] else { continue }
+            var fields: [StockChange.Field] = []
+            for c in columns where c < current.headers.count {
+                let a = r.text(c).trimmingCharacters(in: .whitespaces), p = b.text(c).trimmingCharacters(in: .whitespaces)
+                if let x = r.number(c), let y = b.number(c) {
+                    if abs(x - y) > 1e-9 * max(1, abs(x)) { fields.append(.init(column: current.headers[c], before: p, after: a, delta: x - y)) }
+                } else if a != p {
+                    fields.append(.init(column: current.headers[c], before: p.isEmpty ? "—" : p, after: a.isEmpty ? "—" : a, delta: nil))
+                }
+            }
+            let entered = filterNow.contains(k) && !filterBefore.contains(k)
+            let left = !filterNow.contains(k) && filterBefore.contains(k)
+            if !fields.isEmpty || entered || left {
+                out.append(StockChange(symbol: k, row: r, fields: fields, entered: entered, left: left))
+            }
+        }
+        return out.sorted { ($0.entered || $0.left ? 0 : 1, -$0.fields.count, $0.symbol) < ($1.entered || $1.left ? 0 : 1, -$1.fields.count, $1.symbol) }
+    }
+}
