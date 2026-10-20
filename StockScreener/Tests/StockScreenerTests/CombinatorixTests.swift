@@ -186,32 +186,46 @@ final class StockChangeTests: XCTestCase {
 }
 
 final class ExperimentTests: XCTestCase {
-    func testPlanGuessAndRun() {
-        let t = SheetTable(headers: ["Symbol", "TrigB", "TrigC"], rows: [
-            SheetRow(id: 0, cells: ["AAA", "2026-01-05", "2026-01-07"], numbers: [nil, nil, nil]),
-            SheetRow(id: 1, cells: ["BBB", "05-01-2026", ""], numbers: [nil, nil, nil]),
+    private func sheet() -> SheetTable {
+        SheetTable(headers: ["Symbol", "TrigB", "TrigC", "Sector"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "2026-01-05", "2026-01-07", "IT"], numbers: [nil, nil, nil, nil]),
+            SheetRow(id: 1, cells: ["BBB", "05-01-2026", "", "Auto"], numbers: [nil, nil, nil, nil]),
         ])
-        let plan = ExperimentEngine.guessPlan("COL A is the shortlist trigger -- here the NSE symbol is shortlisted. COL B and COL C are timing triggers -- compare which among COL B or COL C are doing better", table: t)
-        XCTAssertEqual(plan.symbolColumn, "Symbol")
-        XCTAssertEqual(plan.shortlistColumn, "Symbol")
-        XCTAssertEqual(plan.triggers.map(\.column), ["TrigB", "TrigC"])
-        XCTAssertEqual(plan.triggers.first?.kind, "date")
-        XCTAssertEqual(ExperimentEngine.day("05-01-2026"), "2026-01-05")
-        XCTAssertEqual(ExperimentEngine.day("5-Jan-2026"), "2026-01-05")
-
-        var book = PriceBook()
+    }
+    private func book() -> PriceBook {
+        var b = PriceBook()
         let days = (5...30).map { String(format: "2026-01-%02d", $0) }
-        book.series["AAA"] = PriceSeries(days: days, closes: days.indices.map { 100 + Double($0) })
-        book.series["BBB"] = PriceSeries(days: days, closes: days.indices.map { 100 - Double($0) })
-        var p = plan
+        b.series["AAA"] = PriceSeries(days: days, closes: days.indices.map { 100 + Double($0) })
+        b.series["BBB"] = PriceSeries(days: days, closes: days.indices.map { 100 - Double($0) })
+        return b
+    }
+
+    func testCompareCommand() {
+        let t = sheet()
+        var p = ExperimentEngine.guessPlan("COL A is the shortlist trigger -- here the NSE symbol is shortlisted. COL B and COL C are timing triggers -- compare which among COL B or COL C are doing better", notes: "", table: t, previous: nil)
+        XCTAssertEqual(p.task, "compare")
+        XCTAssertEqual(p.symbolColumn, "Symbol")
+        XCTAssertEqual(p.triggers.map(\.column), ["TrigB", "TrigC"])
+        XCTAssertEqual(p.triggers.first?.kind, "date")
         p.horizons = [5]
-        let r = ExperimentEngine.run(p, table: t, prices: book)
-        XCTAssertEqual(r.shortlisted, 2)
-        XCTAssertEqual(r.stats.first { $0.name == "TrigB" }?.triggered, 2)
-        XCTAssertEqual(r.stats.first { $0.name == "TrigC" }?.triggered, 1)
-        let ret: Double = (r.entries.first { $0.symbol == "AAA" && $0.trigger == "TrigB" }?.returns.first ?? nil) ?? 0
+        let r = ExperimentEngine.run(p, table: t, prices: book(), calendar: [])
+        XCTAssertEqual(r.entries.filter { $0.arm == "TrigB" }.count, 2)
+        XCTAssertEqual(r.entries.filter { $0.arm == "TrigC" }.count, 1)
+        let ret: Double = (r.entries.first { $0.symbol == "AAA" && $0.arm == "TrigB" }?.returns.first ?? nil) ?? 0
         XCTAssertEqual(ret, 5, accuracy: 1e-9)
-        XCTAssertEqual(ExperimentEngine.columnLetter(0), "A")
+        XCTAssertEqual(r.tables.count, 2)         // returns + head to head
+    }
+
+    func testOtherCommands() {
+        let t = sheet()
+        let g = ExperimentEngine.guessPlan("how many days from COL B to COL C", notes: "", table: t, previous: nil)
+        XCTAssertEqual(g.task, "gap")
+        let r = ExperimentEngine.run(g, table: t, prices: PriceBook(), calendar: [])
+        XCTAssertTrue(r.headline.contains("2"), r.headline)          // Jan 5 → Jan 7 = 2 weekdays
+        var f = ExpPlan(); f.task = "compare"; f.symbolColumn = "Symbol"; f.triggers = [ExpTrigger(column: "TrigB")]
+        f.filters = [ExpFilter(column: "Sector", op: "=", value: "IT")]; f.horizons = [5]
+        XCTAssertEqual(ExperimentEngine.run(f, table: t, prices: book(), calendar: []).entries.count, 1)
+        XCTAssertEqual(ExperimentEngine.day("5-Jan-2026"), "2026-01-05")
         XCTAssertEqual(ExperimentEngine.columnLetter(27), "AB")
     }
 }
