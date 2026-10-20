@@ -239,3 +239,28 @@ final class ChangeConditionTests: XCTestCase {
         XCTAssertEqual(ChangeEngine.byStock(current: now, previous: prev, label: 0, columns: [1, 2], scope: nil, filterNow: [], filterBefore: [], include: ["AAA"]).count, 1)
     }
 }
+
+final class ExperimentDateTests: XCTestCase {
+    func testMonthFirstSheetsAndBarsAgo() {
+        let t = SheetTable(headers: ["Symbol", "date", "var2"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "10/19/2026", "3"], numbers: [nil, nil, 3]),
+            SheetRow(id: 1, cells: ["BBB", "10/05/2026", "1"], numbers: [nil, nil, 1]),
+        ])
+        XCTAssertTrue(ExperimentEngine.detectMonthFirst(t))
+        ExperimentEngine.monthFirst = true
+        XCTAssertEqual(ExperimentEngine.day("10/05/2026"), "2026-10-05")
+        ExperimentEngine.monthFirst = false
+        XCTAssertEqual(ExperimentEngine.day("10/05/2026"), "2026-05-10")
+        XCTAssertEqual(ExperimentEngine.day("10/19/2026"), "2026-10-19")      // only valid one way
+        // bars ago: entry 3 trading days before the row date
+        var b = PriceBook()
+        let days = ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19"]
+        b.series["AAA"] = PriceSeries(days: days, closes: [100, 101, 102, 103, 104, 110])
+        var p = ExpPlan(); p.symbolColumn = "Symbol"; p.triggers = [ExpTrigger(column: "var2", kind: "barsAgo")]; p.horizons = [2]
+        let r = ExperimentEngine.run(p, table: t, prices: b, calendar: [])
+        let e = r.entries.first { $0.symbol == "AAA" }
+        XCTAssertEqual(e?.day, "2026-10-14")
+        XCTAssertEqual((e?.returns.first ?? nil) ?? 0, (104.0 / 102 - 1) * 100, accuracy: 1e-9)
+        XCTAssertTrue(r.notes.contains { $0.contains("Row date: using") })
+    }
+}

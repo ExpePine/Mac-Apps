@@ -175,10 +175,55 @@ enum ExperimentEngine {
         let d = DateFormatter(); d.locale = Locale(identifier: "en_US_POSIX"); d.timeZone = TimeZone(identifier: "Asia/Kolkata"); d.dateFormat = "yyyy-MM-dd"; return d
     }()
 
+    /// Set per sheet before reading it: does it write 10/19/2026 (month first) or 19/10/2026 (day first)?
+    static var monthFirst = false
+
     static func day(_ raw: String) -> String? {
         let s = raw.trimmingCharacters(in: .whitespaces)
         guard s.count >= 6, s.rangeOfCharacter(from: .decimalDigits) != nil else { return nil }
+        if let d = numericDay(s) { return d }
         for f in formatters { if let d = f.date(from: s) { return key.string(from: d) } }
+        return nil
+    }
+
+    /// 2026-10-19 · 19/10/2026 · 10/19/2026 · 19-10-26 (with an optional time after a space)
+    private static func numericDay(_ s: String) -> String? {
+        let datePart = s.split(separator: " ").first.map(String.init) ?? s
+        let parts = datePart.split(whereSeparator: { $0 == "/" || $0 == "-" || $0 == "." }).map(String.init)
+        guard parts.count == 3, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }), let a = Int(parts[0]), let b = Int(parts[1]), var c = Int(parts[2]) else { return nil }
+        var y: Int, m: Int, d: Int
+        if parts[0].count == 4 { y = a; m = b; d = c } else {
+            if c < 100 { c += 2000 }
+            y = c
+            (m, d) = monthFirst ? (a, b) : (b, a)
+            if m > 12 && d <= 12 { swap(&m, &d) }            // the other order is the only valid one
+        }
+        guard (1...12).contains(m), (1...31).contains(d), (1990...2100).contains(y) else { return nil }
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    /// Looks at every a/b/yyyy cell: a first number above 12 means day first, a second above 12 means month first.
+    static func detectMonthFirst(_ t: SheetTable) -> Bool {
+        var dayFirst = 0, monthFirst = 0
+        for r in t.rows.prefix(3000) {
+            for c in t.headers.indices {
+                let parts = r.text(c).split(separator: " ").first.map { $0.split(whereSeparator: { $0 == "/" || $0 == "-" || $0 == "." }) } ?? []
+                guard parts.count == 3, parts[0].count <= 2, let a = Int(parts[0]), let b = Int(parts[1]), Int(parts[2]) != nil else { continue }
+                if a > 12 { dayFirst += 1 } else if b > 12 { monthFirst += 1 }
+            }
+        }
+        return monthFirst > dayFirst
+    }
+
+    /// The row's date column: the one you picked, else a column named like "date", else one that is mostly dates.
+    static func rowDateColumn(_ p: ExpPlan, table: SheetTable) -> Int? {
+        if !p.baseDateColumn.isEmpty, let i = table.index(of: p.baseDateColumn) { return i }
+        if let i = table.headers.firstIndex(where: { ["date", "day", "row date", "trade date", "as of", "asof", "dt"].contains($0.lowercased()) }) { return i }
+        let skip = Set(p.triggers.compactMap { table.index(of: $0.column) })
+        for c in table.headers.indices where !skip.contains(c) {
+            let v = table.rows.prefix(200).map { $0.text(c) }.filter { !$0.isEmpty }
+            if v.count >= 5, Double(v.filter { day($0) != nil }.count) / Double(v.count) >= 0.8 { return c }
+        }
         return nil
     }
 
@@ -281,6 +326,7 @@ enum ExperimentEngine {
     }
 
     static func run(_ p: ExpPlan, table: SheetTable, prices: PriceBook, calendar: [String]) -> ExpResult {
+        monthFirst = detectMonthFirst(table)
         var r = ExpResult()
         let issues = problems(p, table: table)
         if !issues.isEmpty { r.notes = issues }
@@ -298,22 +344,28 @@ enum ExperimentEngine {
 
     // MARK: compare
 
-    private static func entry(_ p: ExpPlan, _ t: ExpTrigger?, row: SheetRow, table: SheetTable, baseDay: String?) -> (day: String, price: Double?)? {
-        guard let t, let c = table.index(of: t.column) else { return baseDay.map { ($0, nil) } }
+    private static func entry(_ p: ExpPlan, _ t: ExpTrigger?, row: SheetRow, table: SheetTable, baseDay: String?) -> (day: String, price: Double?, back: Int)? {
+        guard let t, let c = table.index(of: t.column) else { return baseDay.map { ($0, nil, 0) } }
         let v = row.text(c)
         switch t.kind {
-        case "flag": return isOn(v) ? baseDay.map { ($0, nil) } : nil
-        case "price": return row.number(c).flatMap { pr in baseDay.map { ($0, pr) } }
-        default: return day(v).map { ($0, nil) }
+        case "flag": return isOn(v) ? baseDay.map { ($0, nil, 0) } : nil
+        case "price": return row.number(c).flatMap { pr in baseDay.map { ($0, pr, 0) } }
+        case "barsAgo":
+            guard let n = row.number(c) ?? Double(v.trimmingCharacters(in: .whitespaces)), n >= 0, n < 5000 else { return nil }
+            return baseDay.map { ($0, nil, Int(n.rounded())) }
+        default: return day(v).map { ($0, nil, 0) }
         }
     }
 
     private static func compare(_ p: ExpPlan, table: SheetTable, rows: [(row: SheetRow, shortDay: String?)], prices: PriceBook, into r: inout ExpResult) {
         guard let sc = table.index(of: p.symbolColumn) else { r.notes.append("Pick the stock column."); return }
-        let bc = p.baseDateColumn.isEmpty ? nil : table.index(of: p.baseDateColumn)
+        let bc = rowDateColumn(p, table: table)
+        if p.baseDateColumn.isEmpty, let bc { r.notes.append("Row date: using the “\(table.headers[bc])” column.") }
         let hs = p.horizons.filter { $0 > 0 }
         guard !hs.isEmpty else { r.notes.append("Add at least one horizon."); return }
         let grp = groups(p, table: table, rows: rows.map(\.row))
+        var noDate = 0, beforeHistory = 0, tooRecent = 0
+        var latestEntry = ""
         let arms: [ExpTrigger?] = p.triggers.isEmpty ? [nil] : p.triggers.map { Optional($0) }
         var missing = Set<String>()
         var byArm: [String: [ExpEntry]] = [:]
@@ -326,10 +378,19 @@ enum ExperimentEngine {
             guard let s = prices.series(for: sym), !s.days.isEmpty else { missing.insert(sym); continue }
             let baseDay = bc.flatMap { day(row.text($0)) } ?? shortDay
             for t in arms {
-                guard let e = entry(p, t, row: row, table: table, baseDay: baseDay),
-                      let i0 = s.days.firstIndex(where: { $0 >= e.day }) else { continue }
+                guard let e = entry(p, t, row: row, table: table, baseDay: baseDay) else { noDate += 1; continue }
+                let i0: Int
+                if e.back > 0 {
+                    // N trading days before the row date (on the stock's own trading days)
+                    guard let b = s.days.lastIndex(where: { $0 <= e.day }), b - e.back >= 0 else { beforeHistory += 1; continue }
+                    i0 = b - e.back
+                } else {
+                    guard let f = s.days.firstIndex(where: { $0 >= e.day }) else { tooRecent += 1; continue }
+                    i0 = f
+                }
                 let i = i0 + max(0, p.entryDelay)
-                guard i < s.closes.count else { continue }
+                guard i < s.closes.count else { tooRecent += 1; continue }
+                if i + (hs.min() ?? 1) >= s.closes.count { tooRecent += 1; latestEntry = max(latestEntry, s.days[i]) }
                 let price = (p.entryDelay == 0 ? e.price : nil) ?? s.closes[i]
                 guard price > 0 else { continue }
                 var rets: [Double?] = [], best: [Double?] = [], worst: [Double?] = []
@@ -360,6 +421,16 @@ enum ExperimentEngine {
             }
         }
         if !missing.isEmpty { r.notes.append("No Yahoo prices for \(missing.count) stock\(missing.count == 1 ? "" : "s") (e.g. \(missing.sorted().prefix(4).joined(separator: ", ")))") }
+        if noDate > 0 {
+            let flags = p.triggers.filter { $0.kind != "date" }.map(\.name)
+            r.notes.append("\(noDate) row/entry pair\(noDate == 1 ? "" : "s") had no entry date"
+                + (bc == nil && !flags.isEmpty ? " — \(flags.joined(separator: ", ")) need a row date: pick “Row date” in the plan." : " (empty / unreadable cell)."))
+        }
+        if beforeHistory > 0 { r.notes.append("\(beforeHistory) entr\(beforeHistory == 1 ? "y goes" : "ies go") further back than the Yahoo history (5 years).") }
+        if tooRecent > 0 {
+            r.notes.append("\(tooRecent) entr\(tooRecent == 1 ? "y is" : "ies are") too recent to measure\(latestEntry.isEmpty ? "" : " (up to \(latestEntry))"): returns after \(hs.min() ?? 1) trading days need entries at least that old."
+                + (p.triggers.contains { $0.kind == "flag" || $0.kind == "price" } ? " With “non-empty = triggered on the row date”, today's rows can only be measured in a few days — if the cells hold how many bars ago the trigger fired, set the trigger to “bars ago”." : ""))
+        }
 
         var cols = ["Entry", "N"]
         for h in hs { cols += ["\(h)d mean", "\(h)d median", "\(h)d win", "\(h)d hit ≥\(f(p.winPercent, 0))%"] }
@@ -390,7 +461,10 @@ enum ExperimentEngine {
         r.tables.append(t)
         r.barTitle = "Mean return by horizon"
         if let best { r.headline = "Best after \(hs[mid]) trading days: \(best.0) (mean \(pct(best.1)))" }
-        else { r.headline = "\(r.entries.count) entries measured — too few (< 5) per entry type to pick a winner" }
+        else {
+            let measured = r.entries.filter { $0.returns.contains { $0 != nil } }.count
+            r.headline = measured == 0 ? "Nothing could be measured yet — see why below" : "\(measured) entries measured — too few (< 5) per entry type to pick a winner"
+        }
 
         // head to head on rows where two entries both fired (no grouping)
         if p.triggers.count >= 2 {
@@ -481,7 +555,7 @@ enum ExperimentEngine {
 
     private static func relation(_ p: ExpPlan, table: SheetTable, rows: [(row: SheetRow, shortDay: String?)], prices: PriceBook, into r: inout ExpResult) {
         guard let sc = table.index(of: p.symbolColumn) else { r.notes.append("Pick the stock column."); return }
-        let bc = p.baseDateColumn.isEmpty ? nil : table.index(of: p.baseDateColumn)
+        let bc = rowDateColumn(p, table: table)
         let hs = p.horizons.filter { $0 > 0 }
         guard !hs.isEmpty else { return }
         let k = hs.count / 2, h = hs[k]
@@ -566,7 +640,10 @@ enum ExperimentEngine {
         for k in p.triggers.indices {
             if let c = table.index(of: p.triggers[k].column) {
                 let sample = table.rows.prefix(30).map { $0.text(c) }.filter { !$0.isEmpty }
-                p.triggers[k].kind = sample.contains { day($0) != nil } ? "date" : (sample.allSatisfy { (Double($0) ?? 0) > 1.5 } ? "price" : "flag")
+                let nums = sample.compactMap { Double($0.replacingOccurrences(of: ",", with: "")) }
+                p.triggers[k].kind = sample.contains { day($0) != nil } ? "date"
+                    : (nums.count == sample.count && !nums.isEmpty && nums.allSatisfy { $0 == $0.rounded() && $0 >= 0 } && nums.contains { $0 > 1 } ? "barsAgo"
+                       : (nums.count == sample.count && nums.allSatisfy { $0 > 1.5 } ? "price" : "flag"))
             }
         }
         p.explanation = "Read without Groq — check the columns below."
@@ -582,7 +659,10 @@ enum ExperimentEngine {
         You turn a trader's command about their Google Sheet into an analysis plan for an app that computes everything \
         itself (from the sheet and daily closing prices). Use ONLY the exact header names given. Pick one task:
         "compare" = returns after entries: each trigger column is an entry (kind "date": cell is the date; "flag": non-empty/1 means \
-        triggered on the row date; "price": cell is the entry price on the row date); no triggers = enter on the row date.
+        triggered on the row date; "barsAgo": cell is how many trading days (bars) ago the trigger fired, counted back from the row \
+        date — typical when a number column holds ta.barssince-style counts; "price": cell is the entry price on the row date); \
+        no triggers = enter on the row date. Always set baseDateColumn when the sheet has a date column. If you are unsure what a \
+        trigger column's numbers mean, say so in explanation.
         "gap" = trading days between two date columns (gapFrom → gapTo).
         "describe" = numbers / value counts of some columns.
         "relation" = does a higher value of number column(s) go with better returns later.
@@ -612,7 +692,7 @@ enum ExperimentEngine {
         }
         p.triggers = (j["triggers"] as? [[String: Any]] ?? []).compactMap { t in
             guard let c = t["column"] as? String, table.index(of: c) != nil else { return nil }
-            let k = (t["kind"] as? String).flatMap { ["date", "flag", "price"].contains($0) ? $0 : nil } ?? "date"
+            let k = (t["kind"] as? String).flatMap { ["date", "flag", "price", "barsAgo"].contains($0) ? $0 : nil } ?? "date"
             return ExpTrigger(column: c, kind: k, label: t["label"] as? String ?? "")
         }
         p.groupBy = s("groupBy"); p.groupBuckets = Int(n("groupBuckets"))

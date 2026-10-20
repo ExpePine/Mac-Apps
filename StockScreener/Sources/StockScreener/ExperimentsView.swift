@@ -300,7 +300,15 @@ struct CommandCard: View {
                         }.labelsHidden().fixedSize()
                     }
                 }
-                GridRow { Text("Row date").font(.caption); pick($cmd.plan.baseDateColumn) }
+                GridRow {
+                    Text("Row date").font(.caption)
+                    HStack {
+                        pick($cmd.plan.baseDateColumn)
+                        if cmd.plan.baseDateColumn.isEmpty, let t = table, let c = ExperimentEngine.rowDateColumn(cmd.plan, table: t) {
+                            Text("auto: \(t.headers[c])").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 GridRow {
                     Text("Group by").font(.caption)
                     HStack {
@@ -340,7 +348,10 @@ struct CommandCard: View {
                     HStack {
                         pick($t.column, none: false)
                         Picker("", selection: $t.kind) {
-                            Text("cell = date").tag("date"); Text("non-empty / 1 = on the row date").tag("flag"); Text("cell = entry price").tag("price")
+                            Text("cell = date").tag("date")
+                            Text("cell = bars ago (trading days before the row date)").tag("barsAgo")
+                            Text("non-empty / 1 = on the row date").tag("flag")
+                            Text("cell = entry price (on the row date)").tag("price")
                         }.labelsHidden().fixedSize()
                         TextField("label", text: $t.label).frame(width: 90).textFieldStyle(.roundedBorder)
                         Button { cmd.plan.triggers.removeAll { $0.id == t.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
