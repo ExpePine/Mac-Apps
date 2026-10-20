@@ -330,3 +330,17 @@ final class ExperimentInvestTests: XCTestCase {
         XCTAssertTrue(r.headline.contains("worst ₹80,000 (BBB)"), r.headline)
     }
 }
+
+final class JumpTests: XCTestCase {
+    func testSMAAndJump() {
+        XCTAssertEqual(DeliverySignal.sma([1, 2, 3, 4], 2), [0, 1.5, 2.5, 3.5])
+        // mode 1: value now ÷ previous different 3-bar highest
+        let m: [Double] = [5, 4, 3, 2, 10]
+        XCTAssertEqual(DeliverySignal.jump(m, at: 4, mode: 1, length: 3) ?? 0, 10.0 / 4.0, accuracy: 1e-9)   // highest before: max(4,3,2)=4
+        // mode 0: percentrank now ÷ the percent rank's previous local peak
+        let x: [Double] = [1, 2, 3, 1, 1, 1, 5, 1, 1, 1, 9]
+        let j = DeliverySignal.jump(x, at: 10, mode: 0, length: 3)
+        XCTAssertNotNil(j)
+        XCTAssertEqual(j ?? 0, 100.0 / 100.0, accuracy: 1e-9)   // PR at bar 6 (5 vs 1,1,1) = 100, now 100
+    }
+}

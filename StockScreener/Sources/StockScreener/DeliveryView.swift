@@ -10,7 +10,9 @@ struct DeliveryView: View {
     @ObservedObject private var dc = DeliveryCenter.shared
 
     @AppStorage("deliv.length") private var length = 300
-    @AppStorage("deliv.useValue") private var useValue = true     // DELIV_QTY × CLOSE_PRICE (else DELIV_QTY)
+    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
+    @AppStorage("deliv.jumpMode") private var jumpMode = 0
+    private var metric: DeliveryMetric { DeliveryMetric(rawValue: metricRaw) ?? .value }
     @AppStorage("deliv.onlyRises") private var onlyRises = true
     @AppStorage("deliv.full") private var full = true
     @AppStorage("deliv.within") private var within = 5
@@ -61,7 +63,7 @@ struct DeliveryView: View {
         .onChange(of: length) { _ in recompute() }
         .onChange(of: onlyRises) { _ in recompute() }
         .onChange(of: full) { _ in recompute() }
-        .onChange(of: useValue) { _ in recompute() }
+        .onChange(of: metricRaw) { _ in recompute() }
         .onChange(of: within) { _ in recompute() }
         .onChange(of: scope) { _ in recompute() }
         .onChange(of: selected) { s in loadCandles(s); pushChart() }
@@ -96,12 +98,11 @@ struct DeliveryView: View {
             }
             HStack(spacing: 10) {
                 Text("Signal: ta.highest(").font(.caption.monospaced())
-                Picker("", selection: $useValue) {
-                    Text("DELIV_QTY * CLOSE_PRICE").tag(true)
-                    Text("DELIV_QTY").tag(false)
+                Picker("", selection: $metricRaw) {
+                    ForEach(DeliveryMetric.allCases) { m in Text(m.pine).tag(m.rawValue) }
                 }
                 .labelsHidden().fixedSize().font(.caption.monospaced())
-                .help("DELIV_QTY × CLOSE_PRICE = value of shares delivered that day (₹), from NSE's own close")
+                .help("DELIV_QTY × CLOSE_PRICE = value of shares delivered that day (₹); the SMAs smooth it over 22 / 66 days")
                 Text(",").font(.caption.monospaced())
                 TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
                 Text(")").font(.caption.monospaced())
@@ -112,6 +113,13 @@ struct DeliveryView: View {
                 .labelsHidden().fixedSize()
                 .help("New high = the highest rises. Any update = exactly Pine's ta.change(ta.highest(...)) != 0, which also fires when an old high leaves the window.")
                 Toggle("Wait for full \(length) days (like Pine's na)", isOn: $full).toggleStyle(.checkbox)
+                Picker("JUMP =", selection: $jumpMode) {
+                    Text("percentrank now ÷ its previous peak").tag(0)
+                    Text("value now ÷ previous 300-day high").tag(1)
+                }
+                .fixedSize()
+                .help("The Filter's JUMP column. 1: ta.percentrank(DELIV_QTY*close, 300) today ÷ the percent rank's previous peak. 2: DELIV_QTY*close today ÷ the previous (different) ta.highest(DELIV_QTY*close, 300).")
+                .onChange(of: jumpMode) { _ in DeliveryCenter.shared.refreshColumns() }
                 Divider().frame(height: 16)
                 Text("Within last").font(.caption)
                 Stepper("\(within) day\(within == 1 ? "" : "s")", value: $within, in: 1...250).fixedSize()
@@ -129,7 +137,7 @@ struct DeliveryView: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
-    private var metricName: String { useValue ? "DELIV_QTY*CLOSE_PRICE" : "DELIV_QTY" }
+    private var metricName: String { metric.pine }
 
     private var storedText: String {
         guard let a = dc.storedDays.first, let b = dc.storedDays.last else { return "No delivery data yet" }
@@ -175,7 +183,7 @@ struct DeliveryView: View {
                 TableColumn("Symbol") { r in Text(r.symbol).bold() }.width(min: 80, ideal: 100)
                 TableColumn("Signal day") { r in Text(r.lastSignal ?? "—").monospacedDigit() }.width(min: 80, ideal: 90)
                 TableColumn("Ago") { r in Text(r.barsAgo.map { $0 == 0 ? "today" : "\($0)d" } ?? "—").monospacedDigit() }.width(min: 40, ideal: 48)
-                TableColumn(useValue ? "Deliv value ₹" : "DELIV_QTY") { r in Text(Self.short(r.qty)).monospacedDigit() }.width(min: 70, ideal: 85)
+                TableColumn(metric.short) { r in Text(Self.short(r.qty)).monospacedDigit() }.width(min: 70, ideal: 85)
                 TableColumn("× avg") { r in Text(r.xAvg.map { String(format: "%.1f×", $0) } ?? "—").monospacedDigit() }.width(min: 45, ideal: 52)
                 TableColumn("Deliv %") { r in Text(String(format: "%.0f%%", r.per)).monospacedDigit() }.width(min: 45, ideal: 52)
                 TableColumn("Signals") { r in Text("\(r.signals)").monospacedDigit().foregroundStyle(.secondary) }.width(min: 40, ideal: 50)
@@ -216,7 +224,7 @@ struct DeliveryView: View {
                 if loadingChart { ProgressView("Yahoo prices…").controlSize(.small) }
                 if let e = chartError { Text("Yahoo: \(e) — showing delivery only").font(.caption).foregroundStyle(.orange) }
                 if pane == "Data", let series = dc.book.series[s] {
-                    DeliveryDataTable(symbol: s, series: series, useValue: useValue, length: max(2, length), full: full, onlyRises: onlyRises,
+                    DeliveryDataTable(symbol: s, series: series, metric: metric, length: max(2, length), full: full, onlyRises: onlyRises,
                                       calendar: dc.calendar, lastDay: dc.book.days.last ?? "")
                 } else {
                     LWChartView(holder: lw)
@@ -232,7 +240,7 @@ struct DeliveryView: View {
         .padding(10)
         .onChange(of: candles.count) { _ in pushChart() }
         .onChange(of: range) { _ in pushChart() }
-        .onChange(of: useValue) { _ in pushChart() }
+        .onChange(of: metricRaw) { _ in pushChart() }
         .onChange(of: length) { _ in pushChart() }
         .onChange(of: onlyRises) { _ in pushChart() }
         .onChange(of: full) { _ in pushChart() }
@@ -244,7 +252,7 @@ struct DeliveryView: View {
         let c = DeliveryColumns.of(s, latestDay: s.days.last ?? "")
         let have = Set(s.days)
         let missing = dc.calendar.filter { $0 >= (s.days.first ?? "") && $0 <= (dc.book.days.last ?? "") && !have.contains($0) }
-        let m = s.metric(value: useValue)
+        let m = s.metric(metric)
         let h = DeliverySignal.highest(m, length: max(2, length), full: full).last ?? nil
         let sig = DeliverySignal.signals(m, length: max(2, length), full: full, onlyRises: onlyRises)
         let p20 = s.per.suffix(20), p100 = s.per.suffix(100)
@@ -257,6 +265,7 @@ struct DeliveryView: View {
             Text("\(sig.count) signal\(sig.count == 1 ? "" : "s")").foregroundStyle(.orange)
             if let sf = c.safety { Text("Safety \(Self.short(sf))") }
             if let pr = c.pctRank { Text("DQ_PRANK \(String(format: "%.0f", pr))") }
+            if let j = c.jump { Text("JUMP \(String(format: "%.2f", j))") }
             if !missing.isEmpty {
                 Text("⚠️ \(missing.count) trading day\(missing.count == 1 ? "" : "s") without an NSE row")
                     .foregroundStyle(.orange)
@@ -269,7 +278,7 @@ struct DeliveryView: View {
 
     private func pushChart() {
         guard let s = selected else { return }
-        lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, useValue: useValue, length: max(2, length),
+        lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar))
     }
 
@@ -285,17 +294,17 @@ struct DeliveryView: View {
         var sigs: [(symbol: String, days: [String])] = []
         for (sym, s) in book.series {
             if let allowed, !allowed.contains(sym) { continue }
-            let idx = DeliverySignal.signals(s.metric(value: useValue), length: len, full: full, onlyRises: onlyRises)
+            let idx = DeliverySignal.signals(s.metric(metric), length: len, full: full, onlyRises: onlyRises)
             if !idx.isEmpty { sigs.append((sym, idx.map { s.days[$0] })) }
         }
-        let script = DeliveryPine.script(signals: sigs, metric: useValue ? "DELIV_QTY*CLOSE_PRICE" : "DELIV_QTY", length: len)
+        let script = DeliveryPine.script(signals: sigs, metric: metric.pine, length: len)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(script, forType: .string)
         dc.status = "Pine Script copied: \(sigs.count) stocks, \(sigs.reduce(0) { $0 + $1.days.count }) signal days (\(script.count / 1024) KB). In TradingView: Pine Editor → paste → Add to chart (on both layouts)."
     }
 
     private func points(_ s: DeliverySeries) -> [DelivPoint] {
-        let m = s.metric(value: useValue)
+        let m = s.metric(metric)
         let h = DeliverySignal.highest(m, length: length, full: full)
         let sig = Set(DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises))
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
@@ -336,7 +345,7 @@ struct DeliveryView: View {
 
     private func recompute() {
         let book = dc.book
-        let len = max(2, length), fl = full, rises = onlyRises, win = within, val = useValue
+        let len = max(2, length), fl = full, rises = onlyRises, win = within, val = metric
         let lastIndex = book.days.count - 1
         var allowed: Set<String>? = nil
         if let label = vm.labelIndex {
@@ -353,7 +362,7 @@ struct DeliveryView: View {
             let both = await Task.detached(priority: .userInitiated) { () -> ([DelivRow], [DelivRow]) in
                 var res: [DelivRow] = [], every: [DelivRow] = []
                 for (sym, s) in book.series {
-                    let m = s.metric(value: val)
+                    let m = s.metric(val)
                     let sig = DeliverySignal.signals(m, length: len, full: fl, onlyRises: rises)
                     let at = sig.last ?? (m.count - 1)
                     guard at >= 0 else { continue }
@@ -397,18 +406,19 @@ struct DeliveryMiniChart: View {
     @ObservedObject private var dc = DeliveryCenter.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("deliv.length") private var length = 300
-    @AppStorage("deliv.useValue") private var useValue = true
+    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
+    private var metric: DeliveryMetric { DeliveryMetric(rawValue: metricRaw) ?? .value }
     @AppStorage("deliv.onlyRises") private var onlyRises = true
     @AppStorage("deliv.full") private var full = true
     @AppStorage("viewer.delivRange") private var range = "1Y"
 
     var body: some View {
         let s = dc.book.series[SymbolBook.clean(symbol)]
-        let sig = s.map { DeliverySignal.signals($0.metric(value: useValue), length: max(2, length), full: full, onlyRises: onlyRises) } ?? []
+        let sig = s.map { DeliverySignal.signals($0.metric(metric), length: max(2, length), full: full, onlyRises: onlyRises) } ?? []
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text("Delivery").font(.caption.bold())
-                Text(useValue ? "DELIV_QTY × CLOSE" : "DELIV_QTY").font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(metric.pine).font(.caption.monospaced()).foregroundStyle(.secondary)
                 if let s, let last = sig.last {
                     let ago = dc.book.days.count - 1 - (dc.book.days.firstIndex(of: s.days[last]) ?? dc.book.days.count - 1)
                     Text("last \(length)-day high: \(s.days[last]) (\(ago == 0 ? "today" : "\(ago)d ago")) · \(sig.count) in history")
@@ -430,14 +440,14 @@ struct DeliveryMiniChart: View {
         .task(id: symbol) { push() }
         .onChange(of: dc.revision) { _ in push() }
         .onChange(of: range) { _ in push() }
-        .onChange(of: useValue) { _ in push() }
+        .onChange(of: metricRaw) { _ in push() }
         .onChange(of: colorScheme) { _ in push() }
     }
 
     private func push() {
         let sym = symbol.uppercased()
         guard let s = dc.book.series[sym] else { return }
-        lw.show(LWChartData.make(symbol: sym, series: s, candles: [], useValue: useValue, length: max(2, length),
+        lw.show(LWChartData.make(symbol: sym, series: s, candles: [], metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar))
     }
 }
@@ -447,7 +457,7 @@ struct DeliveryMiniChart: View {
 struct DeliveryDataTable: View {
     let symbol: String
     let series: DeliverySeries
-    let useValue: Bool
+    let metric: DeliveryMetric
     let length: Int
     let full: Bool
     let onlyRises: Bool
@@ -462,7 +472,7 @@ struct DeliveryDataTable: View {
     }
 
     private var rows: [Row] {
-        let m = series.metric(value: useValue)
+        let m = series.metric(metric)
         let h = DeliverySignal.highest(m, length: length, full: full)
         let sig = Set(DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises))
         var out: [Row] = []

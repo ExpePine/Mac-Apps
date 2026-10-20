@@ -148,6 +148,15 @@ struct DeliverySeries {
     func metric(value: Bool) -> [Double] {
         value ? zip(qty, close).map { $0 * $1 } : qty
     }
+
+    func metric(_ k: DeliveryMetric) -> [Double] {
+        switch k {
+        case .value: return metric(value: true)
+        case .qty: return qty
+        case .sma22: return DeliverySignal.sma(metric(value: true), 22)
+        case .sma66: return DeliverySignal.sma(metric(value: true), 66)
+        }
+    }
 }
 
 struct DeliveryBook {
@@ -174,7 +183,72 @@ struct DeliveryBook {
     }
 }
 
+/// What ta.highest(…, 300) and the charts are computed on.
+enum DeliveryMetric: String, CaseIterable, Identifiable {
+    case value, qty, sma22, sma66
+    var id: String { rawValue }
+    var pine: String {
+        switch self {
+        case .value: return "DELIV_QTY*CLOSE_PRICE"
+        case .qty: return "DELIV_QTY"
+        case .sma22: return "ta.sma(DELIV_QTY*CLOSE_PRICE, 22)"
+        case .sma66: return "ta.sma(DELIV_QTY*CLOSE_PRICE, 66)"
+        }
+    }
+    var short: String {
+        switch self {
+        case .value: return "Deliv value ₹"
+        case .qty: return "DELIV_QTY"
+        case .sma22: return "SMA22 value ₹"
+        case .sma66: return "SMA66 value ₹"
+        }
+    }
+    static var current: DeliveryMetric { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value }
+}
+
 enum DeliverySignal {
+    /// Pine's ta.sma(x, n); the first n − 1 bars (na in Pine) are 0 so they can never be a high.
+    static func sma(_ x: [Double], _ n: Int) -> [Double] {
+        guard n > 1 else { return x }
+        var out = [Double](repeating: 0, count: x.count)
+        var sum = 0.0
+        for i in x.indices {
+            sum += x[i]
+            if i >= n { sum -= x[i - n] }
+            if i >= n - 1 { out[i] = sum / Double(n) }
+        }
+        return out
+    }
+
+    /// JUMP on bar i of `m` (DELIV_QTY × CLOSE):
+    ///  mode 0 — ta.percentrank(m, 300) now ÷ the percent rank's previous peak (its last local high before today)
+    ///  mode 1 — m now ÷ the previous different value of ta.highest(m, 300) (how big the new high is vs the old one)
+    static func jump(_ m: [Double], at i: Int, mode: Int, length: Int = 300) -> Double? {
+        guard i > 0, i < m.count else { return nil }
+        if mode == 1 {
+            let h = highest(m, length: length, full: true)
+            guard let cur = h[i] else { return nil }
+            var k = i - 1
+            while k >= 0, let v = h[k], v == cur { k -= 1 }
+            guard k >= 0, let prev = h[k], prev > 0 else { return nil }
+            return m[i] / prev
+        }
+        var cache: [Int: Double?] = [:]
+        func pr(_ j: Int) -> Double? {
+            if let c = cache[j] { return c }
+            let v = DeliveryColumns.percentRank(m, length: length, at: j)
+            cache[j] = v
+            return v
+        }
+        guard let now = pr(i) else { return nil }
+        var j = i - 1
+        while j >= max(1, i - length) {
+            if let v = pr(j), let a = pr(j - 1), let b = pr(j + 1), v >= a, v > b, v > 0 { return now / v }
+            j -= 1
+        }
+        return nil
+    }
+
     /// Rolling highest of `x` over the last `length` bars (like Pine's ta.highest). nil until `length` bars
     /// exist when `full` is on (Pine returns na then); otherwise uses what's there.
     static func highest(_ x: [Double], length: Int, full: Bool) -> [Double?] {
@@ -210,6 +284,7 @@ struct DeliveryColumns {
     let dlvr: Double?        // ₹ Cr of DELIV_QTY×CLOSE on the latest NSE day, only when the 300-day highest updated that day
     let safety: Double?      // ta.sma(DELIV_QTY, 100) × 0.05 (shares)
     var pctRank: Double? = nil   // ta.percentrank(DELIV_QTY, 300) on the latest day (0–100)
+    var jump: Double? = nil      // JUMP (see DeliverySignal.jump)
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -227,7 +302,9 @@ struct DeliveryColumns {
         let sig = DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises)
         let dlvr: Double? = sig.last == i ? m[i] / 1e7 : nil
         let safety: Double? = i >= 99 ? s.qty[(i - 99)...i].reduce(0, +) / 100 * 0.05 : nil
-        return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i), day: latestDay)
+        let mode = UserDefaults.standard.integer(forKey: "deliv.jumpMode")
+        return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
+                               jump: DeliverySignal.jump(m, at: i, mode: mode), day: latestDay)
     }
 
     /// Binary search in sorted day keys.
@@ -289,6 +366,9 @@ struct DeliveryColumns {
         let have = Set(storedDays)
         return calendar.filter { $0 >= first && !have.contains($0) }
     }
+
+    /// Recompute the Filter columns (e.g. after changing how JUMP is calculated).
+    func refreshColumns() { colCache = nil; onReload?() }
 
     /// The stored NSE day the Filter columns use for a data day (the same day, or the last one before it).
     func nseDay(asOf: String) -> String? { book.days.last(where: { $0 <= asOf }) }
