@@ -103,9 +103,9 @@ enum NSEDeliveryClient {
                     if attempt == 2 { return .blocked("NSE answered HTTP \(status)") }
                     continue
                 }
-                guard status == 200 else { return .noFile }
+                guard status == 200 else { return .blocked("NSE answered HTTP \(status)") }
                 let rows = parse(data)
-                return rows.isEmpty ? .noFile : .rows(rows)
+                return rows.isEmpty ? .blocked("NSE sent an empty or unreadable file") : .rows(rows)
             } catch {
                 if attempt == 2 { return .blocked(error.localizedDescription) }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -216,14 +216,29 @@ struct DeliveryColumns {
     static var onlyRises: Bool { UserDefaults.standard.object(forKey: "deliv.onlyRises") as? Bool ?? true }
     static var full: Bool { UserDefaults.standard.object(forKey: "deliv.full") as? Bool ?? true }
 
-    /// Same rules as Pine: ta.highest(DELIV_QTY*close, 300) (na until 300 bars) and ta.sma(DELIV_QTY, 100) (na until 100 bars).
+    /// Values on the NSE day `latestDay` (normally the Filter's data day) — Pine rules: ta.highest(DELIV_QTY*close, 300)
+    /// (na until 300 bars), ta.sma(DELIV_QTY, 100) (na until 100 bars), ta.percentrank(DELIV_QTY, 300).
+    /// If the stock has no NSE row on that day, everything is unknown (nil).
     static func of(_ s: DeliverySeries, latestDay: String) -> DeliveryColumns {
-        let m = s.metric(value: true)
+        guard let i = index(of: latestDay, in: s.days) else {
+            return DeliveryColumns(dlvr: nil, safety: nil, pctRank: nil, day: latestDay)
+        }
+        let m = Array(s.metric(value: true)[...i])
         let sig = DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises)
-        let n = s.qty.count
-        let dlvr: Double? = (sig.last == n - 1 && s.days.last == latestDay) ? m[n - 1] / 1e7 : nil
-        let safety: Double? = n >= 100 ? s.qty.suffix(100).reduce(0, +) / 100 * 0.05 : nil
-        return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300), day: s.days.last ?? "")
+        let dlvr: Double? = sig.last == i ? m[i] / 1e7 : nil
+        let safety: Double? = i >= 99 ? s.qty[(i - 99)...i].reduce(0, +) / 100 * 0.05 : nil
+        return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i), day: latestDay)
+    }
+
+    /// Binary search in sorted day keys.
+    static func index(of day: String, in days: [String]) -> Int? {
+        var lo = 0, hi = days.count - 1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if days[mid] == day { return mid }
+            if days[mid] < day { lo = mid + 1 } else { hi = mid - 1 }
+        }
+        return nil
     }
 
     /// Pine's ta.percentrank(src, length) on the last bar: % of the previous `length` values that are ≤ the current one
@@ -236,10 +251,11 @@ struct DeliveryColumns {
         return Double(c) / Double(length) * 100
     }
 
-    static func all(_ b: DeliveryBook) -> [String: DeliveryColumns] {
-        let latest = b.days.last ?? ""
+    /// Every stock's values on the stored NSE day closest to (not after) `asOf`.
+    static func all(_ b: DeliveryBook, asOf: String? = nil) -> [String: DeliveryColumns] {
+        let day = asOf.flatMap { a in b.days.last(where: { $0 <= a }) } ?? b.days.last ?? ""
         var out: [String: DeliveryColumns] = [:]
-        for (sym, s) in b.series { out[sym] = of(s, latestDay: latest) }
+        for (sym, s) in b.series { out[sym] = of(s, latestDay: day) }
         return out
     }
 }
@@ -260,6 +276,53 @@ struct DeliveryColumns {
     /// latest NSE day, else nil) and Safety (= ta.sma(DELIV_QTY, 100) × 0.05).
     @Published private(set) var columns: [String: DeliveryColumns] = [:]
     var onReload: (() -> Void)?
+    /// NSE trading days (from Yahoo's NIFTY 50 history) — the reference to find gaps in the stored files.
+    @Published private(set) var calendar: [String] = []
+    private var colCache: (rev: Int, day: String, cols: [String: DeliveryColumns])?
+    private var calendarCheckedAt = Date.distantPast
+
+    private static var calendarURL: URL { DeliveryFiles.folder.appendingPathComponent("nse_trading_days.json") }
+
+    /// Trading days with no stored file, between the first stored day and the last trading day.
+    var gaps: [String] {
+        guard let first = storedDays.first else { return [] }
+        let have = Set(storedDays)
+        return calendar.filter { $0 >= first && !have.contains($0) }
+    }
+
+    /// The stored NSE day the Filter columns use for a data day (the same day, or the last one before it).
+    func nseDay(asOf: String) -> String? { book.days.last(where: { $0 <= asOf }) }
+
+    /// DLVR / Safety / DQ_PRANK for every stock on the NSE day matching `asOf` (cached per data revision and day).
+    func columns(asOf: String) -> [String: DeliveryColumns] {
+        let day = nseDay(asOf: asOf) ?? ""
+        if let c = colCache, c.rev == revision, c.day == day { return c.cols }
+        let cols = DeliveryColumns.all(book, asOf: asOf)
+        colCache = (revision, day, cols)
+        return cols
+    }
+
+    /// Fetches NSE's trading calendar (Yahoo ^NSEI daily bars, 5 years) and keeps it on disk.
+    func refreshCalendar() async {
+        if calendar.isEmpty, let d = try? Data(contentsOf: Self.calendarURL), let c = try? JSONDecoder().decode([String].self, from: d) { calendar = c }
+        guard Date().timeIntervalSince(calendarCheckedAt) > 6 * 3600 else { return }
+        calendarCheckedAt = Date()
+        guard let s = try? await YahooClient.daily("^NSEI", range: "5y") else { return }
+        let merged = Array(Set(calendar).union(s.days)).sorted()
+        calendar = merged
+        if let d = try? JSONEncoder().encode(merged) { try? d.write(to: Self.calendarURL, options: .atomic) }
+    }
+
+    /// Checks the stored days against the trading calendar and downloads any that are missing.
+    func repairGaps() {
+        Task {
+            await refreshCalendar()
+            let g = gaps
+            guard !g.isEmpty else { status = "Checked against NSE's trading calendar: no missing days (\(storedDays.count) stored)."; return }
+            status = "\(g.count) trading day\(g.count == 1 ? "" : "s") missing (e.g. \(g.prefix(3).joined(separator: ", "))) — downloading…"
+            download(target: max(600, storedDays.count), extra: g)
+        }
+    }
 
     private var task: Task<Void, Never>?
     private var lastAutoCheck = Date.distantPast
@@ -293,11 +356,19 @@ struct DeliveryColumns {
             self.book = b
             self.storedDays = days
             self.columns = cols
+            self.colCache = nil
             self.isLoading = false
             self.revision += 1
             self.onReload?()
+            // once per session: find days missing against the trading calendar and fetch them
+            if !self.repairedThisSession, !days.isEmpty {
+                self.repairedThisSession = true
+                await self.refreshCalendar()
+                if !self.gaps.isEmpty && !self.isFetching { self.repairGaps() }
+            }
         }
     }
+    private var repairedThisSession = false
 
     /// Weekdays from today back until `target` trading days are covered (holidays allowed for), newest first.
     private func wantedDays(target: Int) -> [String] {
@@ -319,9 +390,16 @@ struct DeliveryColumns {
     }
 
     /// Downloads every missing trading day back to `target` days (first run ≈ 600 files; later runs only new days).
-    func download(target: Int = 600) {
+    func download(target: Int = 600, extra: [String] = []) {
         guard !isFetching else { return }
-        let todo = wantedDays(target: target)
+        // Trading days (per the calendar) are never "holidays": forget any that were wrongly marked
+        let cal = Set(calendar)
+        var none = DeliveryFiles.missing()
+        if !cal.isEmpty { let before = none.count; none.subtract(cal); if none.count != before { DeliveryFiles.saveMissing(none) } }
+        var todo = wantedDays(target: target)
+        let have = Set(DeliveryFiles.days())
+        for d in extra + gaps where !have.contains(d) && !todo.contains(d) { todo.append(d) }
+        todo.sort(by: >)
         guard !todo.isEmpty else { status = "Up to date — \(storedDays.count) days stored."; return }
         isFetching = true
         progress = (0, todo.count)
@@ -330,6 +408,7 @@ struct DeliveryColumns {
         task = Task {
             var missing = DeliveryFiles.missing()
             var got = 0, blockedRun = 0
+            var notYet: [String] = []
             var blockedMsg: String?
             let width = 4
             var i = 0
@@ -348,7 +427,8 @@ struct DeliveryColumns {
                         try? DeliveryFiles.save(rows, day: d)
                         got += 1; blockedRun = 0
                     case .noFile:
-                        if d < today { missing.insert(d) }          // today's file may simply not be out yet
+                        // a holiday — unless NSE's calendar says it was a trading day (then try again next time)
+                        if d < today && !cal.contains(d) { missing.insert(d) } else { notYet.append(d) }
                         blockedRun = 0
                     case .blocked(let m):
                         blockedRun += 1; blockedMsg = m
@@ -365,6 +445,7 @@ struct DeliveryColumns {
                 self.status = "NSE stopped answering (\(blockedMsg ?? "blocked")) after \(got) days — try again later; what was saved is kept."
             } else {
                 self.status = Task.isCancelled ? "Stopped — \(got) new days saved." : "Done — \(got) new trading day\(got == 1 ? "" : "s") saved."
+                    + (notYet.filter { $0 < today }.isEmpty ? "" : " NSE has no file yet for \(notYet.filter { $0 < today }.sorted().prefix(4).joined(separator: ", ")) — will retry.")
             }
             self.reload()
         }

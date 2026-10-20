@@ -9,7 +9,7 @@ import WebKit
 
 struct LWChartData: Encodable {
     struct Candle: Encodable { let time: String; let open, high, low, close: Double }
-    struct Point: Encodable { let time: String; let value: Double; var color: String? = nil }
+    struct Point: Encodable { let time: String; let value: Double?; var color: String? = nil }   // value nil = empty day (gap)
     struct Marker: Encodable { let time: String; let position = "belowBar"; let color = "#FF9800"; let shape = "arrowUp"; let text: String }
     var candles: [Candle] = []
     var deliv: [Point] = []
@@ -23,7 +23,7 @@ struct LWChartData: Encodable {
 
     /// Builds the chart data for one stock from its delivery series and (optional) Yahoo candles.
     static func make(symbol: String, series: DeliverySeries?, candles: [YahooClient.Candle], useValue: Bool,
-                     length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool) -> LWChartData {
+                     length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool, calendar: [String] = []) -> LWChartData {
         var d = LWChartData()
         d.title = symbol
         d.metric = useValue ? "DELIV_QTY×CLOSE" : "DELIV_QTY"
@@ -44,6 +44,14 @@ struct LWChartData: Encodable {
                 if isSig {
                     d.bands.append(Point(time: s.days[i], value: 1, color: "rgba(255,152,0,0.22)"))
                     d.markers.append(Marker(time: s.days[i], text: "DQ"))
+                }
+            }
+            // Trading days with no NSE row for this stock: keep their place on the date axis (empty bar)
+            if let first = s.days.first, let last = s.days.last {
+                let have = Set(s.days)
+                let empty = calendar.filter { $0 > first && $0 < last && !have.contains($0) }
+                if !empty.isEmpty {
+                    d.deliv = (d.deliv + empty.map { Point(time: $0, value: nil) }).sorted { $0.time < $1.time }
                 }
             }
         }

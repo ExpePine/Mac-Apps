@@ -379,7 +379,10 @@ final class ScreenerViewModel: ObservableObject {
     /// Adds DLVR (₹ Cr on the day ta.highest(DELIV_QTY×CLOSE, 300) updated — the latest NSE day — else blank)
     /// and Safety (ta.sma(DELIV_QTY, 100) × 0.05) from the stored NSE delivery data.
     private func withDeliveryColumns(_ t: SheetTable) -> SheetTable {
-        let cols = DeliveryCenter.shared.columns
+        let dc = DeliveryCenter.shared
+        guard !dc.storedDays.isEmpty else { return t }
+        // Same day as the sheet's data (or the last NSE day before it), not each stock's own last row
+        let cols = dc.columns(asOf: HistoryStore.dayKey(dataDay(of: t)))
         guard !cols.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
         let dName = t.index(of: "DLVR") == nil ? "DLVR" : "DLVR (NSE)"
         let sName = t.index(of: "Safety") == nil ? "Safety" : "Safety (NSE)"

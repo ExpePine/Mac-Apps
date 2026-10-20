@@ -86,6 +86,10 @@ struct DeliveryView: View {
                     .labelsHidden().fixedSize().help("How many trading days of history to keep complete")
                 }
                 if dc.isLoading { ProgressView().controlSize(.small); Text("Reading…").font(.caption) }
+                if !dc.isFetching && !dc.storedDays.isEmpty {
+                    Button("Check gaps") { dc.repairGaps() }
+                        .help("Compares the stored days with NSE's trading calendar (NIFTY 50 trading days from Yahoo) and downloads any missing day")
+                }
                 Text(storedText).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if let s = dc.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
@@ -130,7 +134,9 @@ struct DeliveryView: View {
     private var storedText: String {
         guard let a = dc.storedDays.first, let b = dc.storedDays.last else { return "No delivery data yet" }
         let mb = Double(DeliveryFiles.totalBytes()) / 1_048_576
-        return "\(dc.storedDays.count) trading days (\(a) → \(b)) · \(dc.book.series.count) symbols · \(String(format: "%.1f", mb)) MB compressed"
+        let g = dc.gaps.count
+        return "\(dc.storedDays.count) trading days (\(a) → \(b)) · \(dc.book.series.count) symbols · \(String(format: "%.1f", mb)) MB"
+            + (dc.calendar.isEmpty ? "" : (g == 0 ? " · ✓ matches NSE trading calendar" : " · ⚠️ \(g) trading day\(g == 1 ? "" : "s") missing"))
     }
 
     private var empty: some View {
@@ -210,7 +216,8 @@ struct DeliveryView: View {
                 if loadingChart { ProgressView("Yahoo prices…").controlSize(.small) }
                 if let e = chartError { Text("Yahoo: \(e) — showing delivery only").font(.caption).foregroundStyle(.orange) }
                 if pane == "Data", let series = dc.book.series[s] {
-                    DeliveryDataTable(symbol: s, series: series, useValue: useValue, length: max(2, length), full: full, onlyRises: onlyRises)
+                    DeliveryDataTable(symbol: s, series: series, useValue: useValue, length: max(2, length), full: full, onlyRises: onlyRises,
+                                      calendar: dc.calendar, lastDay: dc.book.days.last ?? "")
                 } else {
                     LWChartView(holder: lw)
                         .frame(minHeight: 380)
@@ -234,7 +241,9 @@ struct DeliveryView: View {
 
     /// One-line summary of the stock's delivery pattern.
     private func stats(_ s: DeliverySeries) -> some View {
-        let c = DeliveryColumns.of(s, latestDay: dc.book.days.last ?? "")
+        let c = DeliveryColumns.of(s, latestDay: s.days.last ?? "")
+        let have = Set(s.days)
+        let missing = dc.calendar.filter { $0 >= (s.days.first ?? "") && $0 <= (dc.book.days.last ?? "") && !have.contains($0) }
         let m = s.metric(value: useValue)
         let h = DeliverySignal.highest(m, length: max(2, length), full: full).last ?? nil
         let sig = DeliverySignal.signals(m, length: max(2, length), full: full, onlyRises: onlyRises)
@@ -248,6 +257,11 @@ struct DeliveryView: View {
             Text("\(sig.count) signal\(sig.count == 1 ? "" : "s")").foregroundStyle(.orange)
             if let sf = c.safety { Text("Safety \(Self.short(sf))") }
             if let pr = c.pctRank { Text("DQ_PRANK \(String(format: "%.0f", pr))") }
+            if !missing.isEmpty {
+                Text("⚠️ \(missing.count) trading day\(missing.count == 1 ? "" : "s") without an NSE row")
+                    .foregroundStyle(.orange)
+                    .help("Trading days (NSE calendar) with no row for this stock: \(missing.suffix(12).joined(separator: ", "))\(missing.count > 12 ? " …" : ""). Usually suspension / no trades — or a day not downloaded yet (see the header).")
+            }
             if let d = c.dlvr { Text("DLVR \(String(format: "%.2f", d)) Cr today").foregroundStyle(.orange).bold() }
         }
         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -256,7 +270,7 @@ struct DeliveryView: View {
     private func pushChart() {
         guard let s = selected else { return }
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, useValue: useValue, length: max(2, length),
-                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark))
+                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar))
     }
 
     /// Pine Script that paints the same signal days on your TradingView charts (for the stocks in scope).
@@ -423,7 +437,7 @@ struct DeliveryMiniChart: View {
         let sym = symbol.uppercased()
         guard let s = dc.book.series[sym] else { return }
         lw.show(LWChartData.make(symbol: sym, series: s, candles: [], useValue: useValue, length: max(2, length),
-                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark))
+                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar))
     }
 }
 
@@ -436,11 +450,14 @@ struct DeliveryDataTable: View {
     let length: Int
     let full: Bool
     let onlyRises: Bool
+    var calendar: [String] = []
+    var lastDay = ""
 
     struct Row: Identifiable {
         var id: String { day }
         let day: String, close: Double, qty: Double, per: Double, value: Double
         let highest: Double?, signal: Bool, safety: Double?, overSafety: Bool?, pctRank: Double?
+        var missing = false        // a trading day with no NSE row for this stock
     }
 
     private var rows: [Row] {
@@ -458,6 +475,14 @@ struct DeliveryDataTable: View {
                            safety: safety, overSafety: safety.map { series.qty[i] > $0 },
                            pctRank: DeliveryColumns.percentRank(series.qty, length: 300, at: i)))
         }
+        // Trading days (NSE calendar) with no row for this stock, shown in place so dates line up with reality
+        if let first = series.days.first {
+            let have = Set(series.days)
+            for d in calendar where d >= first && d <= max(lastDay, series.days.last ?? "") && !have.contains(d) {
+                out.append(Row(day: d, close: 0, qty: 0, per: 0, value: 0, highest: nil, signal: false, safety: nil, overSafety: nil, pctRank: nil, missing: true))
+            }
+            out.sort { $0.day < $1.day }
+        }
         return out.reversed()
     }
 
@@ -465,13 +490,13 @@ struct DeliveryDataTable: View {
         let r = rows
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("\(r.count) days · \(r.filter(\.signal).count) signal days").font(.caption.bold())
+                Text("\(r.filter { !$0.missing }.count) days with data · \(r.filter(\.missing).count) trading days without an NSE row · \(r.filter(\.signal).count) signal days").font(.caption.bold())
                 Spacer()
                 Button("Export CSV…") { export(r) }.controlSize(.small)
             }
             Table(r) {
-                TableColumn("Date") { x in Text(x.day).monospacedDigit().foregroundStyle(x.signal ? Color.orange : Color.primary) }.width(min: 80, ideal: 90)
-                TableColumn("Close") { x in Text(String(format: "%.2f", x.close)).monospacedDigit() }.width(min: 55, ideal: 65)
+                TableColumn("Date") { x in Text(x.day).monospacedDigit().foregroundStyle(x.missing ? Color.secondary : (x.signal ? Color.orange : Color.primary)) }.width(min: 80, ideal: 90)
+                TableColumn("Close") { x in Text(x.missing ? "no NSE row" : String(format: "%.2f", x.close)).monospacedDigit().foregroundStyle(x.missing ? Color.orange : Color.primary) }.width(min: 55, ideal: 75)
                 TableColumn("DELIV_QTY") { x in Text(DeliveryView.short(x.qty)).monospacedDigit() }.width(min: 65, ideal: 75)
                 TableColumn("Deliv %") { x in Text(String(format: "%.1f", x.per)).monospacedDigit() }.width(min: 45, ideal: 55)
                 TableColumn("QTY×CLOSE") { x in Text(DeliveryView.short(x.value)).monospacedDigit() }.width(min: 70, ideal: 80)
@@ -490,7 +515,7 @@ struct DeliveryDataTable: View {
         panel.allowedContentTypes = [.commaSeparatedText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         var s = "Date,Close,DELIV_QTY,DELIV_PER,DELIV_QTY*CLOSE,Highest_\(length),Signal,Safety,PercentRank300\n"
-        for x in r.reversed() {
+        for x in r.reversed() where !x.missing {
             s += "\(x.day),\(x.close),\(Int(x.qty)),\(x.per),\(Int(x.value)),\(x.highest.map { String(Int($0)) } ?? ""),\(x.signal ? 1 : 0),\(x.safety.map { String(Int($0)) } ?? ""),\(x.pctRank.map { String(format: "%.1f", $0) } ?? "")\n"
         }
         try? s.write(to: url, atomically: true, encoding: .utf8)

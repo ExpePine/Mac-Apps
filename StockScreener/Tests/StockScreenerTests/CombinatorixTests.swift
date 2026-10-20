@@ -146,3 +146,21 @@ final class PercentRankTests: XCTestCase {
         XCTAssertEqual(DeliveryColumns.percentRank([2, 2, 2], length: 2), 100)  // ties count
     }
 }
+
+
+final class DeliveryAsOfTests: XCTestCase {
+    func testColumnsUseTheDataDayNotTheStocksLastRow() {
+        // stock A traded on all 3 days; stock B stopped after day 1
+        let a = DeliverySeries(days: ["2026-10-15", "2026-10-16", "2026-10-19"], qty: [1, 2, 3], per: [1, 1, 1], close: [1, 1, 1])
+        let b = DeliverySeries(days: ["2026-10-15"], qty: [5], per: [1], close: [1])
+        let book = DeliveryBook(days: ["2026-10-15", "2026-10-16", "2026-10-19"], series: ["A": a, "B": b])
+        let cols = DeliveryColumns.all(book, asOf: "2026-10-19")
+        XCTAssertEqual(cols["A"]?.day, "2026-10-19")
+        XCTAssertNil(cols["B"]?.pctRank)            // no row on the data day → unknown, not an old value
+        XCTAssertNil(cols["B"]?.safety)
+        // a data day between NSE days uses the last NSE day before it
+        XCTAssertEqual(DeliveryColumns.all(book, asOf: "2026-10-18")["A"]?.day, "2026-10-16")
+        XCTAssertEqual(DeliveryColumns.index(of: "2026-10-16", in: a.days), 1)
+        XCTAssertNil(DeliveryColumns.index(of: "2026-10-17", in: a.days))
+    }
+}
