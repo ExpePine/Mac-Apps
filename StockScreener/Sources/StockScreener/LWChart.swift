@@ -7,6 +7,83 @@ import WebKit
 // Candles (Yahoo) + delivery bars + the rolling ta.highest line on an overlay scale + orange background
 // bands and arrows on signal days. The library is loaded from the jsDelivr CDN (pinned versions).
 
+/// The things that can be drawn on the delivery charts — each one can be switched on / off.
+enum ChartLayer: String, CaseIterable, Identifiable {
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per
+    var id: String { rawValue }
+    func label(_ metric: String, _ length: Int) -> String {
+        switch self {
+        case .candles: return "Price candles (Yahoo)"
+        case .deliv: return "Delivery bars — \(metric)"
+        case .high: return "ta.highest(\(metric), \(length)) line"
+        case .bands: return "Orange bands on signal days"
+        case .markers: return "▲DQ markers on signal days"
+        case .prank: return "ta.percentrank(\(metric), \(length))"
+        case .sma22: return "ta.sma(delivery, 22) line"
+        case .sma66: return "ta.sma(delivery, 66) line"
+        case .per: return "Delivery % (DELIV_PER)"
+        }
+    }
+    var color: Color? {
+        switch self {
+        case .high: return Color(red: 0.16, green: 0.38, blue: 1)
+        case .prank: return Color(red: 0.67, green: 0.28, blue: 0.74)
+        case .sma22: return Color(red: 0, green: 0.74, blue: 0.83)
+        case .sma66: return Color(red: 0.91, green: 0.12, blue: 0.39)
+        case .per: return Color(red: 0.55, green: 0.76, blue: 0.29)
+        case .bands, .markers: return .orange
+        default: return nil
+        }
+    }
+    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank]
+    /// Stored as "a,b,c" in UserDefaults; "" = the defaults, "none" = nothing.
+    static func decode(_ s: String) -> Set<ChartLayer> {
+        if s.isEmpty { return defaults }
+        return Set(s.split(separator: ",").compactMap { ChartLayer(rawValue: String($0)) })
+    }
+    static func encode(_ set: Set<ChartLayer>) -> String {
+        set.isEmpty ? "none" : allCases.filter(set.contains).map(\.rawValue).joined(separator: ",")
+    }
+}
+
+/// "Layers" button: a popover of checkboxes choosing what the chart draws (stays open while you tick).
+struct ChartLayersButton: View {
+    @Binding var raw: String
+    var metric: String
+    var length: Int
+    var options: [ChartLayer] = ChartLayer.allCases
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: { Label("Layers", systemImage: "square.3.layers.3d") }
+            .help("Choose what the chart shows")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Show on chart").font(.headline)
+                    ForEach(options) { l in
+                        Toggle(isOn: Binding(get: { ChartLayer.decode(raw).contains(l) },
+                                             set: { on in var s = ChartLayer.decode(raw); if on { s.insert(l) } else { s.remove(l) }; raw = ChartLayer.encode(s) })) {
+                            HStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: 2).fill(l.color ?? .gray).frame(width: 12, height: 3)
+                                    .opacity(l.color == nil ? 0.5 : 1)
+                                Text(l.label(metric, length))
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                    Divider()
+                    HStack {
+                        Button("All") { raw = ChartLayer.encode(Set(options)) }
+                        Button("Default") { raw = "" }
+                    }
+                    .controlSize(.small)
+                }
+                .padding(12)
+                .fixedSize()
+            }
+    }
+}
+
 struct LWChartData: Encodable {
     struct Candle: Encodable { let time: String; let open, high, low, close: Double }
     struct Point: Encodable { let time: String; let value: Double?; var color: String? = nil }   // value nil = empty day (gap)
@@ -17,6 +94,9 @@ struct LWChartData: Encodable {
     var bands: [Point] = []
     var markers: [Marker] = []
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
+    var sma22: [Point] = []
+    var sma66: [Point] = []
+    var per: [Point] = []             // DELIV_PER, 0–100
     var title = ""
     var metric = ""
     var range = "1Y"          // 6M / 1Y / 2Y / All
@@ -24,7 +104,8 @@ struct LWChartData: Encodable {
 
     /// Builds the chart data for one stock from its delivery series and (optional) Yahoo candles.
     static func make(symbol: String, series: DeliverySeries?, candles: [YahooClient.Candle], metric: DeliveryMetric,
-                     length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool, calendar: [String] = []) -> LWChartData {
+                     length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool, calendar: [String] = [],
+                     layers: Set<ChartLayer> = ChartLayer.defaults) -> LWChartData {
         var d = LWChartData()
         d.title = symbol
         d.metric = metric.pine
@@ -34,9 +115,20 @@ struct LWChartData: Encodable {
         d.candles = candles.compactMap { c in
             seen.insert(c.day).inserted ? Candle(time: c.day, open: c.open, high: c.high, low: c.low, close: c.close) : nil
         }
+        if !layers.contains(.candles) { d.candles = [] }
         if let s = series {
             let m = s.metric(metric)
-            for i in s.days.indices { if let pr = DeliveryColumns.percentRank(m, length: length, at: i) { d.prank.append(Point(time: s.days[i], value: pr)) } }
+            if layers.contains(.prank) {
+                for i in s.days.indices { if let pr = DeliveryColumns.percentRank(m, length: length, at: i) { d.prank.append(Point(time: s.days[i], value: pr)) } }
+            }
+            // SMA lines of the raw delivery (₹ value, or shares when the signal uses DELIV_QTY), on the bars' scale
+            let base = metric == .qty ? s.qty : s.metric(value: true)
+            for (n, l) in [(22, ChartLayer.sma22), (66, .sma66)] where layers.contains(l) {
+                let sm = DeliverySignal.sma(base, n)
+                let pts = s.days.indices.filter { $0 >= n - 1 }.map { Point(time: s.days[$0], value: sm[$0]) }
+                if n == 22 { d.sma22 = pts } else { d.sma66 = pts }
+            }
+            if layers.contains(.per) { d.per = s.days.indices.map { Point(time: s.days[$0], value: s.per[$0]) } }
             let h = DeliverySignal.highest(m, length: length, full: full)
             let sig = Set(DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises))
             for i in s.days.indices {
@@ -44,10 +136,11 @@ struct LWChartData: Encodable {
                 d.deliv.append(Point(time: s.days[i], value: m[i], color: isSig ? "rgba(255,152,0,0.95)" : "rgba(128,128,128,0.45)"))
                 if let v = h[i] { d.high.append(Point(time: s.days[i], value: v)) }
                 if isSig {
-                    d.bands.append(Point(time: s.days[i], value: 1, color: "rgba(255,152,0,0.22)"))
-                    d.markers.append(Marker(time: s.days[i], text: "DQ"))
+                    if layers.contains(.bands) { d.bands.append(Point(time: s.days[i], value: 1, color: "rgba(255,152,0,0.22)")) }
+                    if layers.contains(.markers) { d.markers.append(Marker(time: s.days[i], text: "DQ")) }
                 }
             }
+            if !layers.contains(.high) { d.high = [] }
             // Trading days with no NSE row for this stock: keep their place on the date axis (empty bar)
             if let first = s.days.first, let last = s.days.last {
                 let have = Set(s.days)
@@ -55,6 +148,10 @@ struct LWChartData: Encodable {
                 if !empty.isEmpty {
                     d.deliv = (d.deliv + empty.map { Point(time: $0, value: nil) }).sorted { $0.time < $1.time }
                 }
+            }
+            if !layers.contains(.deliv) {
+                // keep the dates on the axis, draw nothing
+                d.deliv = d.deliv.map { Point(time: $0.time, value: nil) }
             }
         }
         return d
@@ -130,7 +227,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, candle, hist, high, bands, prank, last=null, dark=null;
+    var chart=null, candle, hist, high, bands, prank, sma22, sma66, per, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -151,6 +248,10 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       hist=chart.addHistogramSeries({priceScaleId:'deliv',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       prank=chart.addLineSeries({priceScaleId:'prank',color:'#AB47BC',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
         title:'%rank',autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
+      per=chart.addLineSeries({priceScaleId:'per',color:'#8BC34A',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,
+        autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
+      sma66=chart.addLineSeries({priceScaleId:'deliv',color:'#E91E63',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
+      sma22=chart.addLineSeries({priceScaleId:'deliv',color:'#00BCD4',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       high=chart.addLineSeries({priceScaleId:'deliv',color:'#2962FF',lineWidth:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       chart.timeScale().subscribeVisibleTimeRangeChange(function(r){
         if(!r || window._quiet) return;
@@ -161,8 +262,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       });
       chart.subscribeCrosshairMove(function(p){
         if(!last) return;
-        var c=p&&p.seriesData?p.seriesData.get(candle):null, h=p&&p.seriesData?p.seriesData.get(hist):null, x=p&&p.seriesData?p.seriesData.get(high):null, pr=p&&p.seriesData?p.seriesData.get(prank):null;
-        legend(c,h,x,p&&p.time,pr);
+        if(!p || !p.time || !p.seriesData){ legendLast(); return; }
+        var g=function(s){ return p.seriesData.get(s)||null; };
+        legend(g(candle),g(hist),g(high),p.time,g(prank),g(sma22),g(sma66),g(per));
       });
       return true;
     }
@@ -181,13 +283,19 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     window.setRange=function(f,t){ if(!chart) return; window._quiet=true;
       try{ chart.timeScale().setVisibleLogicalRange({from:pos(f),to:pos(t)}); }catch(e){}
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350); };
-    function legend(c,h,x,t,pr){
+    function lastOf(a){ return a&&a.length?a[a.length-1]:null; }
+    function legendLast(){ var d=last; legend(lastOf(d.candles),lastOf(d.deliv),lastOf(d.high),null,lastOf(d.prank),lastOf(d.sma22),lastOf(d.sma66),lastOf(d.per)); }
+    function legend(c,h,x,t,pr,s22,s66,pc){
       var s='<b>'+last.title+'</b> ';
       if(t) s+=(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0')))+' ';
       if(c) s+='O '+c.open.toFixed(2)+' H '+c.high.toFixed(2)+' L '+c.low.toFixed(2)+' C <b>'+c.close.toFixed(2)+'</b>';
-      s+='<br><span style="color:#FF9800">'+last.metric+' '+(h?fmt(h.value):'')+'</span>';
-      if(x) s+=' &nbsp;<span style="color:#2962FF">highest '+fmt(x.value)+'</span>';
-      if(pr) s+=' &nbsp;<span style="color:#AB47BC">percentrank '+pr.value.toFixed(1)+'</span>';
+      s+='<br>';
+      if(h&&h.value!=null) s+='<span style="color:#FF9800">'+last.metric+' '+fmt(h.value)+'</span>';
+      if(x&&x.value!=null) s+=' &nbsp;<span style="color:#2962FF">highest '+fmt(x.value)+'</span>';
+      if(s22&&s22.value!=null) s+=' &nbsp;<span style="color:#00BCD4">sma22 '+fmt(s22.value)+'</span>';
+      if(s66&&s66.value!=null) s+=' &nbsp;<span style="color:#E91E63">sma66 '+fmt(s66.value)+'</span>';
+      if(pr&&pr.value!=null) s+=' &nbsp;<span style="color:#AB47BC">percentrank '+pr.value.toFixed(1)+'</span>';
+      if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
       document.getElementById('legend').innerHTML=s;
       document.getElementById('legend').style.color=dark?'#d1d4dc':'#131722';
     }
@@ -206,18 +314,22 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var hasCandles=d.candles.length>0;
       chart.priceScale('deliv').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}});
       chart.priceScale('prank').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}, visible:false});
+      chart.priceScale('per').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}, visible:false});
       chart.applyOptions({rightPriceScale:{visible:hasCandles}, leftPriceScale:{visible:false}});
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]);
+      sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
       var ts={}; d.candles.forEach(function(x){ ts[x.time]=1; }); d.deliv.forEach(function(x){ ts[x.time]=1; });
       window._times=Object.keys(ts).sort();
-      (hasCandles?candle:hist).setMarkers(d.markers);
-      if(hasCandles) hist.setMarkers([]); else candle.setMarkers([]);
+      var hasBars=d.deliv.some(function(x){ return x.value!=null; });
+      var mk=hasCandles?candle:(hasBars?hist:(d.high.length?high:hist));
+      [candle,hist,high].forEach(function(s){ if(s!==mk) s.setMarkers([]); });
+      mk.setMarkers(d.markers);
       var n={'6M':126,'1Y':252,'2Y':504}[d.range];
       var len=Math.max(d.candles.length,d.deliv.length);
       window._quiet=true;
       if(n && len>n) chart.timeScale().setVisibleLogicalRange({from:len-n,to:len+4}); else chart.timeScale().fitContent();
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350);
-      legend(d.candles[d.candles.length-1],d.deliv[d.deliv.length-1],d.high[d.high.length-1],null,(d.prank||[])[(d.prank||[]).length-1]);
+      legendLast();
       return 'ok';
     };
     </script></body></html>

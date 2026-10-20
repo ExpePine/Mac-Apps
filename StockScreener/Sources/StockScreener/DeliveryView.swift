@@ -30,6 +30,7 @@ struct DeliveryView: View {
     @State private var chartError: String?
     @State private var loadingChart = false
     @StateObject private var lw = LWChartHolder()
+    @AppStorage("deliv.layers") private var layersRaw = ""
     @Environment(\.colorScheme) private var colorScheme
 
     struct DelivRow: Identifiable {
@@ -72,65 +73,76 @@ struct DeliveryView: View {
     // MARK: Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            FlowLayout(spacing: 10, lineSpacing: 6) {
                 if dc.isFetching {
-                    ProgressView(value: Double(dc.progress.done), total: Double(max(1, dc.progress.total))).frame(width: 160)
-                    Button("Stop") { dc.cancel() }
+                    HStack(spacing: 8) {
+                        ProgressView(value: Double(dc.progress.done), total: Double(max(1, dc.progress.total))).frame(width: 160)
+                        Button("Stop") { dc.cancel() }
+                    }.fixedSize()
                 } else {
-                    Button { dc.download(target: target) } label: {
-                        Label(dc.storedDays.isEmpty ? "Download \(target) days from NSE" : "Update now", systemImage: "arrow.down.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Picker("", selection: $target) {
-                        ForEach([300, 450, 600, 750], id: \.self) { Text("\($0) days").tag($0) }
-                    }
-                    .labelsHidden().fixedSize().help("How many trading days of history to keep complete")
+                    HStack(spacing: 6) {
+                        Button { dc.download(target: target) } label: {
+                            Label(dc.storedDays.isEmpty ? "Download \(target) days from NSE" : "Update now", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Picker("", selection: $target) {
+                            ForEach([300, 450, 600, 750], id: \.self) { Text("\($0) days").tag($0) }
+                        }
+                        .labelsHidden().help("How many trading days of history to keep complete")
+                    }.fixedSize()
                 }
-                if dc.isLoading { ProgressView().controlSize(.small); Text("Reading…").font(.caption) }
+                if dc.isLoading { HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Reading…").font(.caption) }.fixedSize() }
                 if !dc.isFetching && !dc.storedDays.isEmpty {
-                    Button("Check gaps") { dc.repairGaps() }
+                    Button("Check gaps") { dc.repairGaps() }.fixedSize()
                         .help("Compares the stored days with NSE's trading calendar (NIFTY 50 trading days from Yahoo) and downloads any missing day")
                 }
-                Text(storedText).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if let s = dc.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                Text(storedText).font(.caption).foregroundStyle(.secondary).fixedSize()
             }
-            HStack(spacing: 10) {
-                Text("Signal: ta.highest(").font(.caption.monospaced())
-                Picker("", selection: $metricRaw) {
-                    ForEach(DeliveryMetric.allCases) { m in Text(m.pine).tag(m.rawValue) }
-                }
-                .labelsHidden().fixedSize().font(.caption.monospaced())
-                .help("DELIV_QTY × CLOSE_PRICE = value of shares delivered that day (₹); the SMAs smooth it over 22 / 66 days")
-                Text(",").font(.caption.monospaced())
-                TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
-                Text(")").font(.caption.monospaced())
-                Picker("", selection: $onlyRises) {
-                    Text("makes a new high").tag(true)
-                    Text("changes (any update)").tag(false)
-                }
-                .labelsHidden().fixedSize()
-                .help("New high = the highest rises. Any update = exactly Pine's ta.change(ta.highest(...)) != 0, which also fires when an old high leaves the window.")
-                Toggle("Wait for full \(length) days (like Pine's na)", isOn: $full).toggleStyle(.checkbox)
-                Picker("JUMP =", selection: $jumpMode) {
-                    Text("percentrank now ÷ its previous peak").tag(0)
-                    Text("value now ÷ previous 300-day high").tag(1)
-                }
-                .fixedSize()
-                .help("The Filter's JUMP column. 1: ta.percentrank(DELIV_QTY*close, 300) today ÷ the percent rank's previous peak. 2: DELIV_QTY*close today ÷ the previous (different) ta.highest(DELIV_QTY*close, 300).")
-                .onChange(of: jumpMode) { _ in DeliveryCenter.shared.refreshColumns() }
-                Divider().frame(height: 16)
-                Text("Within last").font(.caption)
-                Stepper("\(within) day\(within == 1 ? "" : "s")", value: $within, in: 1...250).fixedSize()
+            if let st = dc.status {
+                Text(st).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).help(st)
+            }
+            FlowLayout(spacing: 14, lineSpacing: 8) {
+                HStack(spacing: 4) {
+                    Text("Signal").font(.caption.bold())
+                    Text("ta.highest(").font(.caption.monospaced())
+                    Picker("", selection: $metricRaw) {
+                        ForEach(DeliveryMetric.allCases) { m in Text(m.pine).tag(m.rawValue) }
+                    }
+                    .labelsHidden()
+                    .help("DELIV_QTY × CLOSE_PRICE = value of shares delivered that day (₹); the SMAs smooth it over 22 / 66 days")
+                    Text(",").font(.caption.monospaced())
+                    TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                    Text(")").font(.caption.monospaced())
+                    Picker("", selection: $onlyRises) {
+                        Text("makes a new high").tag(true)
+                        Text("changes (any update)").tag(false)
+                    }
+                    .labelsHidden()
+                    .help("New high = the highest rises. Any update = exactly Pine's ta.change(ta.highest(...)) != 0, which also fires when an old high leaves the window.")
+                }.fixedSize()
+                Toggle("Wait for full \(length) days (Pine na)", isOn: $full).toggleStyle(.checkbox).fixedSize()
+                HStack(spacing: 4) {
+                    Text("JUMP =").font(.caption)
+                    Picker("", selection: $jumpMode) {
+                        Text("percentrank now ÷ its previous peak").tag(0)
+                        Text("value now ÷ previous \(length)-day high").tag(1)
+                    }
+                    .labelsHidden()
+                    .help("The Filter's JUMP column. 1: ta.percentrank(DELIV_QTY*close, 300) today ÷ the percent rank's previous peak. 2: DELIV_QTY*close today ÷ the previous (different) ta.highest(DELIV_QTY*close, 300).")
+                    .onChange(of: jumpMode) { _ in DeliveryCenter.shared.refreshColumns() }
+                }.fixedSize()
+                HStack(spacing: 4) {
+                    Text("Within last").font(.caption)
+                    Stepper("\(within) day\(within == 1 ? "" : "s")", value: $within, in: 1...250)
+                }.fixedSize()
                 Picker("", selection: $scope) {
                     ForEach(["Sheet stocks", "My Filter", "All NSE"], id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
-                Spacer()
-                Button { copyPine() } label: { Label("Copy Pine Script", systemImage: "doc.on.clipboard") }
+                Button { copyPine() } label: { Label("Copy Pine Script", systemImage: "doc.on.clipboard") }.fixedSize()
                     .help("A TradingView indicator that paints these exact signal days (orange + ▲DQ) on your TradingView charts — for the stocks in the selected scope")
-                SymbolField(vm: vm, placeholder: "Search any NSE stock", text: $search).frame(width: 180)
+                SymbolField(vm: vm, placeholder: "Search any NSE stock", text: $search).frame(width: 200)
             }
             .controlSize(.small)
         }
@@ -208,17 +220,19 @@ struct DeliveryView: View {
     private var chartArea: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let s = selected, dc.book.series[s] != nil {
-                HStack {
-                    Text(s).font(.title3.bold())
-                    if let c = candles.last { Text(String(format: "%.2f", c.close)).font(.headline.monospacedDigit()) }
-                    Text("scroll / pinch = zoom · drag = pan · double-click the date axis = reset").font(.caption2).foregroundStyle(.secondary)
-                    Spacer()
+                HStack(spacing: 8) {
+                    Text(s).font(.title3.bold()).fixedSize()
+                    if let c = candles.last { Text(String(format: "%.2f", c.close)).font(.headline.monospacedDigit()).fixedSize() }
+                    Image(systemName: "info.circle").foregroundStyle(.secondary)
+                        .help("Scroll / pinch = zoom · drag = pan · double-click the date axis = reset")
+                    Spacer(minLength: 8)
+                    if pane == "Chart" { ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize() }
                     Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                     Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                         .opacity(pane == "Chart" ? 1 : 0.4)
-                    Button("TradingView") { vm.openChart(s, queue: shownRows.map(\.symbol), openWindow: openWindow) }.controlSize(.small)
+                    Button("TradingView") { vm.openChart(s, queue: shownRows.map(\.symbol), openWindow: openWindow) }.controlSize(.small).fixedSize()
                 }
                 if let series = dc.book.series[s] { stats(series) }
                 if loadingChart { ProgressView("Yahoo prices…").controlSize(.small) }
@@ -231,7 +245,7 @@ struct DeliveryView: View {
                         .frame(minHeight: 380)
                 }
                 Text("Orange bands + ▲DQ = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated") · bars at the bottom = \(metricName) · blue = the rolling highest")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             } else {
                 Text("Select a stock to see its candles with delivery highs marked.").foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -245,6 +259,7 @@ struct DeliveryView: View {
         .onChange(of: onlyRises) { _ in pushChart() }
         .onChange(of: full) { _ in pushChart() }
         .onChange(of: colorScheme) { _ in pushChart() }
+        .onChange(of: layersRaw) { _ in pushChart() }
     }
 
     /// One-line summary of the stock's delivery pattern.
@@ -258,7 +273,7 @@ struct DeliveryView: View {
         let p20 = s.per.suffix(20), p100 = s.per.suffix(100)
         let avg20 = p20.isEmpty ? 0 : p20.reduce(0, +) / Double(p20.count)
         let avg100 = p100.isEmpty ? 0 : p100.reduce(0, +) / Double(p100.count)
-        return HStack(spacing: 14) {
+        return FlowLayout(spacing: 14, lineSpacing: 3) {
             Text("\(s.days.count) days (\(s.days.first ?? "") → \(s.days.last ?? ""))")
             Text("Deliv % 20d \(String(format: "%.0f", avg20))% · 100d \(String(format: "%.0f", avg100))%")
             if let h, let last = m.last, h > 0 { Text("today = \(String(format: "%.0f", last / h * 100))% of the \(length)-day high") }
@@ -273,13 +288,14 @@ struct DeliveryView: View {
             }
             if let d = c.dlvr { Text("DLVR \(String(format: "%.2f", d)) Cr today").foregroundStyle(.orange).bold() }
         }
-        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        .font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
     }
 
     private func pushChart() {
         guard let s = selected else { return }
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
-                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar))
+                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
+                                 layers: ChartLayer.decode(layersRaw)))
     }
 
     /// Pine Script that paints the same signal days on your TradingView charts (for the stocks in scope).
@@ -411,6 +427,7 @@ struct DeliveryMiniChart: View {
     @AppStorage("deliv.onlyRises") private var onlyRises = true
     @AppStorage("deliv.full") private var full = true
     @AppStorage("viewer.delivRange") private var range = "1Y"
+    @AppStorage("viewer.delivLayers") private var layersRaw = ""
 
     var body: some View {
         let s = dc.book.series[SymbolBook.clean(symbol)]
@@ -430,6 +447,9 @@ struct DeliveryMiniChart: View {
                 Spacer()
                 if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
                 if let n = syncNote { Text(n).font(.caption2).foregroundStyle(.secondary) }
+                ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
+                                  options: ChartLayer.allCases.filter { $0 != .candles })
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
             }
@@ -442,13 +462,15 @@ struct DeliveryMiniChart: View {
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: colorScheme) { _ in push() }
+        .onChange(of: layersRaw) { _ in push() }
     }
 
     private func push() {
         let sym = symbol.uppercased()
         guard let s = dc.book.series[sym] else { return }
         lw.show(LWChartData.make(symbol: sym, series: s, candles: [], metric: metric, length: max(2, length),
-                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar))
+                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
+                                 layers: ChartLayer.decode(layersRaw)))
     }
 }
 
@@ -530,5 +552,46 @@ struct DeliveryDataTable: View {
             s += "\(x.day),\(x.close),\(Int(x.qty)),\(x.per),\(Int(x.value)),\(x.highest.map { String(Int($0)) } ?? ""),\(x.signal ? 1 : 0),\(x.safety.map { String(Int($0)) } ?? ""),\(x.pctRank.map { String(format: "%.1f", $0) } ?? "")\n"
         }
         try? s.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+
+/// Lays its children out left to right and wraps to a new line when the width runs out
+/// (so toolbars never squeeze their labels into a vertical column).
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 6
+
+    private func rows(_ maxW: CGFloat, _ subviews: Subviews) -> [[(Int, CGSize)]] {
+        var rows: [[(Int, CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for (i, v) in subviews.enumerated() {
+            let sz = v.sizeThatFits(.unspecified)
+            if x > 0 && x + sz.width > maxW { rows.append([]); x = 0 }
+            rows[rows.count - 1].append((i, sz))
+            x += sz.width + spacing
+        }
+        return rows.filter { !$0.isEmpty }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? .infinity
+        let rs = rows(maxW, subviews)
+        let h = rs.reduce(0) { $0 + ($1.map(\.1.height).max() ?? 0) } + lineSpacing * CGFloat(max(0, rs.count - 1))
+        let w = rs.map { r in r.reduce(0) { $0 + $1.1.width } + spacing * CGFloat(max(0, r.count - 1)) }.max() ?? 0
+        return CGSize(width: maxW.isFinite ? maxW : w, height: h)
+    }
+
+    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = b.minY
+        for r in rows(b.width, subviews) {
+            let rh = r.map(\.1.height).max() ?? 0
+            var x = b.minX
+            for (i, sz) in r {
+                subviews[i].place(at: CGPoint(x: x, y: y + (rh - sz.height) / 2), proposal: ProposedViewSize(sz))
+                x += sz.width + spacing
+            }
+            y += rh + lineSpacing
+        }
     }
 }
