@@ -79,7 +79,16 @@ struct FilterView: View {
                                    findQuery: finder.activeQuery,
                                    findCurrent: finder.currentMatch,
                                    onSelectRows: { vm.filterSelection = $0 },
-                                   rowMenu: { row in vm.rowMenu(row, selection: vm.filterSelection, openWindow: openWindow, queue: vm.filterRows) })
+                                   rowMenu: { row in vm.rowMenu(row, selection: vm.filterSelection, openWindow: openWindow, queue: vm.filterRows) },
+                                   onColumnOrder: { order in vm.settings.filterColumns = order.map { vm.headers[$0] } },
+                                   onHideColumn: { index in
+                                       vm.settings.filterColumns = vm.filterColumnIndices.filter { $0 != index }.map { vm.headers[$0] }
+                                   },
+                                   hiddenColumns: vm.headers.indices.filter { !vm.filterColumnIndices.contains($0) },
+                                   onShowColumn: { index in
+                                       vm.settings.filterColumns = vm.filterColumnIndices.map { vm.headers[$0] } + [vm.headers[index]]
+                                   },
+                                   onChooseColumns: { showColumns = true })
                     if vm.showTimeline {
                         Divider()
                         TimelineBar()

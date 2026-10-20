@@ -149,8 +149,18 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     }
     function day(t){ if(typeof t==='string') return t; if(typeof t==='number'){ var d=new Date(t*1000); return d.toISOString().slice(0,10); }
       return t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'); }
+    // Shows days f…t even when they run past the data (TradingView often shows empty days on the right):
+    // converts dates to bar positions (extrapolating weekdays beyond the first / last bar).
+    function wd(a,b){ var d1=new Date(a+'T00:00:00Z'), d2=new Date(b+'T00:00:00Z'), n=0, s=d1<d2?1:-1;
+      for(var d=new Date(d1); s>0 ? d<d2 : d>d2; d.setUTCDate(d.getUTCDate()+s)){ var w=d.getUTCDay(); if(w!==0&&w!==6) n+=s; } return n; }
+    function pos(day){
+      var t=window._times||[]; if(!t.length) return 0;
+      if(day<=t[0]) return -wd(day,t[0]);
+      if(day>=t[t.length-1]) return (t.length-1)+wd(t[t.length-1],day);
+      var lo=0,hi=t.length-1; while(lo<hi){ var m=(lo+hi)>>1; if(t[m]<day) lo=m+1; else hi=m; } return lo;
+    }
     window.setRange=function(f,t){ if(!chart) return; window._quiet=true;
-      try{ chart.timeScale().setVisibleRange({from:f,to:t}); }catch(e){}
+      try{ chart.timeScale().setVisibleLogicalRange({from:pos(f),to:pos(t)}); }catch(e){}
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350); };
     function legend(c,h,x,t){
       var s='<b>'+last.title+'</b> ';
@@ -170,6 +180,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('deliv').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}});
       chart.applyOptions({rightPriceScale:{visible:hasCandles}, leftPriceScale:{visible:false}});
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands);
+      var ts={}; d.candles.forEach(function(x){ ts[x.time]=1; }); d.deliv.forEach(function(x){ ts[x.time]=1; });
+      window._times=Object.keys(ts).sort();
       (hasCandles?candle:hist).setMarkers(d.markers);
       if(hasCandles) hist.setMarkers([]); else candle.setMarkers([]);
       var n={'6M':126,'1Y':252,'2Y':504}[d.range];

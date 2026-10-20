@@ -386,9 +386,9 @@ final class ScreenerViewModel: ObservableObject {
         let pName = t.index(of: "DQ_PRANK") == nil ? "DQ_PRANK" : "DQ_PRANK (NSE)"
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
-            let d = c?.dlvr, sf = c?.safety, pr = c?.pctRank
+            let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank      // DLVR 0 = no new 300-day high today
             return SheetRow(id: row.id,
-                            cells: row.cells + [d.map { String(format: "%.2f", $0) } ?? "", sf.map { String(format: "%.0f", $0) } ?? "",
+                            cells: row.cells + [d == 0 ? "0" : String(format: "%.2f", d), sf.map { String(format: "%.0f", $0) } ?? "",
                                                 pr.map { String(format: "%.1f", $0) } ?? ""],
                             numbers: row.numbers + [d, sf, pr])
         }

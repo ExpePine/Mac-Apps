@@ -43,6 +43,13 @@ struct SheetTableView: NSViewRepresentable {
     var onSelectRows: (([SheetRow]) -> Void)? = nil
     /// Right-click menu for a row: (title, action) pairs; title "-" adds a separator.
     var rowMenu: ((SheetRow) -> [(String, () -> Void)])? = nil
+    /// Drag column headers to reorder: called with the new order of sheet columns (frozen ones first).
+    var onColumnOrder: (([Int]) -> Void)? = nil
+    /// Right-click a header: hide it / show a hidden one / open the column chooser.
+    var onHideColumn: ((Int) -> Void)? = nil
+    var hiddenColumns: [Int] = []
+    var onShowColumn: ((Int) -> Void)? = nil
+    var onChooseColumns: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -106,6 +113,12 @@ struct SheetTableView: NSViewRepresentable {
         // Rebuild columns only when the column set changes.
         let signature = "E\(eColor != nil)S\(sColor != nil)P\(pColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
             + "#" + originalHeaders.joined(separator: "|")
+        if signature != c.columnSignature, c.expectedOrder == visible {
+            c.columnSignature = signature        // the user just dragged a column: the tables already look like this
+            c.expectedOrder = nil
+        }
+        c.expectedOrder = nil
+        for t in [left, right] { t.allowsColumnReordering = onColumnOrder != nil }
         if signature != c.columnSignature {
             c.columnSignature = signature
             c.setColumns(frozen, on: left, parent: self)
@@ -177,6 +190,7 @@ struct SheetTableView: NSViewRepresentable {
         weak var rightScroll: NSScrollView?
         var leftWidth: NSLayoutConstraint?
         var columnSignature = ""
+        var expectedOrder: [Int]?
         var renderedVersion = -1
         var flashToken = 0
         var findKey = ""
@@ -206,6 +220,10 @@ struct SheetTableView: NSViewRepresentable {
             header.onMenuClick = { [weak self, weak table] column, rect in
                 guard let self, let table else { return }
                 self.showColumnMenu(table: table, column: column, rect: rect)
+            }
+            header.onContextMenu = { [weak self, weak table] column in
+                guard let self, let table else { return nil }
+                return self.headerMenu(table: table, column: column)
             }
             table.headerView = header
             table.delegate = self
@@ -277,6 +295,44 @@ struct SheetTableView: NSViewRepresentable {
             pop.animates = true
             pop.show(relativeTo: rect, of: header, preferredEdge: .maxY)
             popover = pop
+        }
+
+        /// Right-click on a column header.
+        func headerMenu(table: NSTableView, column: Int) -> NSMenu? {
+            guard let parent, parent.onHideColumn != nil || parent.onChooseColumns != nil else { return nil }
+            let menu = NSMenu()
+            if column >= 0, column < table.tableColumns.count, let index = Self.columnIndex(table.tableColumns[column]),
+               index < parent.headers.count, let hide = parent.onHideColumn {
+                menu.addItem(ClosureMenuItem(title: "Hide “\(parent.headers[index])”") { hide(index) })
+            }
+            if let show = parent.onShowColumn, !parent.hiddenColumns.isEmpty {
+                let item = NSMenuItem(title: "Show column", action: nil, keyEquivalent: "")
+                let sub = NSMenu()
+                for i in parent.hiddenColumns where i < parent.headers.count {
+                    sub.addItem(ClosureMenuItem(title: parent.headers[i]) { show(i) })
+                }
+                item.submenu = sub
+                menu.addItem(item)
+            }
+            if let choose = parent.onChooseColumns {
+                menu.addItem(.separator())
+                menu.addItem(ClosureMenuItem(title: "Choose & order columns…") { choose() })
+            }
+            if parent.onColumnOrder != nil {
+                let tip = NSMenuItem(title: "Tip: drag a header to move the column", action: nil, keyEquivalent: "")
+                tip.isEnabled = false
+                menu.addItem(tip)
+            }
+            return menu
+        }
+
+        /// A header was dragged to a new place: report the new order of sheet columns.
+        func tableViewColumnDidMove(_ notification: Notification) {
+            guard let parent, let report = parent.onColumnOrder, let left = leftTable, let right = rightTable else { return }
+            let order = (left.tableColumns + right.tableColumns).compactMap { Self.columnIndex($0) }.filter { $0 < parent.headers.count }
+            guard order != parent.columns.filter({ $0 < parent.headers.count }) else { return }   // e.g. badge columns being placed
+            expectedOrder = order
+            DispatchQueue.main.async { report(order) }
         }
 
         static func columnIndex(_ column: NSTableColumn) -> Int? {
@@ -539,6 +595,12 @@ final class SheetCellView: NSTableCellView {
 final class MenuHeaderView: NSTableHeaderView {
     var menuEnabled = false
     var onMenuClick: ((Int, NSRect) -> Void)?
+    var onContextMenu: ((Int) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let column = self.column(at: convert(event.locationInWindow, from: nil))
+        return onContextMenu?(column) ?? super.menu(for: event)
+    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
