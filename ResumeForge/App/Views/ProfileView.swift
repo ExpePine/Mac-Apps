@@ -154,6 +154,8 @@ struct SettingsView: View {
     @State private var key = Keychain.load()
     @AppStorage("groqModel") private var model = AppStore.defaultModel
     @AppStorage("allowPlaceholders") private var allowPlaceholders = false
+    @AppStorage("autoProcess") private var autoProcess = true
+    @AppStorage("autoDepth") private var autoDepth = AutoDepth.resume.rawValue
     @State private var models: [String] = []
     @State private var status = ""
 
@@ -163,7 +165,7 @@ struct SettingsView: View {
                 SecureField("Groq API key", text: $key, prompt: Text("gsk_…"))
                     .onSubmit { Keychain.save(key); status = "Saved to Keychain." }
                 HStack {
-                    Button("Save key") { Keychain.save(key); status = "Saved to Keychain." }
+                    Button("Save key") { Keychain.save(key); status = "Saved to Keychain."; store.resumeAutoAfterPause() }
                     Button("Test & list models") { Task { await test() } }
                     Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
@@ -185,6 +187,18 @@ struct SettingsView: View {
                 Text("Get a key at console.groq.com/keys. Groq's model line-up changes — use 'Test & list models' to see what's live and pick a large text model. On the free tier each request must fit in about 8,000 tokens per minute, so the app sends your most relevant stories (not all of them) and waits when Groq asks it to.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Process new jobs automatically in the background", isOn: $autoProcess)
+                Picker("Go as far as", selection: $autoDepth) {
+                    ForEach(AutoDepth.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .disabled(!autoProcess)
+            } header: {
+                Text("Background processing")
+            } footer: {
+                Text("Each new JD is processed one at a time while you keep browsing. On Groq's free tier, all steps use roughly 15–25K tokens per job against a daily allowance of about 200K, so expect around 8–12 full jobs a day. Choose a shorter depth to process more jobs. If the daily allowance runs out, the queue pauses and picks up again later.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Writing") {
                 Toggle("Allow [VERIFY] placeholders by default", isOn: $allowPlaceholders)
                 Text("Off: resumes contain only facts from your profile and stories. On: the app may add clearly marked [VERIFY] bullets for missing requirements, for you to confirm or delete. You can switch per resume.")
@@ -196,7 +210,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 520)
+        .frame(width: 600, height: 720)
     }
 
     private func test() async {

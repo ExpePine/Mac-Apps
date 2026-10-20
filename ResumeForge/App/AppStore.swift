@@ -30,6 +30,12 @@ final class AppStore: ObservableObject {
     @Published var busy: String?
     @Published var errorMessage: String?
 
+    // Background processing of new jobs (see AutoPipeline.swift)
+    @Published var autoQueue: [UUID] = []
+    @Published var autoPaused: String?
+    @Published var autoStatus: String?
+    var autoWorker: Task<Void, Never>?
+
     private var saveTask: Task<Void, Never>?
     private var midnightTimer: Timer?
     private var waitObserver: NSObjectProtocol?
@@ -45,8 +51,10 @@ final class AppStore: ObservableObject {
     var client: GroqClient { GroqClient(apiKey: Keychain.load(), model: model) }
 
     init() {
+        Self.registerAutoDefaults()
         load()
         isLoading = false
+        DispatchQueue.main.async { self.resumePendingAuto() }
         DispatchQueue.main.async { self.updateDockBadge() }
         // Refresh the Dock count after midnight.
         midnightTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
@@ -54,7 +62,10 @@ final class AppStore: ObservableObject {
         }        // Show "waiting for Groq's per-minute limit" in the status pill.
         waitObserver = NotificationCenter.default.addObserver(forName: GroqClient.waitingNotification, object: nil, queue: .main) { [weak self] n in
             let msg = n.userInfo?["message"] as? String ?? "Waiting for Groq…"
-            Task { @MainActor in self?.busy = msg }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.busy != nil { self.busy = msg } else { self.autoStatus = msg }
+            }
         }
     }
 
@@ -131,7 +142,9 @@ final class AppStore: ObservableObject {
         }
         updateDockBadge()
         let id = j.id
-        if !Keychain.load().isEmpty {
+        if autoProcessEnabled {
+            enqueueAuto(id)
+        } else if !Keychain.load().isEmpty {
             run("Cleaning up job description…") { try await self.parseJob(id) }
         }
     }

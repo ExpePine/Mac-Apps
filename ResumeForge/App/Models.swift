@@ -23,6 +23,10 @@ struct JobPosting: Codable, Identifiable, Hashable {
     var tailoredMissing: [String] = []
     var gaps: [StoryGap] = []       // missing stories vs the benchmark
     var strengths: [String] = []
+
+    // Background processing (optional so older saved data still loads)
+    var autoStage: String?
+    var autoError: String?
 }
 
 // MARK: - Stories (your raw material)

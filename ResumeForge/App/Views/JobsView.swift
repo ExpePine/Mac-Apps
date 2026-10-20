@@ -16,7 +16,9 @@ struct JobsView: View {
                             }
                             HStack(spacing: 6) {
                                 Pill(text: job.source)
-                                if job.tailored != nil {
+                                if let st = job.stage, st != .done {
+                                    StagePill(stage: st)
+                                } else if job.tailored != nil {
                                     Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).help("Your resume is ready")
                                 }
                                 let open = job.gaps.filter { $0.status == .open }.count
@@ -28,11 +30,14 @@ struct JobsView: View {
                         .padding(.vertical, 3)
                         .tag(job.id)
                         .contextMenu {
+                            Button("Run all steps in background") { store.enqueueAuto(job.id) }
+                            Divider()
                             Button("Delete", role: .destructive) { store.deleteJob(job.id) }
                         }
                     }
                 }
                 Divider()
+                AutoStatusBar()
                 HStack {
                     Button { showAdd = true } label: { Label("Add job manually", systemImage: "plus") }
                         .buttonStyle(.borderless)
@@ -86,12 +91,14 @@ struct JobDetailView: View {
         if let job {
             VStack(alignment: .leading, spacing: 0) {
                 header(job)
+                stageBanner(job)
                 Picker("", selection: $tab) {
                     ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .padding(.horizontal, 16).padding(.bottom, 10)
+                .onAppear { if job.tailored != nil { tab = .mine } }
                 Divider()
                 switch tab {
                 case .jd: jdTab(job)
@@ -100,6 +107,31 @@ struct JobDetailView: View {
                 case .mine: mineTab(job)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func stageBanner(_ job: JobPosting) -> some View {
+        if let st = job.stage, st.isActive {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(st == .queued ? "Queued — will run in the background" : "Working in the background: \(st.label)")
+                Spacer()
+            }
+            .font(.callout)
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        } else if let err = job.autoError {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: job.stage == .failed ? "exclamationmark.triangle.fill" : "info.circle")
+                    .foregroundStyle(job.stage == .failed ? .orange : .secondary)
+                Text(err).lineLimit(3).textSelection(.enabled)
+                Spacer()
+                if job.stage == .failed {
+                    Button("Retry") { store.enqueueAuto(jobID) }
+                }
+            }
+            .font(.callout)
+            .padding(.horizontal, 16).padding(.bottom, 8)
         }
     }
 
@@ -373,7 +405,54 @@ struct AddJobSheet: View {
         store.data.jobs.insert(j, at: 0)
         store.selectedJobID = j.id
         let id = j.id
-        store.run("Cleaning up job description…") { try await store.parseJob(id) }
+        if store.autoProcessEnabled {
+            store.enqueueAuto(id)
+        } else {
+            store.run("Cleaning up job description…") { try await store.parseJob(id) }
+        }
         dismiss()
+    }
+}
+
+// MARK: - Background status
+
+struct StagePill: View {
+    let stage: AutoStage
+    var body: some View {
+        HStack(spacing: 4) {
+            if stage.isActive && stage != .queued { ProgressView().controlSize(.mini) }
+            Pill(text: stage.label, color: stage == .failed ? .red : (stage == .queued ? .gray : .blue))
+        }
+    }
+}
+
+struct AutoStatusBar: View {
+    @EnvironmentObject var store: AppStore
+
+    var body: some View {
+        if let paused = store.autoPaused {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "pause.circle.fill").foregroundStyle(.orange)
+                Text(paused).font(.caption).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button("Resume") { store.resumeAutoAfterPause() }.controlSize(.small)
+            }
+            .padding(8)
+            Divider()
+        } else if store.autoQueuedCount > 0 {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(store.autoQueuedCount) job\(store.autoQueuedCount == 1 ? "" : "s") processing in background")
+                        .font(.caption.bold())
+                    if let s = store.autoStatus {
+                        Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(8)
+            Divider()
+        }
     }
 }

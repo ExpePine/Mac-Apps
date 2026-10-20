@@ -37,7 +37,8 @@ The extension captures job descriptions from Naukri, Wellfound and LinkedIn. The
    | **ERR** | Sending failed. A status page opens with the reason and a *Copy job as JSON* fallback. |
 
    To see recently sent jobs, reset today's count, or forget sent jobs (so you can send them again), go to **Safari ▸ Settings ▸ Extensions ▸ ResumeForge Capture ▸ Settings**.
-3. **Later, in the app**, work through each job's tabs: **Job Description → Best Resume → Missing Stories → (Interview) → My Resume → Export PDF**.
+3. **Background processing.** Each new JD is automatically run through *clean up → Best Resume → Missing Stories → My Resume*, one job at a time, while you keep browsing. The Jobs list shows each job's progress (Queued, Best resume…, Ready). If a step fails, open the job and press Retry. On Groq's free tier the daily allowance covers roughly 8–12 full jobs. You can choose a shorter depth, or turn this off, under Settings ▸ Background processing. When the daily allowance runs out, the queue pauses and resumes later.
+4. **Then**, review each job's tabs: **Job Description → Best Resume → Missing Stories → (Interview) → My Resume → Export PDF**.
    - **Facts from my stories only** keeps every line traceable to something you said.
    - **Allow [VERIFY] placeholders** adds orange, clearly marked guesses for you to confirm or delete.
 
