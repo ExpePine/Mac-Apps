@@ -523,6 +523,8 @@ struct ReelItem {
 /// Keeps a few loaded chart pages so stepping back and forth is instant, and re-applies your remembered
 /// zoom (time-axis wheel steps + page size) to each chart after it loads.
 final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
+    /// For "Go to date" on web views it doesn't own (the Chart viewer).
+    static let helper = ReelPool()
     private var popups: [(window: NSWindow, web: WKWebView, slot: Int)] = []
     private var views: [String: WKWebView] = [:]
     private var slots: [String: Int] = [:]    // key → chart (0 = Chart 1, 1 = Chart 2)

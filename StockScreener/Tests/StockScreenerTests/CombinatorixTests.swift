@@ -136,3 +136,13 @@ final class DeliveryColumnTests: XCTestCase {
         XCTAssertEqual(TVRange.day(TVRange.unix("2026-07-29")!), "2026-07-29")
     }
 }
+
+final class PercentRankTests: XCTestCase {
+    func testPineStylePercentRank() {
+        let x: [Double] = [1, 2, 3, 4, 5]
+        XCTAssertNil(DeliveryColumns.percentRank(x, length: 5))                 // needs length + 1 bars
+        XCTAssertEqual(DeliveryColumns.percentRank(x, length: 4), 100)          // all 4 previous ≤ 5
+        XCTAssertEqual(DeliveryColumns.percentRank([5, 1, 9, 3, 4], length: 4), 50)   // 1 and 3 ≤ 4
+        XCTAssertEqual(DeliveryColumns.percentRank([2, 2, 2], length: 2), 100)  // ties count
+    }
+}

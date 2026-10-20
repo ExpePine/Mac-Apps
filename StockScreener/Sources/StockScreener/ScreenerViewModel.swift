@@ -228,9 +228,9 @@ final class ScreenerViewModel: ObservableObject {
         // NSE delivery data → DLVR / Safety columns, refreshed whenever new days arrive
         DeliveryCenter.shared.onReload = { [weak self] in
             guard let self else { return }
-            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAdded") {
-                UserDefaults.standard.set(true, forKey: "deliv.colsAdded")
-                for n in ["DLVR", "Safety"] where !self.settings.filterColumns.contains(n) { self.settings.filterColumns.append(n) }
+            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAdded2") {
+                UserDefaults.standard.set(true, forKey: "deliv.colsAdded2")
+                for n in ["DLVR", "Safety", "DQ_PRANK"] where !self.settings.filterColumns.contains(n) { self.settings.filterColumns.append(n) }
             }
             self.setTableKeepingRaw()
         }
@@ -383,14 +383,17 @@ final class ScreenerViewModel: ObservableObject {
         guard !cols.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
         let dName = t.index(of: "DLVR") == nil ? "DLVR" : "DLVR (NSE)"
         let sName = t.index(of: "Safety") == nil ? "Safety" : "Safety (NSE)"
+        let pName = t.index(of: "DQ_PRANK") == nil ? "DQ_PRANK" : "DQ_PRANK (NSE)"
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
-            let d = c?.dlvr, sf = c?.safety
+            let d = c?.dlvr, sf = c?.safety, pr = c?.pctRank
             return SheetRow(id: row.id,
-                            cells: row.cells + [d.map { String(format: "%.2f", $0) } ?? "", sf.map { String(format: "%.0f", $0) } ?? ""],
-                            numbers: row.numbers + [d, sf])
+                            cells: row.cells + [d.map { String(format: "%.2f", $0) } ?? "", sf.map { String(format: "%.0f", $0) } ?? "",
+                                                pr.map { String(format: "%.1f", $0) } ?? ""],
+                            numbers: row.numbers + [d, sf, pr])
         }
-        return SheetTable(headers: t.headers + [dName, sName], rows: rows, originalHeaders: t.originalHeaders + [dName, sName])
+        let extra = [dName, sName, pName]
+        return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
     /// Adds the neural net's NN_score column (0–100) when a model has been trained.

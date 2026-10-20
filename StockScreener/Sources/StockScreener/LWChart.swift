@@ -242,12 +242,54 @@ enum DeliveryPine {
 /// Reads / sets the visible date range of the TradingView chart page through the chart API that tradingview.com
 /// exposes in the page (window.TradingViewApi). Not an official, documented interface — it may be missing.
 enum TVRange {
-    static let getJS = """
-    (function(){ try { var a = window.TradingViewApi; if (!a || !a.activeChart) return 'noapi';
-      var r = a.activeChart().getVisibleRange(); return r ? (Math.round(r.from) + ',' + Math.round(r.to)) : 'none'; } catch (e) { return 'err'; } })()
+    /// Finds the chart controller in the TradingView page (several known places) — body for callAsyncJavaScript.
+    static let finder = """
+    function __ssChart() {
+      var a = window.TradingViewApi || window.tradingViewApi;
+      var tries = [];
+      if (a) {
+        tries.push(function(){ return a.activeChart && a.activeChart(); });
+        tries.push(function(){ return a.chart && a.chart(0); });
+        tries.push(function(){ return a._activeChartWidgetWV && a._activeChartWidgetWV.value(); });
+      }
+      for (var i = 0; i < tries.length; i++) {
+        try { var c = tries[i](); if (c && typeof c.getVisibleRange === 'function') return c; } catch (e) {}
+      }
+      return null;
+    }
     """
-    static func setJS(from: Int, to: Int) -> String {
-        "(function(){ try { window.TradingViewApi.activeChart().setVisibleRange({from: \(from), to: \(to)}); return 'ok'; } catch (e) { return 'err'; } })()"
+
+    /// Returns "from,to" (unix seconds) or a short reason it couldn't.
+    static let getBody = finder + """
+    var c = __ssChart();
+    if (!c) {
+      var keys = Object.keys(window).filter(function(k){ return /tradingview|tvapi|chartapi/i.test(k); }).slice(0, 8).join('|');
+      return 'noapi:' + (typeof window.TradingViewApi) + (keys ? ':' + keys : '');
+    }
+    var r = c.getVisibleRange();
+    if (r && typeof r.then === 'function') r = await r;
+    if (!r || r.from == null) return 'norange';
+    return Math.round(r.from) + ',' + Math.round(r.to);
+    """
+
+    static func setBody(from: Int, to: Int) -> String {
+        finder + """
+        var c = __ssChart();
+        if (!c || typeof c.setVisibleRange !== 'function') return 'noapi';
+        var p = c.setVisibleRange({from: \(from), to: \(to)});
+        if (p && typeof p.then === 'function') await p;
+        return 'ok';
+        """
+    }
+
+    /// Runs one of the bodies above in the page and hands back its text result (or the error).
+    static func run(_ web: WKWebView, _ body: String, done: @escaping (String) -> Void) {
+        web.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { r in
+            switch r {
+            case .success(let v): done((v as? String) ?? "\(v)")
+            case .failure(let e): done("jserror: " + e.localizedDescription)
+            }
+        }
     }
 
     private static let f: DateFormatter = {

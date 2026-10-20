@@ -247,6 +247,7 @@ struct DeliveryView: View {
             if let h, let last = m.last, h > 0 { Text("today = \(String(format: "%.0f", last / h * 100))% of the \(length)-day high") }
             Text("\(sig.count) signal\(sig.count == 1 ? "" : "s")").foregroundStyle(.orange)
             if let sf = c.safety { Text("Safety \(Self.short(sf))") }
+            if let pr = c.pctRank { Text("DQ_PRANK \(String(format: "%.0f", pr))") }
             if let d = c.dlvr { Text("DLVR \(String(format: "%.2f", d)) Cr today").foregroundStyle(.orange).bold() }
         }
         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -439,7 +440,7 @@ struct DeliveryDataTable: View {
     struct Row: Identifiable {
         var id: String { day }
         let day: String, close: Double, qty: Double, per: Double, value: Double
-        let highest: Double?, signal: Bool, safety: Double?, overSafety: Bool?
+        let highest: Double?, signal: Bool, safety: Double?, overSafety: Bool?, pctRank: Double?
     }
 
     private var rows: [Row] {
@@ -454,7 +455,8 @@ struct DeliveryDataTable: View {
             let safety: Double? = i >= 99 ? sum / 100 * 0.05 : nil
             out.append(Row(day: series.days[i], close: series.close[i], qty: series.qty[i], per: series.per[i],
                            value: series.qty[i] * series.close[i], highest: h[i], signal: sig.contains(i),
-                           safety: safety, overSafety: safety.map { series.qty[i] > $0 }))
+                           safety: safety, overSafety: safety.map { series.qty[i] > $0 },
+                           pctRank: DeliveryColumns.percentRank(series.qty, length: 300, at: i)))
         }
         return out.reversed()
     }
@@ -476,6 +478,7 @@ struct DeliveryDataTable: View {
                 TableColumn("Highest(\(length))") { x in Text(x.highest.map { DeliveryView.short($0) } ?? "—").monospacedDigit().foregroundStyle(.blue) }.width(min: 75, ideal: 85)
                 TableColumn("Signal") { x in Text(x.signal ? "▲ DQ" : "").foregroundStyle(.orange).bold() }.width(min: 40, ideal: 50)
                 TableColumn("Safety") { x in Text(x.safety.map { DeliveryView.short($0) } ?? "—").monospacedDigit() }.width(min: 55, ideal: 65)
+                TableColumn("%Rank 300") { x in Text(x.pctRank.map { String(format: "%.0f", $0) } ?? "—").monospacedDigit() }.width(min: 50, ideal: 60)
                 TableColumn("QTY > Safety") { x in Text(x.overSafety.map { $0 ? "yes" : "no" } ?? "—").foregroundStyle(x.overSafety == false ? Color.red : Color.secondary) }.width(min: 60, ideal: 75)
             }
         }
@@ -486,9 +489,9 @@ struct DeliveryDataTable: View {
         panel.nameFieldStringValue = "\(symbol)_delivery.csv"
         panel.allowedContentTypes = [.commaSeparatedText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        var s = "Date,Close,DELIV_QTY,DELIV_PER,DELIV_QTY*CLOSE,Highest_\(length),Signal,Safety\n"
+        var s = "Date,Close,DELIV_QTY,DELIV_PER,DELIV_QTY*CLOSE,Highest_\(length),Signal,Safety,PercentRank300\n"
         for x in r.reversed() {
-            s += "\(x.day),\(x.close),\(Int(x.qty)),\(x.per),\(Int(x.value)),\(x.highest.map { String(Int($0)) } ?? ""),\(x.signal ? 1 : 0),\(x.safety.map { String(Int($0)) } ?? "")\n"
+            s += "\(x.day),\(x.close),\(Int(x.qty)),\(x.per),\(Int(x.value)),\(x.highest.map { String(Int($0)) } ?? ""),\(x.signal ? 1 : 0),\(x.safety.map { String(Int($0)) } ?? ""),\(x.pctRank.map { String(format: "%.1f", $0) } ?? "")\n"
         }
         try? s.write(to: url, atomically: true, encoding: .utf8)
     }

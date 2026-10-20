@@ -209,6 +209,7 @@ enum DeliverySignal {
 struct DeliveryColumns {
     let dlvr: Double?        // ₹ Cr of DELIV_QTY×CLOSE on the latest NSE day, only when the 300-day highest updated that day
     let safety: Double?      // ta.sma(DELIV_QTY, 100) × 0.05 (shares)
+    var pctRank: Double? = nil   // ta.percentrank(DELIV_QTY, 300) on the latest day (0–100)
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -222,7 +223,17 @@ struct DeliveryColumns {
         let n = s.qty.count
         let dlvr: Double? = (sig.last == n - 1 && s.days.last == latestDay) ? m[n - 1] / 1e7 : nil
         let safety: Double? = n >= 100 ? s.qty.suffix(100).reduce(0, +) / 100 * 0.05 : nil
-        return DeliveryColumns(dlvr: dlvr, safety: safety, day: s.days.last ?? "")
+        return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300), day: s.days.last ?? "")
+    }
+
+    /// Pine's ta.percentrank(src, length) on the last bar: % of the previous `length` values that are ≤ the current one
+    /// (na until length + 1 bars exist).
+    static func percentRank(_ x: [Double], length: Int, at i: Int? = nil) -> Double? {
+        let i = i ?? x.count - 1
+        guard length > 0, i >= length, i < x.count else { return nil }
+        var c = 0
+        for k in (i - length)..<i where x[k] <= x[i] { c += 1 }
+        return Double(c) / Double(length) * 100
     }
 
     static func all(_ b: DeliveryBook) -> [String: DeliveryColumns] {

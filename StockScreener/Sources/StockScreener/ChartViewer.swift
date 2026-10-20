@@ -16,6 +16,8 @@ struct ChartViewer: View {
     @State private var pushedToTVAt = Date.distantPast
     @State private var syncFails = 0
     @State private var syncNote: String?
+    @State private var lastSyncReport = ""
+    @State private var pendingGoTo: String?
     private let syncTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     private var symbol: String { vm.chartSymbol ?? "" }
@@ -64,14 +66,19 @@ struct ChartViewer: View {
         .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
         .onAppear { load(); vm.refreshChartLinksIfStale() }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
-        .onChange(of: vm.chartSymbol) { _ in load(); lastTV = "" }
+        .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0 }
         .onReceive(syncTimer) { _ in pollTVRange() }
         .onAppear {
             mini.onUserRange = { from, to in
                 guard UserDefaults.standard.object(forKey: "viewer.syncDelivery") as? Bool ?? true,
                       let f = TVRange.unix(from), let t = TVRange.unix(to) else { return }
                 pushedToTVAt = Date()
-                web.view.evaluateJavaScript(TVRange.setJS(from: f, to: t + 86_399), completionHandler: nil)
+                TVRange.run(web.view, TVRange.setBody(from: f, to: t + 86_399)) { r in
+                    if r != "ok" {
+                        // No chart controller on this page: centre TradingView on the middle day with its Go to date box instead
+                        goToCenterLater(TVRange.day((f + t) / 2))
+                    }
+                }
             }
         }
         .onChange(of: vm.settings.chartLinkColumn) { _ in load() }
@@ -117,6 +124,13 @@ struct ChartViewer: View {
                     .toggleStyle(.button)
                     .help("Move the TradingView chart and the delivery chart together")
                     .onChange(of: syncDelivery) { _ in syncFails = 0; syncNote = nil; lastTV = "" }
+                    .contextMenu {
+                        Button("Copy sync report") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("TradingView sync: \(lastSyncReport) · fails \(syncFails) · url \(web.view.url?.absoluteString ?? "-")", forType: .string)
+                        }
+                        Button("Retry sync") { syncFails = 0; lastTV = "" }
+                    }
             }
             Button { web.view.goBack() } label: { Image(systemName: "arrow.backward") }.help("Back")
             Button { web.view.reload() } label: { Image(systemName: "arrow.clockwise") }.help("Reload")
@@ -179,21 +193,35 @@ struct ChartViewer: View {
 
     /// TradingView → delivery chart: follow TradingView's visible dates (and delivery → TradingView via onUserRange).
     private func pollTVRange() {
-        guard showDelivery, syncDelivery, !symbol.isEmpty, syncFails < 40,
+        guard showDelivery, syncDelivery, !symbol.isEmpty, !web.view.isLoading,
               Date().timeIntervalSince(pushedToTVAt) > 0.8 else { return }
-        web.view.evaluateJavaScript(TVRange.getJS) { r, _ in
-            guard let s = r as? String else { return }
-            let parts = s.split(separator: ",").compactMap { Int($0) }
+        if syncFails >= 25 { return }              // gave up on this page: only delivery → TradingView (Go to date) works
+        TVRange.run(web.view, TVRange.getBody) { r in
+            let parts = r.split(separator: ",").compactMap { Int($0) }
             guard parts.count == 2 else {
                 syncFails += 1
-                if syncFails >= 40 { syncNote = "Sync unavailable: this TradingView page doesn't expose its chart range" }
+                lastSyncReport = r
+                if syncFails >= 25 {
+                    syncNote = "Sync: TradingView doesn't expose its chart here (\(r.prefix(60))) — moving the delivery chart still re-centres TradingView"
+                } else { syncNote = "Sync: waiting for TradingView… (\(r.prefix(40)))" }
                 return
             }
             syncFails = 0
+            lastSyncReport = "ok \(r)"
             syncNote = "🔗 synced"
-            guard s != lastTV else { return }
-            lastTV = s
+            guard r != lastTV else { return }
+            lastTV = r
             mini.setRange(from: TVRange.day(parts[0]), to: TVRange.day(parts[1]))
+        }
+    }
+
+    /// Fallback when there's no chart controller: after you stop moving the delivery chart, TradingView jumps to its middle day.
+    private func goToCenterLater(_ day: String) {
+        pendingGoTo = day
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            guard pendingGoTo == day else { return }
+            pendingGoTo = nil
+            ReelPool.helper.goTo(web.view, date: day, tries: 2, native: true)
         }
     }
 
