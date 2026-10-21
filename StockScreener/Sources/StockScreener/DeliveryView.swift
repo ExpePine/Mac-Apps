@@ -31,6 +31,7 @@ struct DeliveryView: View {
     @State private var loadingChart = false
     @StateObject private var lw = LWChartHolder()
     @AppStorage("deliv.layers") private var layersRaw = ""
+    @AppStorage("t3.rev") private var t3Rev = 0
     @Environment(\.colorScheme) private var colorScheme
 
     struct DelivRow: Identifiable {
@@ -133,6 +134,7 @@ struct DeliveryView: View {
                     .onChange(of: jumpMode) { _ in DeliveryCenter.shared.refreshColumns() }
                 }.fixedSize()
                 StreakButton().fixedSize()
+                T3Button().fixedSize()
                 HStack(spacing: 4) {
                     Text("Within last").font(.caption)
                     Stepper("\(within) day\(within == 1 ? "" : "s")", value: $within, in: 1...250)
@@ -261,6 +263,7 @@ struct DeliveryView: View {
         .onChange(of: full) { _ in pushChart() }
         .onChange(of: colorScheme) { _ in pushChart() }
         .onChange(of: layersRaw) { _ in pushChart() }
+        .onChange(of: t3Rev) { _ in pushChart() }
     }
 
     /// One-line summary of the stock's delivery pattern.
@@ -431,6 +434,7 @@ struct DeliveryMiniChart: View {
     @AppStorage("deliv.full") private var full = true
     @AppStorage("viewer.delivRange") private var range = "1Y"
     @AppStorage("viewer.delivLayers") private var layersRaw = ""
+    @AppStorage("t3.rev") private var t3Rev = 0
 
     var body: some View {
         let s = dc.book.series[SymbolBook.clean(symbol)]
@@ -466,6 +470,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: colorScheme) { _ in push() }
         .onChange(of: layersRaw) { _ in push() }
+        .onChange(of: t3Rev) { _ in push() }
     }
 
     private func push() {
@@ -662,5 +667,62 @@ struct StreakButton: View {
                 .onChange(of: value) { _ in DeliveryCenter.shared.refreshColumns() }
                 .onChange(of: metricRaw) { _ in DeliveryCenter.shared.refreshColumns() }
             }
+    }
+}
+
+
+/// "T3" button + popover: settings of the Tilson T3 line on the delivery charts and the Filter's t3Color column.
+struct T3Button: View {
+    @AppStorage("t3.length") private var length = 22
+    @AppStorage("t3.factor") private var factor = 1.0
+    @AppStorage("t3.useQty") private var useQty = false
+    @AppStorage("t3.rev") private var rev = 0
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: { Label("T3", systemImage: "waveform.path.ecg") }
+            .help("Tilson T3 of delivery: the line on the delivery charts and the Filter's t3Color column (1 = rising / green, 0 = red)")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("T3 (Tilson) on delivery").font(.headline)
+                    HStack(spacing: 6) {
+                        Text("src =").font(.caption.monospaced())
+                        Picker("", selection: $useQty) {
+                            Text("DELIV_QTY*CLOSE_PRICE").tag(false)
+                            Text("DELIV_QTY").tag(true)
+                        }
+                        .labelsHidden().fixedSize()
+                    }
+                    HStack(spacing: 6) {
+                        Text("length =").font(.caption.monospaced())
+                        TextField("", value: $length, format: .number).frame(width: 50).multilineTextAlignment(.trailing)
+                        Text("factor =").font(.caption.monospaced())
+                        TextField("", value: $factor, format: .number).frame(width: 50).multilineTextAlignment(.trailing)
+                    }
+                    Text("""
+                    gd(src, length) => ta.ema(src, length) * (1 + factor) - ta.ema(ta.ema(src, length), length) * factor
+                    t3 = gd(gd(gd(src, length), length), length)
+                    t3Color = t3 > t3[1] ? green : red      → Filter t3Color: 1 = green, 0 = red
+                    """)
+                    .font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text("ta.ema follows Pine: na for the first `length` bars, then seeded with their average. Six EMAs are chained, so T3 needs about 6 × length trading days (≈ \(6 * max(1, length) - 5) for length \(length)) before it has a value; t3Color is blank until then.")
+                        .font(.caption2).foregroundStyle(.secondary).frame(width: 460, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text("Show / hide the line: Layers button on the chart").font(.caption2).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset") { length = 22; factor = 1; useQty = false }
+                    }
+                }
+                .padding(14)
+                .onChange(of: length) { _ in changed() }
+                .onChange(of: factor) { _ in changed() }
+                .onChange(of: useQty) { _ in changed() }
+            }
+    }
+
+    private func changed() {
+        if length < 1 { length = 1 }
+        rev &+= 1
+        DeliveryCenter.shared.refreshColumns()
     }
 }

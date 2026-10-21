@@ -242,6 +242,10 @@ final class ScreenerViewModel: ObservableObject {
                 UserDefaults.standard.set(true, forKey: "deliv.colsAdded5")
                 if !self.settings.filterColumns.contains("STREAK") { self.settings.filterColumns.append("STREAK") }
             }
+            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAdded6") {
+                UserDefaults.standard.set(true, forKey: "deliv.colsAdded6")
+                if !self.settings.filterColumns.contains("t3Color") { self.settings.filterColumns.append("t3Color") }
+            }
             self.setTableKeepingRaw()
         }
         DeliveryCenter.shared.loadIfNeeded()
@@ -403,16 +407,18 @@ final class ScreenerViewModel: ObservableObject {
         let jName = t.index(of: "JUMP") == nil ? "JUMP" : "JUMP (NSE)"
         let mName = t.index(of: "DELSMA") == nil ? "DELSMA" : "DELSMA (NSE)"
         let kName = t.index(of: "STREAK") == nil ? "STREAK" : "STREAK (NSE)"
+        let tName = t.index(of: "t3Color") == nil ? "t3Color" : "t3Color (NSE)"
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
-            let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump, ms = c?.delSma, sk = c?.streak.map(Double.init)      // DLVR 0 = no new 300-day high today
+            let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump, ms = c?.delSma, sk = c?.streak.map(Double.init), t3 = c?.t3Color.map(Double.init)      // DLVR 0 = no new 300-day high today
             return SheetRow(id: row.id,
                             cells: row.cells + [d == 0 ? "0" : String(format: "%.2f", d), sf.map { String(format: "%.0f", $0) } ?? "",
                                                 pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? "",
-                                                ms.map { String(format: "%.1f", $0) } ?? "", sk.map { String(format: "%.0f", $0) } ?? ""],
-                            numbers: row.numbers + [d, sf, pr, jp, ms, sk])
+                                                ms.map { String(format: "%.1f", $0) } ?? "", sk.map { String(format: "%.0f", $0) } ?? "",
+                                                t3.map { String(format: "%.0f", $0) } ?? ""],
+                            numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3])
         }
-        let extra = [dName, sName, pName, jName, mName, kName]
+        let extra = [dName, sName, pName, jName, mName, kName, tName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 

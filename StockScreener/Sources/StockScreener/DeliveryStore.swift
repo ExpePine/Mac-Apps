@@ -278,6 +278,70 @@ enum DeliverySignal {
     }
 }
 
+// MARK: - T3 (Tilson) on delivery
+
+/// Pine:  gd(src, length) => ta.ema(src, length) * (1 + factor) - ta.ema(ta.ema(src, length), length) * factor
+///        t3 = gd(gd(gd(src, length), length), length);  t3Color = t3 > t3[1] ? green : red
+struct T3Def: Equatable {
+    var length = 22
+    var factor = 1.0
+    var useQty = false           // source: DELIV_QTY*CLOSE_PRICE (default) or DELIV_QTY
+
+    var sourceName: String { useQty ? "DELIV_QTY" : "DELIV_QTY*CLOSE_PRICE" }
+    var pine: String { "t3(\(sourceName), \(length), factor \(CombiEngine.fmt(factor)))" }
+
+    static var current: T3Def {
+        let d = UserDefaults.standard
+        var t = T3Def()
+        let l = d.integer(forKey: "t3.length"); if l >= 1 { t.length = l }
+        if d.object(forKey: "t3.factor") != nil { t.factor = d.double(forKey: "t3.factor") }
+        t.useQty = d.bool(forKey: "t3.useQty")
+        return t
+    }
+
+    func source(_ s: DeliverySeries, upTo i: Int? = nil) -> [Double] {
+        let x = useQty ? s.qty : s.metric(value: true)
+        guard let i, i < x.count else { return x }
+        return Array(x[...i])
+    }
+
+    /// Pine's ta.ema: na until `n` values are available, seeded with their SMA, then alpha = 2 / (n + 1).
+    /// na inputs (nil) before the first full window are skipped, like nested Pine EMAs.
+    static func ema(_ x: [Double?], _ n: Int) -> [Double?] {
+        var out = [Double?](repeating: nil, count: x.count)
+        guard n >= 1 else { return x }
+        let a = 2.0 / Double(n + 1)
+        var prev: Double?
+        var run: [Double] = []
+        for i in x.indices {
+            guard let v = x[i] else { if prev == nil { run.removeAll() }; out[i] = prev == nil ? nil : prev; continue }
+            if let p = prev {
+                prev = a * v + (1 - a) * p
+            } else {
+                run.append(v)
+                if run.count > n { run.removeFirst() }
+                if run.count == n { prev = run.reduce(0, +) / Double(n) }
+            }
+            out[i] = prev
+        }
+        return out
+    }
+
+    func gd(_ x: [Double?]) -> [Double?] {
+        let e1 = Self.ema(x, length), e2 = Self.ema(e1, length)
+        return zip(e1, e2).map { a, b in (a != nil && b != nil) ? a! * (1 + factor) - b! * factor : nil }
+    }
+
+    func t3(_ x: [Double]) -> [Double?] { gd(gd(gd(x.map { Optional($0) }))) }
+
+    /// 1 = t3 > t3[1] (green), 0 = otherwise (red), nil = t3 or t3[1] is na. On the last bar of `x`.
+    func color(_ x: [Double]) -> Int? {
+        let t = t3(x)
+        guard t.count >= 2, let a = t[t.count - 1], let b = t[t.count - 2] else { return nil }
+        return a > b ? 1 : 0
+    }
+}
+
 // MARK: - STREAK: consecutive days a condition on ta.percentrank(ta.sma(DELIV_QTY*close, n), length) holds
 
 struct StreakDef: Equatable {
@@ -340,6 +404,7 @@ struct DeliveryColumns {
     var jump: Double? = nil      // JUMP (see DeliverySignal.jump)
     var delSma: Double? = nil    // DELSMA = ta.percentrank(ta.sma(DELIV_QTY*close, 22), 300) (0–100)
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
+    var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -360,7 +425,8 @@ struct DeliveryColumns {
         let mode = UserDefaults.standard.integer(forKey: "deliv.jumpMode")
         return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
                                jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i),
-                               streak: StreakDef.current.streak(m, at: i), day: latestDay)
+                               streak: StreakDef.current.streak(m, at: i),
+                               t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)), day: latestDay)
     }
 
     /// ta.percentrank(ta.sma(x, 22), 300) at bar i — Pine rules: the SMA is na for the first 21 bars, and the

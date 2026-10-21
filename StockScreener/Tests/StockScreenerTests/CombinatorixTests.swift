@@ -465,3 +465,22 @@ final class StreakTests: XCTestCase {
         XCTAssertNil(d.streak([Double](repeating: 1, count: 100), at: 99))
     }
 }
+
+final class T3Tests: XCTestCase {
+    func testPineEMASeededWithSMA() {
+        let e = T3Def.ema([1, 2, 3, 4, 5].map { Optional($0) }, 3)
+        XCTAssertNil(e[1])
+        XCTAssertEqual(e[2]!, 2, accuracy: 1e-12)                    // SMA of 1,2,3
+        XCTAssertEqual(e[3]!, 0.5 * 4 + 0.5 * 2, accuracy: 1e-12)    // alpha = 2/(3+1)
+    }
+    func testT3OfConstantIsConstantAndColour() {
+        let d = T3Def(length: 5, factor: 1, useQty: false)
+        let flat = [Double](repeating: 10, count: 60)
+        let t = d.t3(flat)
+        XCTAssertNil(t[20])                                           // needs 6×5−5 = 25 bars
+        XCTAssertEqual(t[24]!, 10, accuracy: 1e-9)
+        XCTAssertEqual(d.color(flat), 0)                              // not rising → red (0)
+        XCTAssertEqual(d.color(flat + [20, 30, 40]), 1)               // rising → green (1)
+        XCTAssertNil(d.color(Array(flat.prefix(25))))                 // t3[1] still na
+    }
+}
