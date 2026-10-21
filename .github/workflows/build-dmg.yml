@@ -10,6 +10,8 @@ on:
       - ".github/workflows/stock-screener-dmg.yml"
       - "TabCop/**"
       - ".github/workflows/tabcop-dmg.yml"
+      - "SamsaraExpenses/**"
+      - ".github/workflows/samsara-expenses-dmg.yml"
   workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
 
 permissions:

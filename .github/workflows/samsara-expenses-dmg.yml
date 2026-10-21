@@ -1,0 +1,84 @@
+name: Samsara Expenses DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "SamsaraExpenses/**"
+      - ".github/workflows/samsara-expenses-dmg.yml"
+  workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: SamsaraExpenses
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Unit tests (CSV parser + analysis)
+        run: swift test
+
+      - name: Build app and DMG
+        run: |
+          chmod +x scripts/build-dmg.sh
+          ./scripts/build-dmg.sh "1.0.${{ github.run_number }}" "${{ github.run_number }}"
+
+      - name: Render screenshots (made-up sample data)
+        continue-on-error: true
+        run: |
+          "dist/Samsara Expenses.app/Contents/MacOS/SamsaraExpenses" --screenshots | tee shots.log
+          DIR="$(grep '^SCREENSHOTS_DIR ' shots.log | cut -d' ' -f2-)"
+          mkdir -p dist/screens
+          cp "$DIR"/*.png dist/screens/ || true
+
+      # Opens the real Samsara page in the hidden web view and presses 📥 once.
+      # Prints only row counts and the header line, never the expense rows (logs are public).
+      - name: Probe auto-download from the Samsara page
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          "dist/Samsara Expenses.app/Contents/MacOS/SamsaraExpenses" --probe-fetch
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SamsaraExpenses-screens
+          path: SamsaraExpenses/dist/screens
+          if-no-files-found: ignore
+
+      - name: Upload DMG (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SamsaraExpenses-dmg
+          path: SamsaraExpenses/dist/SamsaraExpenses.dmg
+
+      - name: Publish Release with DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="samsara-expenses-build-${{ github.run_number }}"
+          gh release create "$TAG" dist/SamsaraExpenses.dmg \
+            --title "Samsara Expenses (build ${{ github.run_number }})" \
+            --notes "Download SamsaraExpenses.dmg below, drag the app to Applications, then System Settings > Privacy & Security > Open Anyway on first launch. Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
+
+      - name: Update stable "samsara-expenses-latest" download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete samsara-expenses-latest --yes --cleanup-tag || true
+          gh release create samsara-expenses-latest dist/SamsaraExpenses.dmg \
+            --title "Samsara Expenses (latest)" \
+            --notes "Always the newest Samsara Expenses build (currently build ${{ github.run_number }}). Universal (Apple Silicon + Intel), macOS 13 or later." \
+            --latest=false
