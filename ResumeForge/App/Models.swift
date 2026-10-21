@@ -188,4 +188,6 @@ struct AppData: Codable {
     var masterMissing: [String] = []
     var templates: [TemplateSpec]?  // optional so older saved data still loads
     var feed: [FeedJob]?
+    var actions: [ActionItem]?
+    var commentary: Commentary?
 }

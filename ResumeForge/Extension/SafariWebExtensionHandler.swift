@@ -10,16 +10,23 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let request = context.inputItems.first as? NSExtensionItem
         let message = request?.userInfo?[SFExtensionMessageKey]
 
-        guard let dict = message as? [String: Any],
-              (dict["action"] as? String) == "saveJob",
-              let jobDict = dict["job"] as? [String: Any] else {
+        guard let dict = message as? [String: Any], let action = dict["action"] as? String else {
             finish(context, ["ok": false, "error": "Unknown message"])
             return
         }
 
         let url: URL
         do {
-            url = try SharedConfig.importURL(for: CapturedJob(dictionary: jobDict))
+            switch action {
+            case "saveJob":
+                guard let jobDict = dict["job"] as? [String: Any] else { throw NSError(domain: "ResumeForge", code: 3) }
+                url = try SharedConfig.importURL(for: CapturedJob(dictionary: jobDict))
+            case "saveAction":
+                guard let a = dict["payload"] as? [String: Any] else { throw NSError(domain: "ResumeForge", code: 3) }
+                url = try SharedConfig.actionURL(for: ActionPayload(dictionary: a))
+            default:
+                throw NSError(domain: "ResumeForge", code: 4, userInfo: [NSLocalizedDescriptionKey: "Unknown message"])
+            }
         } catch {
             finish(context, ["ok": false, "error": error.localizedDescription])
             return

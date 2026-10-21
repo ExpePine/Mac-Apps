@@ -212,3 +212,93 @@ api.runtime.onInstalled?.addListener(() => {
 try { api.alarms.onAlarm.addListener((a) => { if (a.name === "rf-midnight-check") showCount(); }); } catch (_) {}
 api.tabs.onActivated?.addListener(() => { showCount(); });
 showCount();
+
+// ---------- actions: right-click a job page → ResumeForge: add action ----------
+// The action goes to the app together with the JD on that page (or the page text, e.g. a recruiter's profile);
+// the app's AI then fills in the company, consultant/recruiter and date.
+const ACTION_PRESETS = [
+  ["linkedin", "Meet on LinkedIn"],
+  ["whatsapp", "Message on WhatsApp"],
+  ["call", "Call"],
+  ["email", "Email follow-up"],
+  ["apply", "Apply"],
+];
+const MENU_CONTEXTS = ["page", "selection", "link"];
+const menus = api.contextMenus || api.menus;
+
+async function buildMenus() {
+  if (!menus) return;
+  try { await menus.removeAll(); } catch (_) {}
+  const add = (o) => { try { menus.create(o); } catch (_) { /* already exists */ } };
+  add({ id: "rf-root", title: "ResumeForge: add action", contexts: MENU_CONTEXTS });
+  for (const [id, title] of ACTION_PRESETS) add({ id: "rf-act-" + id, parentId: "rf-root", title, contexts: MENU_CONTEXTS });
+  add({ id: "rf-act-custom", parentId: "rf-root", title: "Custom action…", contexts: MENU_CONTEXTS });
+}
+
+async function sendAction(tab, kind, text, selection) {
+  let page = null;
+  try { page = await extract(tab); } catch (_) { page = { url: tab.url, title: tab.title, rawText: "" }; }
+  const job = page && looksLikeJob(page) ? page : null;
+  const payload = {
+    kind, text: text || "", selection: selection || "",
+    pageURL: tab.url || "", pageTitle: tab.title || "",
+    pageText: job ? "" : ((page && page.rawText) || "").slice(0, 12000),
+    job,
+  };
+  try {
+    const reply = await api.runtime.sendNativeMessage(NATIVE_APP_ID, { action: "saveAction", payload });
+    if (!reply || !reply.ok) throw new Error((reply && reply.error) || "No reply from ResumeForge");
+    // A JD that wasn't sent before is now in the app too — count it like a capture.
+    if (job) {
+      const state = await loadState();
+      const keys = jobKeys(job);
+      if (!keys.some((k) => state.seen[k])) {
+        const t = Date.now(), d = today();
+        for (const k of keys) state.seen[k] = { t, d, title: job.title || "", company: job.company || "" };
+        prune(state.seen);
+        state.count += 1;
+        await api.storage.local.set({ day: d, count: state.count, seen: state.seen });
+      }
+    }
+    flash("✓", COLORS.ok, `Action added${job && job.company ? " for " + job.company : ""}: ${text || kind}`, 1400);
+    return { ok: true };
+  } catch (e) {
+    await api.storage.local.set({ lastError: String((e && e.message) || e), lastErrorAt: Date.now() });
+    await setBadge("ERR", COLORS.err, "Couldn't add the action — see the status page.");
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+if (menus && menus.onClicked) {
+  menus.onClicked.addListener(async (info, tab) => {
+    const id = String(info.menuItemId || "");
+    if (!id.startsWith("rf-act-") || !tab) return;
+    const kind = id.slice(7);
+    if (kind === "custom") {
+      const q = new URLSearchParams({ tab: String(tab.id), sel: (info.selectionText || "").slice(0, 1000), title: tab.title || "" });
+      try { await api.tabs.create({ url: api.runtime.getURL("action.html") + "?" + q.toString() }); } catch (_) {}
+      return;
+    }
+    const preset = (ACTION_PRESETS.find(([k]) => k === kind) || [kind, kind])[1];
+    await sendAction(tab, kind, preset, info.selectionText || "");
+  });
+}
+
+// Custom action typed on action.html
+api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type !== "RF_ACTION_CUSTOM") return;
+  (async () => {
+    try {
+      const tab = await api.tabs.get(Number(msg.tabId));
+      const r = await sendAction(tab, msg.kind || "custom", msg.text || "", msg.selection || "");
+      sendResponse(r);
+    } catch (e) {
+      sendResponse({ ok: false, error: "The job tab was closed — open it again and retry." });
+    }
+  })();
+  return true;
+});
+
+api.runtime.onInstalled?.addListener(buildMenus);
+api.runtime.onStartup?.addListener(buildMenus);
+buildMenus();

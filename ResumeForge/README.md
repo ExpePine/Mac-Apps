@@ -48,6 +48,16 @@ The extension captures job descriptions from Naukri, Wellfound and LinkedIn. The
 
 Your data is stored in `~/Library/Application Support/ResumeForge/ResumeForge.json`. API keys and your GitHub token are kept in the macOS Keychain.
 
+## Actions (one place for everything you need to do)
+
+- **From Safari:** right-click a job page, choose **ResumeForge: add action**, then pick **Meet on LinkedIn**, **Message on WhatsApp**, **Call**, **Email follow-up**, **Apply** or **Custom action…** (write your own). The action goes to the app along with that JD, and the JD is added to Jobs if it isn't there yet. The AI then reads the JD and the page to fill in the **company**, the **consultant or recruiter**, their **contact details** if shown, and the **date** from what you wrote (e.g. "tomorrow 11am"). Text you've selected on the page, such as a phone number, is used too. Right-clicking on a recruiter's LinkedIn profile also works: the action is linked to the job with the matching company.
+- **In the app:** the **Actions** tab shows every action across all jobs, grouped into Overdue / Today / Upcoming / No date.
+  - The **↗** button opens WhatsApp (wa.me with the number), a LinkedIn profile or people search, email, or the job.
+  - Each job's page also lists its actions.
+- **Workload commentary:** a panel beside the board where the AI looks across all your jobs and actions. It tells you what to do now and why, what's overdue, which jobs have stalled (a resume is ready but nothing has been sent, or a strong match has no action), and what to reschedule. It refreshes after changes, at most every 20 minutes, and when you press ⟳.
+
+The app never sends messages for you. It opens the right place, and you send.
+
 ## Templates (copy a CV design from a screenshot)
 
 Go to **Templates** in the sidebar and drop a screenshot of a CV you like. The AI reads the design (fonts, sizes, colours, heading style, single or two-column, section order) and saves it as a template. Fine-tune it in the editor, which shows a live preview. Pick a template on any resume, or set a default under **Settings ▸ Processing**. It approximates the design: photos, icons and charts aren't reproduced.

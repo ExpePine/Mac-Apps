@@ -169,6 +169,7 @@ struct JobDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(job.description.isEmpty)
                 }
+                JobActionsBox(jobID: jobID)
                 if let m = job.match {
                     MatchCard(match: m)
                 } else {

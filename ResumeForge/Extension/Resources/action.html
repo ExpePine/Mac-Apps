@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Add action — ResumeForge</title>
+  <style>
+    :root { color-scheme: light dark; --accent: #2f5d8a; --muted: #777; --border: #8884; }
+    body { font: 14px -apple-system, system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 19px; margin: 0 0 4px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 4px; }
+    textarea, select { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: inherit; }
+    textarea { height: 110px; resize: vertical; }
+    .row { display: flex; gap: 8px; margin-top: 14px; }
+    button { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+    #status { margin-top: 12px; font-size: 13px; min-height: 18px; }
+    .ok { color: #2e7d32; } .err { color: #c62828; }
+    blockquote { margin: 8px 0 0; padding: 6px 10px; border-left: 3px solid var(--border); color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Add an action</h1>
+  <div class="muted" id="page"></div>
+  <label for="kind">Type</label>
+  <select id="kind">
+    <option value="custom">Other</option>
+    <option value="linkedin">Meet on LinkedIn</option>
+    <option value="whatsapp">Message on WhatsApp</option>
+    <option value="call">Call</option>
+    <option value="email">Email follow-up</option>
+    <option value="apply">Apply</option>
+  </select>
+  <label for="text">What do you need to do?</label>
+  <textarea id="text" placeholder="e.g. Call the consultant tomorrow at 11 about the salary band" autofocus></textarea>
+  <blockquote id="sel" hidden></blockquote>
+  <div class="muted" style="margin-top:8px">The app links this to the job and the AI fills in the company, the consultant or recruiter, and the date.</div>
+  <div class="row">
+    <button id="cancel">Cancel</button>
+    <button id="save" class="primary">Add action (⌘↩)</button>
+  </div>
+  <div id="status"></div>
+  <script src="action.js"></script>
+</body>
+</html>

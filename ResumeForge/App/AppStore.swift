@@ -5,6 +5,7 @@ import SwiftUI
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case feed = "Job Feed"
     case jobs = "Jobs"
+    case actions = "Actions"
     case stories = "Stories"
     case interview = "Interview"
     case master = "Master Resume"
@@ -16,6 +17,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .feed: return "antenna.radiowaves.left.and.right"
         case .jobs: return "briefcase"
+        case .actions: return "checklist"
         case .stories: return "book"
         case .interview: return "bubble.left.and.bubble.right"
         case .master: return "doc.richtext"
@@ -49,6 +51,12 @@ final class AppStore: ObservableObject {
     var feedWorker: Task<Void, Never>?
     var feedTimer: Timer?
 
+    // Actions & workload commentary (see Actions.swift)
+    @Published var commentaryBusy = false
+    @Published var commentaryStale = false
+    @Published var commentaryError: String?
+    var commentaryTask: Task<Void, Never>?
+
     private var saveTask: Task<Void, Never>?
     private var midnightTimer: Timer?
     private var waitObserver: NSObjectProtocol?
@@ -63,6 +71,11 @@ final class AppStore: ObservableObject {
         isLoading = false
         DispatchQueue.main.async { self.resumePendingAuto() }
         DispatchQueue.main.async { self.startFeedTimer() }
+        // Fresh commentary when the app opens after a few hours away.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            if let c = self.data.commentary, Date().timeIntervalSince(c.generatedAt) < 3 * 3600 { return }
+            if !self.actions.isEmpty { self.scheduleCommentary(force: true) }
+        }
         DispatchQueue.main.async { self.updateDockBadge() }
         // Refresh the Dock count after midnight.
         midnightTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
@@ -124,6 +137,14 @@ final class AppStore: ObservableObject {
     // MARK: Jobs handed over by the Safari extension (resumeforge://import?job=…)
 
     func handleOpenURL(_ url: URL) {
+        if url.host == "action" {
+            guard let a = SharedConfig.decodeActionURL(url) else {
+                errorMessage = "Couldn't read the action sent from Safari."
+                return
+            }
+            ingestAction(a)
+            return
+        }
         guard let c = SharedConfig.decodeImportURL(url) else {
             errorMessage = "Couldn't read the job sent from Safari. Try 'Copy as JSON' in the extension and Jobs → Add job manually."
             return

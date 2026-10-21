@@ -41,6 +41,7 @@ struct ContentView: View {
         } detail: {
             switch store.section ?? .jobs {
             case .jobs: JobsView()
+            case .actions: ActionsView()
             case .stories: StoriesView()
             case .interview: InterviewView()
             case .master: MasterResumeView()
