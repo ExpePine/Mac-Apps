@@ -457,7 +457,7 @@ final class StreakTests: XCTestCase {
         var d = StreakDef(); d.sma = 22; d.length = 300; d.op = ">"; d.value = 99
         XCTAssertEqual(d.streak(x, at: x.count - 1), 5)
         XCTAssertEqual(d.streak(x, at: 424), 0)
-        d.op = "<"; d.value = 1
+        d.op = "≤"; d.value = 1                                  // flat SMA ties count (≤), like Pine: rank 1.0 on the last low day
         XCTAssertGreaterThan(d.streak(x, at: 424) ?? 0, 0)
     }
     func testNilWithoutHistory() {
