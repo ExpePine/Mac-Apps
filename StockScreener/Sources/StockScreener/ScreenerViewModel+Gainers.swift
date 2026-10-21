@@ -35,20 +35,25 @@ extension ScreenerViewModel {
         return (up, down)
     }
 
-    /// Sheet stocks up ≥ threshold on `day` (Yahoo close-to-close; the sheet's change% column as a fallback).
-    func gainers(on day: String) -> [GainerRow] {
+    /// Sheet stocks up ≥ threshold on `day`, from Yahoo prices only (today = the live price vs yesterday's close).
+    func gainers(on day: String) -> [GainerRow] { yahooGainers(on: day, min: settings.gainersThreshold) }
+
+    func yahooGainers(on day: String, min: Double) -> [GainerRow] {
         guard let label = labelIndex else { return [] }
-        let changes = tgChanges(for: table, day: day)
-        let sheetDay = HistoryStore.dayKey(dataDay(of: table))
+        var seen = Set<String>()
         return table.rows.compactMap { r in
-            guard let ch = changes[r.id], ch.0 >= settings.gainersThreshold else { return nil }
-            let c = ch.0, yahoo = ch.1
-            if !yahoo && day != sheetDay { return nil }        // the sheet's change% only describes its own data day
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
-            let s = priceBook.series(for: sym)
-            let close = s?.index(onOrBefore: day).map { s!.closes[$0] }
-            return GainerRow(row: r, symbol: sym, change: c, close: close, fromYahoo: yahoo)
+            guard !sym.isEmpty, let s = priceBook.series(for: sym), let c = s.dailyChange(on: day), c >= min,
+                  seen.insert(sym).inserted else { return nil }
+            let close = s.index(onOrBefore: day).map { s.closes[$0] }
+            return GainerRow(row: r, symbol: sym, change: c, close: close, fromYahoo: true)
         }.sorted { $0.change > $1.change }
+    }
+
+    /// Sheet stocks with no Yahoo price on `day` (can't be judged).
+    func stocksWithoutYahoo(on day: String) -> Int {
+        guard let label = labelIndex else { return 0 }
+        return table.rows.filter { priceBook.series(for: $0.text(label))?.dailyChange(on: day) == nil }.count
     }
 
     func reason(_ symbol: String, day: String) -> String? { newsCache.reasons["\(day)|\(symbol)"] }

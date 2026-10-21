@@ -46,12 +46,9 @@ struct GainerChartsView: View {
         var out: [Item] = []
         switch gcMode {
         case .daily:
-            let changes = vm.tgChanges(for: vm.table, day: day)
-            let sheetDay = HistoryStore.dayKey(vm.dataDay(of: vm.table))
-            for r in rows {
-                guard let ch = changes[r.id], ch.0 >= dailyMin else { continue }
-                if !ch.1 && day != sheetDay { continue }     // the sheet's change% only describes its own day
-                out.append(Item(symbol: sym(r), change: ch.0, row: r))
+            let allowed = Set(rows.map(sym))
+            for g in vm.yahooGainers(on: day, min: dailyMin) where allowed.contains(g.symbol) {
+                out.append(Item(symbol: g.symbol, change: g.change, row: g.row))
             }
         case .monthly:
             let w = GCMonthWindow(rawValue: monthWindow) ?? .rolling
@@ -113,6 +110,7 @@ struct GainerChartsView: View {
         }
         .navigationTitle(cur.map { "Gainer Charts — \($0.symbol) · Chart \(chart + 1)" } ?? "Gainer Charts")
         .onAppear { vm.refreshChartLinksIfStale(); restart() }
+        .task { await LiveQuotes.shared.keepLive(vm) }
         .onChange(of: mode) { _ in restart() }
         .onChange(of: dailyMin) { _ in restart() }
         .onChange(of: monthlyMin) { _ in restart() }

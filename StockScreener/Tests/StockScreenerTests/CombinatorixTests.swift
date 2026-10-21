@@ -429,3 +429,22 @@ final class AutoPredictTests: XCTestCase {
         XCTAssertEqual(b.runs.count, 1)
     }
 }
+
+final class LiveQuotesTests: XCTestCase {
+    private func ist(_ s: String) -> Date {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.date(from: s)!
+    }
+    @MainActor func testMarketHours() {
+        XCTAssertTrue(LiveQuotes.marketOpen(ist("2026-10-21 10:00")))     // Wednesday
+        XCTAssertFalse(LiveQuotes.marketOpen(ist("2026-10-21 08:59")))
+        XCTAssertFalse(LiveQuotes.marketOpen(ist("2026-10-21 16:00")))
+        XCTAssertFalse(LiveQuotes.marketOpen(ist("2026-10-24 11:00")))    // Saturday
+    }
+    func testLiveBarMerges() {
+        let old = PriceSeries(days: ["2026-10-19", "2026-10-20"], closes: [100, 100])
+        let live = PriceSeries(days: ["2026-10-20", "2026-10-21"], closes: [100, 106])
+        let m = old.merged(with: live)
+        XCTAssertEqual(m.dailyChange(on: "2026-10-21")!, 6, accuracy: 1e-9)
+    }
+}

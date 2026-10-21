@@ -12,6 +12,9 @@ struct GainersView: View {
     @State private var sortDescending = true
     @State private var selection: [SheetRow] = []
     @State private var version = 0
+    @ObservedObject private var live = LiveQuotes.shared
+    @AppStorage("live.enabled") private var liveOn = true
+    @AppStorage("live.interval") private var liveInterval = 60.0
 
     var body: some View {
         let day = vm.currentGainerDay
@@ -27,7 +30,7 @@ struct GainersView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 40)).foregroundStyle(.secondary)
                     Text("No stocks up ≥ \(fmt(vm.settings.gainersThreshold))% on \(day)").font(.title3)
-                    Text("Lower the threshold, pick another day, or click Update prices (Yahoo) if the latest day is missing.")
+                    Text(live.lastUpdate == nil ? "Waiting for the first live Yahoo pass (\(live.progress.done)/\(live.progress.total))…" : "Lower the threshold or pick another day.")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -36,12 +39,14 @@ struct GainersView: View {
             }
         }
         .navigationTitle("Daily Gainers")
+        .task { await LiveQuotes.shared.keepLive(vm) }             // live Yahoo prices for every stock
         .task {
             while !Task.isCancelled {
-                await vm.refreshIndexCharts()
-                try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)        // every 5 minutes while open
+                await vm.refreshIndexCharts()                          // NIFTY / SENSEX intraday, every minute
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
             }
         }
+        .onChange(of: live.tick) { _ in version += 1 }
         .sheet(isPresented: $showSettings) { NewsAISettings().environmentObject(vm) }
         .onAppear { if vm.sectorReport == nil { Task { await vm.computeSectors(notify: false) } } }
         .onChange(of: vm.sectorReport?.asOf) { _ in version += 1 }
@@ -63,6 +68,24 @@ struct GainersView: View {
                 Text("3M").tag(1)
             }
             .pickerStyle(.segmented).labelsHidden().frame(width: 110)
+            VStack(alignment: .trailing, spacing: 4) {
+                Toggle("Live", isOn: $liveOn).toggleStyle(.switch).controlSize(.small)
+                    .help("Re-read every stock's price from Yahoo while NSE is open (Mon–Fri 09:15–15:30 IST)")
+                Picker("", selection: $liveInterval) {
+                    ForEach([30.0, 60, 120, 300], id: \.self) { Text($0 < 60 ? "every \(Int($0)) s" : "every \(Int($0 / 60)) min").tag($0) }
+                }
+                .labelsHidden().fixedSize().controlSize(.small)
+                Button("Refresh now") { Task { await live.sweep(vm) } }.controlSize(.small).disabled(live.updating)
+            }
+            TimelineView(.periodic(from: .now, by: 5)) { _ in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(live.statusText).font(.caption.monospacedDigit())
+                        .foregroundStyle(live.updating ? Color.orange : (LiveQuotes.marketOpen() ? Color.green : Color.secondary))
+                    if live.updating { ProgressView(value: Double(live.progress.done), total: Double(max(1, live.progress.total))).frame(width: 160) }
+                    if let e = live.lastError { Text(e).font(.caption2).foregroundStyle(.orange).lineLimit(2) }
+                }
+                .frame(width: 230, alignment: .leading)
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
@@ -228,7 +251,7 @@ struct GainersView: View {
                                      let why = vm.reason(g.symbol, day: day) ?? ""
                                      let rot = sc.flatMap { vm.sectorRotation(g.row.text($0), day: day) }
                                      return SheetRow(id: g.row.id,
-                                                     cells: g.row.cells + [String(format: "%+.2f%%", g.change) + (g.fromYahoo ? "" : " *"),
+                                                     cells: g.row.cells + [String(format: "%+.2f%%", g.change),
                                                                            g.close.map { String(format: "%.2f", $0) } ?? "", why,
                                                                            rot.map { ScreenerViewModel.quadrantLabel($0.quadrant) } ?? "",
                                                                            rot?.trend.rawValue ?? "",
@@ -285,7 +308,9 @@ struct GainersView: View {
                     Button("Clear filters") { vm.settings.gainersColumnFilters = [:]; vm.settings.gainersOnlyFilterList = false }
                         .controlSize(.small)
                 }
-                Text("Day % = Yahoo close vs previous close (* = from the sheet's change% column). “Why” = Groq's summary of recent headlines (\(vm.settings.newsProvider.rawValue)); check the source before acting. Right-click a stock to add it to a watchlist.")
+                let missing = vm.stocksWithoutYahoo(on: day)
+                if missing > 0 { Text("\(missing) sheet stocks have no Yahoo price for \(day)").font(.caption2).foregroundStyle(.orange) }
+                Text("Day % = Yahoo price vs previous close (live while NSE is open). “Why” = Groq's summary of recent headlines (\(vm.settings.newsProvider.rawValue)); check the source before acting. Right-click a stock to add it to a watchlist.")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
             }

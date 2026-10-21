@@ -183,14 +183,13 @@ enum YahooClient {
     }
 
     /// Fetches many symbols with a few parallel requests. Calls `progress(done, total)` on the main actor.
-    static func fetchAll(_ symbols: [String], range: String,
+    static func fetchAll(_ symbols: [String], range: String, width: Int = 6,
                          progress: @escaping @MainActor (Int, Int) -> Void) async -> (PriceBook, [String]) {
         var book = PriceBook()
         var failed: [String] = []
         let unique = Array(Set(symbols.map { $0.trimmingCharacters(in: .whitespaces).uppercased() }.filter { !$0.isEmpty })).sorted()
         var done = 0
         let total = unique.count
-        let width = 6
 
         var index = 0
         while index < unique.count {
