@@ -54,7 +54,7 @@ final class ParserTests: XCTestCase {
     }
 
     func testMissingColumnsThrows() {
-        XCTAssertThrowsError(try ExpenseParser.parse(text: "Name,Cost\nA,1\n")) { err in
+        XCTAssertThrowsError(try ExpenseParser.parse(text: "Label,Cost\nA,1\n")) { err in
             XCTAssertEqual(err as? ParseError, .missingColumns(["Product"]))
         }
         XCTAssertThrowsError(try ExpenseParser.parse(text: ""))
