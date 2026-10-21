@@ -10,6 +10,13 @@ struct ChartReelView: View {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var pool = ReelPool()
     @StateObject private var deliveryLW = LWChartHolder()
+    @AppStorage("reel.syncDelivery") private var syncDelivery = true
+    @State private var syncNote: String?
+    @State private var lastTV = ""
+    @State private var syncFails = 0
+    @State private var pushedToTVAt = Date.distantPast
+    @State private var pendingGoTo: String?
+    private let syncTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     @AppStorage("reel.source") private var source = ReelSource.gainers.rawValue
     @AppStorage("reel.column") private var column = ""
@@ -149,6 +156,27 @@ struct ChartReelView: View {
         .onChange(of: mbc.events.count) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
         .onChange(of: layout) { _ in phase = 0; show(shown, items) }
+        .onChange(of: shown) { _ in lastTV = ""; syncFails = 0; syncNote = nil }
+        .onReceive(syncTimer) { _ in pollTV(current) }
+        .onAppear {
+            // delivery chart → TradingView: when you pan / zoom the delivery chart, Chart 1 follows
+            deliveryLW.onUserRange = { from, to in
+                guard syncDelivery, ReelLayout(rawValue: layout) == .withDelivery,
+                      let web = chart1Web(), let f = TVRange.unix(from), let t = TVRange.unix(to) else { return }
+                pushedToTVAt = Date()
+                TVRange.run(web, TVRange.setBody(from: f, to: t + 86_399)) { r in
+                    guard r != "ok" else { return }
+                    // no chart controller on this page: centre TradingView on the middle day (Go to date) instead
+                    let day = TVRange.day((f + t) / 2)
+                    pendingGoTo = day
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        guard pendingGoTo == day, let w = chart1Web() else { return }
+                        pendingGoTo = nil
+                        ReelPool.helper.goTo(w, date: day, tries: 2, native: true)
+                    }
+                }
+            }
+        }
         .onReceive(timer) { _ in
             guard playing, !dragging else { return }
             let isSeq = ReelLayout(rawValue: layout) == .sequence
@@ -311,6 +339,10 @@ struct ChartReelView: View {
                     .help("My pick: grey → green → orange (⌘K)")
                     .keyboardShortcut("k", modifiers: .command)
                 }
+                if ReelLayout(rawValue: layout) == .withDelivery {
+                    Toggle("🔗 Sync", isOn: $syncDelivery).toggleStyle(.button)
+                        .help("Keep the delivery chart on the same dates as Chart 1 — and move Chart 1 when you pan / zoom the delivery chart")
+                }
                 Button { vm.openChart(it.symbol, queue: items.map(\.symbol), openWindow: openWindow) } label: { Label("Chart viewer", systemImage: "arrow.up.forward.app") }
                     .help("Open this stock in the Chart viewer (snapshots, annotate, sign in)")
             }
@@ -334,7 +366,7 @@ struct ChartReelView: View {
             case .withDelivery:
                 VSplitView {
                     chartPane(it, 0).frame(minHeight: 250)
-                    DeliveryMiniChart(symbol: it.symbol, lw: deliveryLW, focus: it.goTo)
+                    DeliveryMiniChart(symbol: it.symbol, lw: deliveryLW, syncNote: syncDelivery ? syncNote : nil, focus: it.goTo)
                         .frame(minHeight: 110, idealHeight: 230)
                 }
             }
@@ -470,6 +502,35 @@ struct ChartReelView: View {
     }
 
     static let speeds: [Double] = [1, 1.5, 2, 3, 4, 5, 8, 12]
+
+    // MARK: Sync (Chart 1 ↔ delivery chart)
+
+    private func chart1Web() -> WKWebView? {
+        let list = items
+        guard list.indices.contains(shown), let u = vm.chartURL(list[shown].symbol, column: 0) else { return nil }
+        return pool.view(for: u, slot: 0, goTo: list[shown].goTo)
+    }
+
+    /// TradingView → delivery chart: follow Chart 1's visible dates.
+    private func pollTV(_ it: ReelItem?) {
+        guard syncDelivery, ReelLayout(rawValue: layout) == .withDelivery, it != nil, !dragging,
+              Date().timeIntervalSince(pushedToTVAt) > 0.8, syncFails < 25,
+              let web = chart1Web(), !web.isLoading else { return }
+        TVRange.run(web, TVRange.getBody) { r in
+            let parts = r.split(separator: ",").compactMap { Int($0) }
+            guard parts.count == 2 else {
+                syncFails += 1
+                syncNote = syncFails >= 25 ? "Sync: TradingView doesn't expose its chart here — panning the delivery chart still re-centres Chart 1"
+                                           : "Sync: waiting for TradingView…"
+                return
+            }
+            syncFails = 0
+            syncNote = "🔗 synced"
+            guard r != lastTV else { return }
+            lastTV = r
+            deliveryLW.setRange(from: TVRange.day(parts[0]), to: TVRange.day(parts[1]))
+        }
+    }
 
     private func step(_ d: Int, _ list: [ReelItem]) {
         guard !list.isEmpty else { return }
