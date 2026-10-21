@@ -172,6 +172,13 @@ struct TodayView: View {
             .sorted { $0.periodStart < $1.periodStart }
     }
 
+    private var followThroughText: String {
+        let judged = entries.compactMap(\.intentResult)
+        guard !judged.isEmpty else { return "–" }
+        let done = judged.reduce(0.0) { $0 + ($1 == "did" ? 1 : ($1 == "partly" ? 0.5 : 0)) }
+        return "\(Int(done / Double(judged.count) * 100))%"
+    }
+
     private var onPlanText: String {
         let checked = entries.filter { $0.goalAligned != nil }
         guard !checked.isEmpty else { return "–" }
@@ -204,6 +211,7 @@ struct TodayView: View {
                     StatTile(value: onPlanText, label: "Check-ins on plan", symbol: "scope", tint: .green)
                     StatTile(value: durationText(tracker.today.activeSeconds), label: "Active screen time",
                              symbol: "desktopcomputer", tint: .orange)
+                    StatTile(value: followThroughText, label: "Did what I said", symbol: "arrow.uturn.forward.circle", tint: .purple)
                 }
 
                 Card(title: "Today's goals", symbol: "target") {

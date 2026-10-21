@@ -249,6 +249,15 @@ extension ReportArchive {
             else if let n = e.deviationNote { l += " | coach: \(clip(n, 60))" }
             return l
         }
+        let judged = all.compactMap { e -> (String, String?)? in e.intentResult.map { ($0, e.intentReason) } }
+        var followLine = "(no intentions recorded yet)"
+        if !judged.isEmpty {
+            let done = judged.reduce(0.0) { $0 + ($1.0 == "did" ? 1 : ($1.0 == "partly" ? 0.5 : 0)) }
+            var reasons: [String: Int] = [:]
+            for (r, why) in judged where r != "did" { reasons[why ?? "no reason given", default: 0] += 1 }
+            followLine = "\(Int(done / Double(judged.count) * 100))% of \(judged.count) stated intentions followed through; reasons when not: "
+                + reasons.sorted { $0.value > $1.value }.prefix(6).map { "\($0.key) \($0.value)×" }.joined(separator: ", ")
+        }
         let planList = plans?.plans ?? []
         let planLines = planList.prefix(12).map { p -> String in
             var l = "\(clip(p.goal, 60)) [\(p.status.rawValue)] \(p.doneCount)/\(p.steps.count) steps, \(p.blockers.count) flow breaks"
@@ -294,6 +303,8 @@ extension ReportArchive {
         check-ins answered \(stats.answered), missed \(stats.missed), skipped \(stats.skipped); \
         on-plan \(stats.onPlanRate.map { "\($0)%" } ?? "n/a") of \(stats.checked) checked; wins \(stats.successes); \
         goals: set on \(goalDays) days, \(goalsDone)/\(goalsSet) done; plan pace: \(pace).
+
+        FOLLOW-THROUGH (said I'd do next vs did): \(followLine)
 
         WORK CATEGORIES (all reports): \(categoryTotals.isEmpty ? "(none yet)" : top(categoryTotals, 10, minutes: true))
         TOP WEBSITES: \(siteTotals.isEmpty ? "(none)" : top(siteTotals, 12))

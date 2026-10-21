@@ -244,6 +244,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let all = month + goals.activeToday.map(\.text).filter { !month.contains($0) }
         session.todayRows = GoalAccounting.rows(store.entries(on: Date()), goals: all)
+        // What I said I'd do in this period (from the last check-in, if recent).
+        let maxGap = TimeInterval(settings.intervalMinutes * 60 * 2 + 300)
+        if let last = store.entries
+            .filter({ $0.status != .missed && $0.status != .skipped && $0.periodEnd <= session.prompt.start.addingTimeInterval(60) })
+            .max(by: { $0.periodEnd < $1.periodEnd }),
+           session.prompt.start.timeIntervalSince(last.periodEnd) <= maxGap,
+           let text = last.nextIntent, !text.isEmpty {
+            session.previousIntent = PromptSession.Intent(text: text, goal: last.nextGoal, kind: last.nextKind,
+                                                         planID: last.nextPlanID, stepID: last.nextStepID)
+        }
+        let judged = store.entries(on: Date()).compactMap(\.intentResult)
+        if !judged.isEmpty {
+            let done = judged.reduce(0.0) { $0 + ($1 == "did" ? 1 : ($1 == "partly" ? 0.5 : 0)) }
+            session.followThrough = (done, judged.count)
+        }
+
         let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())
         let weekEntries = store.entries.filter { week?.contains($0.periodEnd) ?? false }
         session.weekRows = GoalAccounting.rows(weekEntries, goals: all)
@@ -262,7 +278,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Task { [weak self] in
             guard let self else { return }
             let guess = await self.coach.guessPosition(goals: session.goalOptions, plans: plansForGuess,
-                                                       previous: previous, usageText: usage)
+                                                       previous: previous, usageText: usage,
+                                                       intent: session.previousIntent?.text)
             session.guessing = false
             if let guess { session.applyGuess(guess) }
         }
@@ -302,6 +319,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func reviewAgainstGoals(_ entry: Entry) {
         guard entry.status == .completed || entry.status == .quickReply || entry.status == .autoSaved else {
             return
+        }
+        // Said something in free text last time and the app couldn't tell: let the coach judge.
+        if let intent = entry.intentFor, entry.intentResult == nil, coach.hasKey {
+            let usage = usageSummary(tracker.usage.usage(for: entry.periodEnd), from: entry.periodStart, to: entry.periodEnd)
+            Task { [weak self] in
+                guard let self, let r = await self.coach.judgeIntent(intent: intent, did: CoachService.text(of: entry), usage: usage) else { return }
+                self.store.update(entry.id) {
+                    $0.intentResult = r.result
+                    if $0.intentReason == nil { $0.intentReason = r.reason }
+                }
+            }
         }
         // Tapped a goal or step: it's on plan, no AI check needed.
         if let tag = entry.goalTag, entry.checkinKind != "drift" {

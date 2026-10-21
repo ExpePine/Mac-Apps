@@ -101,7 +101,8 @@ struct PositionGuess {
 }
 
 extension CoachService {
-    func guessPosition(goals: [String], plans: [Plan], previous: Entry?, usageText: String) async -> PositionGuess? {
+    func guessPosition(goals: [String], plans: [Plan], previous: Entry?, usageText: String,
+                       intent: String? = nil) async -> PositionGuess? {
         guard hasKey else { return nil }
         var planText = ""
         for (pi, p) in plans.enumerated() {
@@ -118,6 +119,7 @@ extension CoachService {
         My active plan paths:
         \(planText.isEmpty ? "(none)" : planText)
         Previous check-in: \(previous.map { "\($0.timeRangeText): \(CoachService.text(of: $0))" } ?? "(none)")
+        What I said I'd do in this period: \(intent ?? "(nothing)")
         Screen activity in this period: \(usageText.isEmpty ? "(no data)" : usageText)
 
         Guess where I most likely am right now. Prefer continuity with the previous check-in unless the screen \
@@ -145,6 +147,21 @@ extension CoachService {
             if g.goal == nil { g.goal = GoalAccounting.match(plan.goal, in: goals) ?? plan.goal }
         }
         return g
+    }
+
+    /// Did the period match what I said I'd do?
+    func judgeIntent(intent: String, did: String, usage: String) async -> (result: String, reason: String?)? {
+        let user = """
+        What I said I'd do: "\(intent)"
+        What I logged: "\(did)"
+        Screen activity in that period: \(usage.isEmpty ? "(no data)" : usage)
+        Return {"result": "did" or "partly" or "didnt", "reason": "max 6 words if not did, else null"}
+        """
+        guard let raw = try? await ask(system: "You judge whether someone followed through on a short intention. Be fair. Output only valid JSON.",
+                                       user: user, json: true),
+              let json = extractJSON(raw), let r = (json["result"] as? String)?.lowercased(),
+              ["did", "partly", "didnt"].contains(r) else { return nil }
+        return (r, json["reason"] as? String)
     }
 
     func explainPath(_ digest: String) async throws -> PathNote {

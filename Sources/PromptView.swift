@@ -8,8 +8,10 @@ struct PromptView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            if let intent = session.previousIntent { intentCheck(intent) }
             pathSection
             noteSection
+            nextSection
             if let msg = session.errorMessage {
                 Text(msg)
                     .font(.callout)
@@ -33,10 +35,119 @@ struct PromptView: View {
                 Text(session.prompt.rangeText)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                if let f = session.followThrough, f.total > 0 {
+                    Label("Follow-through today: \(Int(f.done / Double(f.total) * 100))% (\(f.total) checked)",
+                          systemImage: "arrow.uturn.forward.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             CountdownRing(remaining: session.remaining, total: session.totalSeconds)
         }
+    }
+
+    // MARK: Did I do what I said?
+
+    private func intentCheck(_ intent: PromptSession.Intent) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "quote.opening").foregroundStyle(.secondary)
+                Text("You said you'd: ").foregroundStyle(.secondary) + Text(intent.text).fontWeight(.semibold)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                resultChip("did", "Did it", "checkmark.circle.fill", .green)
+                resultChip("partly", "Partly", "circle.lefthalf.filled", .yellow)
+                resultChip("didnt", "Didn't", "xmark.circle.fill", .orange)
+                Spacer()
+                if session.intentResult != nil {
+                    Text("auto-checked from your tap — change if wrong").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            if session.intentResult == "didnt" || session.intentResult == "partly" {
+                let reasons = ["Pulled into something else", "Took longer", "Interrupted", "Changed plan", "Distracted", "Blocked"]
+                FlowChips(items: reasons) { r in
+                    chip(r, color: .orange, selected: session.intentReason == r) {
+                        session.intentReason = session.intentReason == r ? nil : r
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.07)))
+    }
+
+    private func resultChip(_ value: String, _ title: String, _ icon: String, _ tint: Color) -> some View {
+        let selected = session.intentResult == value
+        return Button { session.setIntentResult(value) } label: {
+            Label(title, systemImage: icon)
+                .font(.callout)
+                .foregroundStyle(selected ? tint : Color.primary)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Capsule().fill(selected ? tint.opacity(0.2) : Color.secondary.opacity(0.10)))
+                .overlay(Capsule().strokeBorder(selected ? tint : Color.clear, lineWidth: 1.5))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Next interval
+
+    private var nextSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("NEXT \(session.intervalMinutes) MIN — WHAT WILL YOU DO?")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if session.hasSelection && session.selectedKind != "drift" {
+                    nextChip(.same, "Continue this", "arrow.forward.circle")
+                }
+                if let f = session.followingStep {
+                    nextChip(.nextStep(planID: f.path.id, stepID: f.step.id, text: f.step.text),
+                             "Next: \(f.step.text)", "forward.end")
+                }
+                nextChip(.kind("break"), "Break", "cup.and.saucer")
+                Menu {
+                    ForEach(session.goalOptions, id: \.self) { g in
+                        Button(g) { session.setNext(.goal(g)) }
+                    }
+                    ForEach(session.planPaths) { path in
+                        Section(path.goal) {
+                            ForEach(path.steps) { st in
+                                Button(st.text) { session.setNext(.nextStep(planID: path.id, stepID: st.id, text: st.text)) }
+                            }
+                        }
+                    }
+                } label: {
+                    Text(otherLabel).lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+            TextField("Next", text: $session.nextText, prompt: Text("Optional — “I'll …” in a few words"))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    private var otherLabel: String {
+        if case .goal(let g) = session.nextChoice { return "Goal: \(g)" }
+        if case .nextStep(_, _, let t) = session.nextChoice,
+           session.followingStep?.step.text != t { return "Step: \(t)" }
+        return "Something else…"
+    }
+
+    private func nextChip(_ choice: PromptSession.NextChoice, _ title: String, _ icon: String) -> some View {
+        let selected = session.nextChoice == choice
+        return Button { session.setNext(choice) } label: {
+            Label(title, systemImage: icon)
+                .lineLimit(1)
+                .font(.callout)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Capsule().fill(selected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.10)))
+                .overlay(Capsule().strokeBorder(selected ? Color.accentColor : Color.clear, lineWidth: 1.5))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Path — tap where you are

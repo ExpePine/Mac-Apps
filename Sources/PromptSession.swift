@@ -36,30 +36,124 @@ final class PromptSession: ObservableObject {
     var todayRows: [GoalTimeRow] = []
     var weekRows: [GoalTimeRow] = []
 
+    // MARK: Intentions
+
+    struct Intent {
+        let text: String
+        let goal: String?
+        let kind: String?
+        let planID: UUID?
+        let stepID: UUID?
+    }
+
+    enum NextChoice: Equatable {
+        case none, same, nextStep(planID: UUID, stepID: UUID, text: String), goal(String), kind(String)
+    }
+
+    /// What I said I'd do in this period (from the previous check-in).
+    var previousIntent: Intent?
+    var followThrough: (done: Double, total: Int)?
+
+    @Published var intentResult: String?          // did / partly / didnt
+    @Published var intentReason: String?
+    private var intentManual = false
+    @Published var nextChoice: NextChoice = .none
+    @Published var nextText = ""
+    private var nextManual = false
+
+    func setIntentResult(_ r: String) {
+        intentManual = true
+        intentResult = (intentResult == r) ? nil : r
+        if intentResult == "did" { intentReason = nil }
+    }
+
+    func setNext(_ c: NextChoice) {
+        nextManual = true
+        nextChoice = (nextChoice == c) ? .none : c
+    }
+
+    /// The step after the selected one in the same plan path.
+    var followingStep: (path: PlanPath, step: PlanStep)? {
+        guard let sid = selectedStep, let path = planPaths.first(where: { $0.steps.contains { $0.id == sid } }),
+              let i = path.steps.firstIndex(where: { $0.id == sid }), i + 1 < path.steps.count else { return nil }
+        return (path, path.steps[i + 1])
+    }
+
+    /// Compares what I said with what I picked (unless I set it by hand).
+    private func autoAssess() {
+        guard let p = previousIntent, !intentManual else { return }
+        if selectedKind == "drift" { intentResult = "didnt"; return }
+        if let ps = p.stepID, selectedStep == ps { intentResult = "did"; return }
+        if let ps = p.stepID, let sel = selectedStep, ps != sel,
+           let plan = planPaths.first(where: { $0.id == p.planID }), plan.steps.contains(where: { $0.id == sel }) {
+            intentResult = "did"; return      // moved on to a later step of the same plan
+        }
+        if let pg = p.goal, let sg = selectedGoal, pg == sg { intentResult = "did"; return }
+        if let pk = p.kind, pk == selectedKind { intentResult = "did"; return }
+        if (p.goal != nil || p.stepID != nil || p.kind != nil) && hasSelection { intentResult = "didnt"; return }
+        intentResult = nil
+    }
+
+    /// Default "next" follows the current selection unless chosen by hand.
+    private func autoNext() {
+        guard !nextManual else { return }
+        if stepDone, let f = followingStep {
+            nextChoice = .nextStep(planID: f.path.id, stepID: f.step.id, text: f.step.text)
+        } else {
+            nextChoice = hasSelection && selectedKind != "drift" ? .same : .none
+        }
+    }
+
+    func selectionChanged() {
+        autoAssess()
+        autoNext()
+    }
+
+    /// Starts on what I said I'd do (the guess may still override it).
+    func preselectFromIntent() {
+        guard let p = previousIntent, !userPicked else { return }
+        if let k = p.kind, ["break", "meeting", "admin"].contains(k) {
+            selectedKind = k
+        } else if let sid = p.stepID, let pid = p.planID, planPaths.contains(where: { $0.id == pid }) {
+            selectedStep = sid; selectedPlan = pid; selectedGoal = p.goal
+        } else if let g = p.goal {
+            selectedGoal = g
+        } else {
+            return
+        }
+        guessNote = "Pre-filled from what you planned — tap to change"
+        selectionChanged()
+    }
+
     @Published var selectedGoal: String?
     @Published var selectedKind: String?          // break / meeting / admin / drift
     @Published var selectedStep: UUID?
     @Published var selectedPlan: UUID?
-    @Published var stepDone = false
+    @Published var stepDone = false { didSet { if oldValue != stepDone { selectionChanged() } } }
     @Published var guessing = false
     @Published var guessNote: String?
     private var userPicked = false
 
+    var intervalMinutes: Int { settings.intervalMinutes }
+
     var hasSelection: Bool { selectedGoal != nil || selectedKind != nil || selectedStep != nil }
 
     func pickGoal(_ g: String) {
+        defer { selectionChanged() }
         userPicked = true; guessNote = nil
         if selectedGoal == g && selectedStep == nil { selectedGoal = nil; return }
         selectedGoal = g; selectedKind = nil; selectedStep = nil; selectedPlan = nil; stepDone = false
     }
 
     func pickKind(_ k: String) {
+        defer { selectionChanged() }
         userPicked = true; guessNote = nil
         if selectedKind == k { selectedKind = nil; return }
         selectedKind = k; selectedGoal = nil; selectedStep = nil; selectedPlan = nil; stepDone = false
     }
 
     func pickStep(_ step: PlanStep, in path: PlanPath) {
+        defer { selectionChanged() }
         userPicked = true; guessNote = nil
         if selectedStep == step.id { selectedStep = nil; selectedPlan = nil; selectedGoal = nil; stepDone = false; return }
         selectedStep = step.id
@@ -71,6 +165,7 @@ final class PromptSession: ObservableObject {
     /// Applies the coach's guess, unless the user already chose something.
     func applyGuess(_ g: PositionGuess) {
         guard !userPicked, !finished else { return }
+        defer { selectionChanged() }
         if let k = ["break", "meeting", "admin", "drift"].first(where: { $0 == g.kind }) {
             selectedKind = k
         } else if let sid = g.stepID, let pid = g.planID {
@@ -242,7 +337,35 @@ final class PromptSession: ObservableObject {
             transcript: transcript,
             transcriptPending: pending
         )
+        if let p = previousIntent, status != .skipped {
+            entry.intentFor = p.text
+            entry.intentResult = status == .missed ? "didnt" : intentResult
+            entry.intentReason = intentReason
+        }
         if status != .skipped && status != .missed {
+            // Next interval intention
+            let typedNext = nextText.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch nextChoice {
+            case .same:
+                entry.nextGoal = selectedGoal
+                entry.nextKind = selectedKind ?? (selectedGoal != nil ? "goal" : nil)
+                entry.nextPlanID = selectedStep != nil && !stepDone ? selectedPlan : nil
+                entry.nextStepID = stepDone ? nil : selectedStep
+                entry.nextIntent = typedNext.isEmpty ? "Continue: " + composedText.replacingOccurrences(of: "Worked on: ", with: "") : typedNext
+            case .nextStep(let pid, let sid, let text):
+                entry.nextPlanID = pid; entry.nextStepID = sid
+                entry.nextGoal = selectedGoal ?? planPaths.first { $0.id == pid }.map { GoalAccounting.match($0.goal, in: goalOptions) ?? $0.goal }
+                entry.nextKind = "goal"
+                entry.nextIntent = typedNext.isEmpty ? text : typedNext
+            case .goal(let g):
+                entry.nextGoal = g; entry.nextKind = "goal"
+                entry.nextIntent = typedNext.isEmpty ? g : typedNext
+            case .kind(let k):
+                entry.nextKind = k
+                entry.nextIntent = typedNext.isEmpty ? (k == "break" ? "Take a break" : k.capitalized) : typedNext
+            case .none:
+                entry.nextIntent = typedNext.isEmpty ? nil : typedNext
+            }
             entry.goalTag = selectedGoal
             entry.checkinKind = selectedKind ?? (selectedGoal != nil ? "goal" : nil)
             entry.planID = selectedPlan

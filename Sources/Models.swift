@@ -59,6 +59,16 @@ struct Entry: Identifiable, Codable, Equatable {
     var stepID: UUID? = nil
     var stepCompleted: Bool? = nil
 
+    // Intention for the next interval, and how the previous one went
+    var nextIntent: String? = nil
+    var nextGoal: String? = nil
+    var nextKind: String? = nil
+    var nextPlanID: UUID? = nil
+    var nextStepID: UUID? = nil
+    var intentFor: String? = nil          // what I said I'd do in this period
+    var intentResult: String? = nil       // did / partly / didnt
+    var intentReason: String? = nil
+
     init(prompt: Prompt,
          text: String,
          status: Status,
