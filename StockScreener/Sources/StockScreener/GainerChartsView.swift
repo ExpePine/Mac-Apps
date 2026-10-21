@@ -71,7 +71,9 @@ struct GainerChartsView: View {
         case .rolling: return s.change(over: 21, endingOn: day)
         case .calendar:
             let start = String(day.prefix(7)) + "-01"
-            guard let b = s.index(onOrBefore: start), s.days[b] < start, s.closes[b] > 0 else { return nil }
+            guard var b = s.index(onOrBefore: start) else { return nil }
+            if s.days[b] >= start { b -= 1 }                   // the 1st itself was a trading day: use the bar before it
+            guard b >= 0, s.closes[b] > 0 else { return nil }
             return (s.closes[i] / s.closes[b] - 1) * 100
         }
     }
