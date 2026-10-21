@@ -148,6 +148,7 @@ final class ReportArchive: ObservableObject {
         let checkIns: Int
         let successes: Int
         let hasRecord: Bool
+        var goalSplit: (tied: Double, drift: Double)? = nil
     }
 
     func calendarDay(_ day: Date) -> CalendarDay {
@@ -161,7 +162,8 @@ final class ReportArchive: ObservableObject {
             checkIns: entries.count,
             successes: rec?.successCount
                 ?? entries.filter { RecapBuilder.keywordSuccess(CoachService.text(of: $0)) == true }.count,
-            hasRecord: rec != nil
+            hasRecord: rec != nil,
+            goalSplit: goalSplit(day)
         )
     }
 

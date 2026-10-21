@@ -52,6 +52,13 @@ struct Entry: Identifiable, Codable, Equatable {
     var explanationAccepted: Bool? = nil
     var coachFeedback: String? = nil
 
+    // Where on the path this check-in was (one-tap logging)
+    var goalTag: String? = nil            // the goal this time served
+    var checkinKind: String? = nil        // goal / break / meeting / admin / drift
+    var planID: UUID? = nil
+    var stepID: UUID? = nil
+    var stepCompleted: Bool? = nil
+
     init(prompt: Prompt,
          text: String,
          status: Status,

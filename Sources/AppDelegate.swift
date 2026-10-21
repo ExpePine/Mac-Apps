@@ -220,14 +220,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let session = PromptSession(prompt: prompt, settings: settings, store: store)
         session.goalTexts = goals.activeToday.filter { !$0.done }.map(\.text)
         if let plan = plans.activePlan, let i = plan.currentIndex { session.currentStep = plan.steps[i].text }
+        configurePath(session)
         session.onFinish = { [weak self] entry in self?.resolve(entry) }
         session.onStuck = { [weak self] in self?.showMain(.stuck) }
         activeSession = session
         windows.showPrompt(session)
+        guessPosition(for: session)
+    }
+
+    /// Goals, active plan steps and time-per-goal for the one-tap check-in.
+    private func configurePath(_ session: PromptSession) {
+        let month = goals.activeMonth.map(\.text)
+        let today = goals.activeToday.filter { !$0.done }.map(\.text).filter { !month.contains($0) }
+        session.goalOptions = month + today
+
+        let active = plans.plans.filter { $0.status == .active }.sorted { $0.lastActivity > $1.lastActivity }.prefix(2)
+        session.planPaths = active.compactMap { p in
+            let remaining = p.steps.filter { $0.status == .todo || $0.status == .doing || $0.status == .blocked }
+            guard !remaining.isEmpty else { return nil }
+            let current = p.currentIndex.map { p.steps[$0].id }
+            return PromptSession.PlanPath(id: p.id, goal: p.goal, steps: Array(remaining.prefix(4)), currentStepID: current)
+        }
+
+        let all = month + goals.activeToday.map(\.text).filter { !month.contains($0) }
+        session.todayRows = GoalAccounting.rows(store.entries(on: Date()), goals: all)
+        let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())
+        let weekEntries = store.entries.filter { week?.contains($0.periodEnd) ?? false }
+        session.weekRows = GoalAccounting.rows(weekEntries, goals: all)
+    }
+
+    private func guessPosition(for session: PromptSession) {
+        guard settings.guessPosition, coach.hasKey,
+              !session.goalOptions.isEmpty || !session.planPaths.isEmpty else { return }
+        session.guessing = true
+        let prompt = session.prompt
+        let plansForGuess = session.planPaths.compactMap { plans.plan($0.id) }
+        let previous = store.entries
+            .filter { $0.status != .missed && $0.status != .skipped && $0.periodEnd <= prompt.start.addingTimeInterval(60) }
+            .max { $0.periodEnd < $1.periodEnd }
+        let usage = usageSummary(tracker.usage.usage(for: prompt.end), from: prompt.start, to: prompt.end)
+        Task { [weak self] in
+            guard let self else { return }
+            let guess = await self.coach.guessPosition(goals: session.goalOptions, plans: plansForGuess,
+                                                       previous: previous, usageText: usage)
+            session.guessing = false
+            if let guess { session.applyGuess(guess) }
+        }
     }
 
     private func resolve(_ entry: Entry) {
         store.add(entry)
+        advancePlan(with: entry)
         if entry.transcriptPending {
             store.transcribeInBackground(entry.id, localeID: settings.speechLocaleID)
         }
@@ -239,8 +282,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     /// Ask the coach whether this check-in served today's goals; if not, ask why.
+    /// A check-in on a plan step starts it, or completes it if ticked.
+    private func advancePlan(with entry: Entry) {
+        guard let pid = entry.planID, let sid = entry.stepID else { return }
+        plans.update(pid) { p in
+            guard let i = p.steps.firstIndex(where: { $0.id == sid }) else { return }
+            if p.steps[i].startedAt == nil { p.steps[i].startedAt = entry.periodStart }
+            if entry.stepCompleted == true {
+                p.steps[i].status = .done
+                p.steps[i].finishedAt = entry.periodEnd
+                p.log(.stepDone, "Done: \(p.steps[i].text)", step: sid)
+            } else if p.steps[i].status == .todo {
+                p.steps[i].status = .doing
+                p.log(.stepStarted, "Started: \(p.steps[i].text)", step: sid)
+            }
+        }
+    }
+
     private func reviewAgainstGoals(_ entry: Entry) {
         guard entry.status == .completed || entry.status == .quickReply || entry.status == .autoSaved else {
+            return
+        }
+        // Tapped a goal or step: it's on plan, no AI check needed.
+        if let tag = entry.goalTag, entry.checkinKind != "drift" {
+            store.update(entry.id) {
+                $0.goalAligned = true
+                $0.alignedGoal = tag
+            }
+            return
+        }
+        // Breaks, meetings and admin are neutral.
+        if let k = entry.checkinKind, GoalAccounting.breakKinds[k] != nil { return }
+        // Marked as drift: ask why straight away.
+        if entry.checkinKind == "drift" {
+            let reason = "You marked this time as drift."
+            store.update(entry.id) {
+                $0.goalAligned = false
+                $0.deviationNote = reason
+            }
+            let latest = store.entries.first { $0.id == entry.id } ?? entry
+            windows.showDeviation(DeviationModel(entry: latest, alignment: Alignment(aligned: false, goal: nil, reason: reason),
+                                                 goals: goals.activeToday.map(\.text), coach: coach))
             return
         }
         Task { [weak self] in

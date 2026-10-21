@@ -74,6 +74,7 @@ struct EmailSettingsView: View {
             Section {
                 Toggle("Set today's and this month's goals before check-ins start", isOn: $settings.requireGoals)
                 Toggle("Compare each check-in with my goals", isOn: $settings.coachChecksEnabled)
+                Toggle("Guess where I am on my path at each check-in", isOn: $settings.guessPosition)
             } header: {
                 Text("Coach")
             } footer: {

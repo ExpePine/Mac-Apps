@@ -7,6 +7,7 @@ import WebKit
 struct ReportsView: View {
     let reports: ReportService
     @ObservedObject var archive: ReportArchive
+    var coach: CoachService? = nil
 
     @State private var kind: ReportKind = .calendar
     @State private var anchor = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
@@ -50,7 +51,9 @@ struct ReportsView: View {
             Divider()
             if kind != .day && !missing.isEmpty { missingBanner }
             if kind == .calendar {
-                CalendarGrid(archive: archive, month: anchor, onReplay: { replayDay = ReplayDay(day: $0) }) { day in
+                CalendarGrid(archive: archive, month: anchor, onReplay: { replayDay = ReplayDay(day: $0) },
+                             footer: AnyView(WorkPathPanel(archive: archive, coach: coach, anchor: anchor)
+                                .id(UsageStore.key(archive.interval(.month, containing: anchor).start)))) { day in
                     anchor = day
                     kind = .day
                 }
@@ -282,6 +285,7 @@ struct CalendarGrid: View {
     @ObservedObject var archive: ReportArchive
     let month: Date
     var onReplay: (Date) -> Void = { _ in }
+    var footer: AnyView = AnyView(EmptyView())
     let onSelect: (Date) -> Void
 
     private let palette: [Color] = [
@@ -316,6 +320,13 @@ struct CalendarGrid: View {
         }
         while result.count % 7 != 0 { result.append(nil) }
         return result
+    }
+
+    private func legend(_ c: Color, _ t: String) -> some View {
+        HStack(spacing: 5) {
+            Capsule().fill(c).frame(width: 14, height: 4)
+            Text(t).font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private var weekdayNames: [String] {
@@ -354,6 +365,14 @@ struct CalendarGrid: View {
                         }
                     }
                 }
+                HStack(spacing: 14) {
+                    legend(.green, "Goal-tied")
+                    legend(.orange, "Drift / off-plan")
+                    legend(.gray, "Other / untagged")
+                    Spacer()
+                }
+                .padding(.top, 4)
+                footer.padding(.top, 18)
             }
             .padding(20)
         }
@@ -396,6 +415,19 @@ private struct DayCell: View {
             }
 
             Spacer(minLength: 0)
+
+            if let split = info.goalSplit {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Rectangle().fill(Color.green).frame(width: geo.size.width * split.tied)
+                        Rectangle().fill(Color.orange).frame(width: geo.size.width * split.drift)
+                        Rectangle().fill(Color.gray.opacity(0.35))
+                    }
+                    .clipShape(Capsule())
+                }
+                .frame(height: 4)
+                .help("\(Int(split.tied * 100))% goal-tied · \(Int(split.drift * 100))% drift")
+            }
 
             if info.activeSeconds >= 60 {
                 HStack(spacing: 4) {

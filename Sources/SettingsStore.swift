@@ -26,6 +26,7 @@ final class SettingsStore: ObservableObject {
         static let coachChecks = "coachChecksEnabled"
         static let askGoalsMorning = "askGoalsMorning"
         static let requireGoals = "requireGoals"
+        static let guessPosition = "guessPosition"
     }
 
     static let intervalPresets = [15, 20, 30, 40, 60]
@@ -77,6 +78,8 @@ final class SettingsStore: ObservableObject {
     @Published var askGoalsMorning: Bool { didSet { defaults.set(askGoalsMorning, forKey: Keys.askGoalsMorning) } }
     /// Check-ins don't start until today's and this month's goals are set.
     @Published var requireGoals: Bool { didSet { defaults.set(requireGoals, forKey: Keys.requireGoals) } }
+    /// At each check-in, guess where on your path you are (Groq).
+    @Published var guessPosition: Bool { didSet { defaults.set(guessPosition, forKey: Keys.guessPosition) } }
 
     init() {
         defaults.register(defaults: [
@@ -102,6 +105,7 @@ final class SettingsStore: ObservableObject {
             Keys.coachChecks: true,
             Keys.askGoalsMorning: true,
             Keys.requireGoals: true,
+            Keys.guessPosition: true,
         ])
         intervalMinutes = defaults.integer(forKey: Keys.interval)
         entryWindowMinutes = defaults.integer(forKey: Keys.window)
@@ -125,6 +129,7 @@ final class SettingsStore: ObservableObject {
         coachChecksEnabled = defaults.bool(forKey: Keys.coachChecks)
         askGoalsMorning = defaults.bool(forKey: Keys.askGoalsMorning)
         requireGoals = defaults.bool(forKey: Keys.requireGoals)
+        guessPosition = defaults.bool(forKey: Keys.guessPosition)
     }
 }
 

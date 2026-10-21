@@ -21,6 +21,79 @@ final class PromptSession: ObservableObject {
     /// The current step of the active plan, if any.
     var currentStep: String?
 
+    // MARK: Path (one-tap logging)
+
+    struct PlanPath: Identifiable {
+        let id: UUID
+        let goal: String
+        let steps: [PlanStep]          // remaining steps, current first
+        let currentStepID: UUID?
+    }
+
+    /// Goals to tap (this month's, then today's).
+    var goalOptions: [String] = []
+    var planPaths: [PlanPath] = []
+    var todayRows: [GoalTimeRow] = []
+    var weekRows: [GoalTimeRow] = []
+
+    @Published var selectedGoal: String?
+    @Published var selectedKind: String?          // break / meeting / admin / drift
+    @Published var selectedStep: UUID?
+    @Published var selectedPlan: UUID?
+    @Published var stepDone = false
+    @Published var guessing = false
+    @Published var guessNote: String?
+    private var userPicked = false
+
+    var hasSelection: Bool { selectedGoal != nil || selectedKind != nil || selectedStep != nil }
+
+    func pickGoal(_ g: String) {
+        userPicked = true; guessNote = nil
+        if selectedGoal == g && selectedStep == nil { selectedGoal = nil; return }
+        selectedGoal = g; selectedKind = nil; selectedStep = nil; selectedPlan = nil; stepDone = false
+    }
+
+    func pickKind(_ k: String) {
+        userPicked = true; guessNote = nil
+        if selectedKind == k { selectedKind = nil; return }
+        selectedKind = k; selectedGoal = nil; selectedStep = nil; selectedPlan = nil; stepDone = false
+    }
+
+    func pickStep(_ step: PlanStep, in path: PlanPath) {
+        userPicked = true; guessNote = nil
+        if selectedStep == step.id { selectedStep = nil; selectedPlan = nil; selectedGoal = nil; stepDone = false; return }
+        selectedStep = step.id
+        selectedPlan = path.id
+        selectedGoal = GoalAccounting.match(path.goal, in: goalOptions) ?? path.goal
+        selectedKind = nil
+    }
+
+    /// Applies the coach's guess, unless the user already chose something.
+    func applyGuess(_ g: PositionGuess) {
+        guard !userPicked, !finished else { return }
+        if let k = ["break", "meeting", "admin", "drift"].first(where: { $0 == g.kind }) {
+            selectedKind = k
+        } else if let sid = g.stepID, let pid = g.planID {
+            selectedStep = sid; selectedPlan = pid; selectedGoal = g.goal
+        } else if let goal = g.goal {
+            selectedGoal = goal
+        } else {
+            return
+        }
+        guessNote = g.why.isEmpty ? "Best guess — tap to change" : "Guess: \(g.why) — tap to change"
+    }
+
+    private var composedText: String {
+        if let k = selectedKind {
+            return ["break": "Break", "meeting": "Meeting", "admin": "Admin / email", "drift": "Drifted from plan"][k] ?? k
+        }
+        if let sid = selectedStep, let step = planPaths.flatMap(\.steps).first(where: { $0.id == sid }) {
+            return "Worked on: \(step.text)" + (stepDone ? " — done ✓" : "")
+        }
+        if let g = selectedGoal { return "Worked on: \(g)" }
+        return ""
+    }
+
     private let settings: SettingsStore
     private let store: EntryStore
     private let recorder = AudioRecorder()
@@ -43,7 +116,7 @@ final class PromptSession: ObservableObject {
     }
 
     var canSave: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAudio
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAudio || hasSelection
     }
 
     // MARK: - Countdown
@@ -145,7 +218,9 @@ final class PromptSession: ObservableObject {
 
         var status = requested
         var audio: String? = hasAudio ? audioFileName : nil
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Typed words win; otherwise the tapped path position becomes the text.
+        let trimmed = typed.isEmpty ? composedText : (hasSelection ? "\(composedText) — \(typed)" : typed)
 
         if status == .skipped, let a = audio {
             try? FileManager.default.removeItem(at: store.audioURL(fileName: a))
@@ -159,7 +234,7 @@ final class PromptSession: ObservableObject {
         // (timed out mid-recording, or saved while transcription was running).
         let pending = audio != nil && settings.autoTranscribe && (wasRecording || isTranscribing || transcript == nil)
 
-        let entry = Entry(
+        var entry = Entry(
             prompt: prompt,
             text: status == .skipped ? "" : trimmed,
             status: status,
@@ -167,6 +242,13 @@ final class PromptSession: ObservableObject {
             transcript: transcript,
             transcriptPending: pending
         )
+        if status != .skipped && status != .missed {
+            entry.goalTag = selectedGoal
+            entry.checkinKind = selectedKind ?? (selectedGoal != nil ? "goal" : nil)
+            entry.planID = selectedPlan
+            entry.stepID = selectedStep
+            entry.stepCompleted = selectedStep != nil ? stepDone : nil
+        }
         onFinish?(entry)
     }
 }

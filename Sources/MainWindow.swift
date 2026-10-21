@@ -84,7 +84,7 @@ struct MainWindowView: View {
         case .stuck:
             StuckView(coach: app.coach, stuckStore: app.stuckStore)
         case .reports:
-            ReportsView(reports: app.reports, archive: app.archive)
+            ReportsView(reports: app.reports, archive: app.archive, coach: app.coach)
         case .screenTime:
             ScreenTimeView(app: app, tracker: app.tracker)
         case .history:
