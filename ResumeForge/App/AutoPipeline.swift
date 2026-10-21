@@ -84,9 +84,9 @@ extension AppStore {
         autoWorker = Task { @MainActor [weak self] in
             guard let self else { return }
             while let id = self.autoQueue.first {
-                await self.processAuto(id)
+                let finished = await self.processAuto(id)
                 if self.autoPaused != nil { break }
-                self.autoQueue.removeAll { $0 == id }
+                if finished { self.autoQueue.removeAll { $0 == id } }
             }
             self.autoStatus = nil
             self.autoWorker = nil
@@ -101,12 +101,13 @@ extension AppStore {
         data.jobs[i].autoError = error
     }
 
-    private func processAuto(_ id: UUID) async {
+    /// Returns false when the job should be tried again (per-minute limit hit; already waited).
+    private func processAuto(_ id: UUID) async -> Bool {
         let depth = autoDepth
         func job() -> JobPosting? { jobIndex(id).map { data.jobs[$0] } }
         func name() -> String { job().map { $0.title.isEmpty ? "job" : $0.title } ?? "job" }
         do {
-            guard let j = job() else { return }
+            guard let j = job() else { return true }
 
             // 1. Clean up the JD — skipped when the extension already got a full, labelled description.
             if !j.parsed {
@@ -140,14 +141,21 @@ extension AppStore {
             if depth.rawValue >= AutoDepth.resume.rawValue, job()?.tailored == nil {
                 if data.stories.isEmpty && data.profile.roles.isEmpty {
                     setStage(id, .done, error: "Add your profile or stories, then press Build my resume.")
-                    return
+                    return true
                 }
                 setStage(id, .resume); autoStatus = "Writing your resume: \(name())"
                 try await buildTailored(id, allowPlaceholders: allowPlaceholdersDefault)
             }
             setStage(id, .done)
+            return true
         } catch {
             let msg = error.localizedDescription
+            if error is AIClient.RateLimited {
+                setStage(id, .queued)
+                autoStatus = "Per-minute AI limit — continuing in a minute"
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                return false
+            }
             if msg.contains(AppStore.quotaMarker) {
                 setStage(id, .queued)
                 autoPaused = "Your AI providers are out of free quota — automatic processing is paused. It resumes when you relaunch the app or press Resume (or add another provider in Settings)."
@@ -159,6 +167,7 @@ extension AppStore {
             } else {
                 setStage(id, .failed, error: msg)
             }
+            return true
         }
     }
 }

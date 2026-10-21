@@ -342,7 +342,7 @@ struct FeedSettingsView: View {
     @AppStorage("feedEnabled") private var enabled = true
     @AppStorage("feedRepo") private var repo = FeedSettings.defaultRepo
     @AppStorage("feedAIMatch") private var aiMatch = true
-    @AppStorage("feedAIPerDay") private var aiPerDay = 60
+    @AppStorage("feedAIPerDay") private var aiPerDay = 200
     @AppStorage("feedRecheck") private var recheck = true
     @AppStorage("feedMinLocal") private var minLocal = 45
     @AppStorage("feedAutoAdd") private var autoAdd = false

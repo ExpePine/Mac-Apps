@@ -67,7 +67,7 @@ enum FeedSettings {
 
     static func register() {
         UserDefaults.standard.register(defaults: [
-            "feedEnabled": true, "feedAIMatch": true, "feedAIPerDay": 60, "feedMinLocal": 45, "feedRecheck": true,
+            "feedEnabled": true, "feedAIMatch": true, "feedAIPerDay": 200, "feedMinLocal": 45, "feedRecheck": true,
             "feedAutoAdd": false, "feedAutoAddScore": 80, "yearsExperience": 0
         ])
     }
@@ -176,6 +176,31 @@ enum MatchScorer {
 }
 
 extension Prompts {
+    static func matchBatch(jobs: String, count: Int, profile: String, stories: String) -> String {
+        """
+        TASK: Judge how well the candidate fits EACH of the \(count) jobs below, like a sharp recruiter shortlisting. Be honest; don't flatter.
+
+        Return: {"results": [{"i": 0, "score": 0-100, "verdict": "Strong fit | Good fit | Stretch | Poor fit",
+                              "hardConflicts": ["likely deal-breakers"], "softGaps": ["gaps a story or note could cover"],
+                              "strengths": ["best matching evidence"], "why": "max 25 words"}]}
+        One result per job, using its [i]. Each list: at most 3 items, each at most 12 words.
+
+        CALIBRATION: 85+ = would shortlist, no hard conflicts. 70–84 good, minor gaps. 50–69 stretch. Any hard conflict caps \
+        the score at 55. Hard conflict = a must-have the candidate clearly lacks or contradicts (mandatory degree/certification, \
+        years far outside the range, a required domain they've never worked in, a different function). If something simply \
+        isn't mentioned in the profile/stories, it's a soft gap, not a hard conflict.
+
+        CANDIDATE PROFILE:
+        \(profile)
+
+        CANDIDATE STORIES (most relevant):
+        \(stories)
+
+        JOBS:
+        \(jobs)
+        """
+    }
+
     static func match(title: String, company: String, location: String, description: String,
                       profile: Profile, stories: [Story], budget: Int) -> String {
         let prof = profileBlock(profile, maxChars: 1500)
@@ -393,32 +418,80 @@ extension AppStore {
         startFeedWorker()
     }
 
+    /// How many jobs fit in one AI request for your primary provider (small free tiers → smaller batches).
+    var feedBatchSize: Int { min(12, max(3, (primaryLimit - 2500) / 750)) }
+
     private func startFeedWorker() {
         guard feedWorker == nil, !feedMatchQueue.isEmpty else { return }
         feedWorker = Task { @MainActor [weak self] in
             guard let self else { return }
-            while let id = self.feedMatchQueue.first {
-                if let i = self.feedIndex(id) {
-                    let f = self.feed[i]
-                    self.feedStatus = "Checking fit: \(f.title)"
-                    do {
-                        let m = try await self.aiMatch(title: f.title, company: f.company, location: f.location, description: f.description)
+            var paused = false
+            while !self.feedMatchQueue.isEmpty {
+                let ids = Array(self.feedMatchQueue.prefix(self.feedBatchSize))
+                let jobs = ids.compactMap { id in self.feedIndex(id).map { self.feed[$0] } }
+                if jobs.isEmpty { self.feedMatchQueue.removeAll { ids.contains($0) }; continue }
+                self.feedStatus = "Checking fit: \(jobs.count) jobs (\(jobs.first?.company ?? "")…)"
+                do {
+                    let results = try await self.aiMatchBatch(jobs)
+                    for (id, m) in results {
                         if let k = self.feedIndex(id) { self.data.feed?[k].match = m }
                         self.feedChecksDone += 1
                         self.countAIMatch()
                         self.autoAddIfStrong(id)
-                    } catch {
-                        if error.localizedDescription.contains(AppStore.quotaMarker) {
-                            self.feedStatus = "AI quota used up — fit checks paused"
-                            break
-                        }
                     }
+                    self.feedMatchQueue.removeAll { ids.contains($0) }
+                } catch is AIClient.RateLimited {
+                    // Per-minute limit: keep the batch queued and carry on shortly.
+                    self.feedStatus = "Per-minute AI limit — continuing in a minute"
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
+                } catch {
+                    if error.localizedDescription.contains(AppStore.quotaMarker) {
+                        self.feedStatus = "Daily AI quota used up — fit checks resume tomorrow (or add another provider)"
+                        paused = true
+                        break
+                    }
+                    self.feedMatchQueue.removeAll { ids.contains($0) }   // skip this batch, don't loop on it
                 }
-                self.feedMatchQueue.removeAll { $0 == id }
             }
-            if self.feedStatus?.hasPrefix("Checking fit") == true { self.feedStatus = nil }
+            if self.feedStatus?.hasPrefix("Checking fit") == true || self.feedStatus?.hasPrefix("Per-minute") == true {
+                self.feedStatus = nil
+            }
             self.feedWorker = nil
+            if !paused { self.scheduleFeedMatching() }      // pull the next batch straight away, up to the daily cap
         }
+    }
+
+    /// One AI request judges several jobs: compact JDs, your profile and most relevant stories sent once.
+    func aiMatchBatch(_ jobs: [FeedJob]) async throws -> [(String, MatchResult)] {
+        let profile = data.profile, stories = data.stories
+        let n = jobs.count
+        let o = try await ask(output: 220 * n + 300, temperature: 0.2) { budget in
+            let prof = Prompts.profileBlock(profile, maxChars: 1200)
+            let context = jobs.map { $0.title + " " + $0.description.prefix(800) }.joined(separator: " ")
+            let storyList = Prompts.storiesBlock(stories, relevantTo: context, maxChars: min(5000, max(1500, budget / 5)))
+            let per = max(500, min(2500, (budget - prof.count - storyList.count - 2500) / max(1, n) - 150))
+            let list = jobs.enumerated().map { i, f in
+                "[\(i)] \(f.title) — \(f.company) — \(f.location)\(f.experience.isEmpty ? "" : " — " + f.experience)\n\(Prompts.clip(f.description, per))"
+            }.joined(separator: "\n\n")
+            return Prompts.matchBatch(jobs: list, count: n, profile: prof, stories: storyList)
+        }
+        let basis = matchBasis
+        var out: [(String, MatchResult)] = []
+        for r in J.dicts(o, "results") {
+            guard let i = Int(J.str(r, "i")), jobs.indices.contains(i) else { continue }
+            var m = MatchResult()
+            m.score = min(100, max(0, Int(J.str(r, "score")) ?? 0))
+            m.verdict = J.str(r, "verdict")
+            m.hardConflicts = J.strings(r, "hardConflicts")
+            m.softGaps = J.strings(r, "softGaps")
+            m.strengths = J.strings(r, "strengths")
+            m.why = J.str(r, "why")
+            if !m.hardConflicts.isEmpty { m.score = min(m.score, 55) }
+            m.local = false
+            m.basis = basis
+            out.append((jobs[i].id, m))
+        }
+        return out
     }
 
     func aiMatch(title: String, company: String, location: String, description: String) async throws -> MatchResult {

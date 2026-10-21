@@ -60,7 +60,13 @@ struct AIClient {
     struct QuotaExceeded: LocalizedError {
         let provider: String
         let detail: String
+        var daily = true                 // false = only the per-minute limit (try again in a minute)
         var errorDescription: String? { "\(provider) is out of free quota for now. \(detail)" }
+    }
+
+    /// Every provider is at its per-minute limit right now — not out for the day. Wait a minute and carry on.
+    struct RateLimited: LocalizedError {
+        var errorDescription: String? { "Your AI providers are at their per-minute limit — continuing in a minute." }
     }
 
     /// One request at a time: with per-minute token limits, parallel calls only collide.
@@ -190,7 +196,7 @@ struct AIClient {
                 let daily = msg.localizedCaseInsensitiveContains("per day") || msg.localizedCaseInsensitiveContains("PerDay")
                     || msg.localizedCaseInsensitiveContains("daily") || status == 402
                 if daily || attempt > 3 {
-                    throw QuotaExceeded(provider: provider.kind.title, detail: String(msg.prefix(300)))
+                    throw QuotaExceeded(provider: provider.kind.title, detail: String(msg.prefix(300)), daily: daily)
                 }
                 let wait = min(75, max(2, http.flatMap { Self.retryAfter($0) } ?? Self.parseWait(msg) ?? 20))
                 await MainActor.run {

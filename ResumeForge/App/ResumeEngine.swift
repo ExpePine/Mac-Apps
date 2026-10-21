@@ -29,6 +29,7 @@ extension AppStore {
         guard !providers.isEmpty else { throw noProviderError(vision: !images.isEmpty) }
         var lastError: Error?
         var quotaHit = false
+        var minuteLimited = false
         for p in providers {
             let client = AIClient(provider: p)
             for _ in 0..<2 {
@@ -51,6 +52,7 @@ extension AppStore {
                     lastError = e          // limit learned — rebuild smaller on this provider
                 } catch let e as AIClient.QuotaExceeded {
                     lastError = e; quotaHit = true
+                    if !e.daily { minuteLimited = true }
                     break                  // next provider
                 } catch {
                     lastError = error
@@ -58,6 +60,7 @@ extension AppStore {
                 }
             }
         }
+        if quotaHit && minuteLimited { throw AIClient.RateLimited() }
         if quotaHit && lastError is AIClient.QuotaExceeded { throw allQuotaError(lastError) }
         throw lastError ?? noProviderError(vision: !images.isEmpty)
     }
@@ -67,13 +70,16 @@ extension AppStore {
         let providers = ProviderSettings.usable
         guard !providers.isEmpty else { throw noProviderError(vision: false) }
         var lastError: Error?
+        var minuteLimited = false
         for p in providers {
             do {
                 return try await AIClient(provider: p).json(messages: messages, temperature: temperature, maxTokens: output)
             } catch {
                 lastError = error
+                if let q = error as? AIClient.QuotaExceeded, !q.daily { minuteLimited = true }
             }
         }
+        if minuteLimited { throw AIClient.RateLimited() }
         if lastError is AIClient.QuotaExceeded { throw allQuotaError(lastError) }
         throw lastError ?? noProviderError(vision: false)
     }
