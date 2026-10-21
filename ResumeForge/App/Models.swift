@@ -27,6 +27,8 @@ struct JobPosting: Codable, Identifiable, Hashable {
     // Background processing (optional so older saved data still loads)
     var autoStage: String?
     var autoError: String?
+    var match: MatchResult?         // fit score + conflicts against your profile and stories
+    var feedKey: String?            // set when the job came from the GitHub job feed
 }
 
 // MARK: - Stories (your raw material)
@@ -133,6 +135,7 @@ struct ResumeDoc: Codable, Hashable {
     var additional: [LabeledLine] = []
     var mode = "strict"             // strict | placeholders | benchmark
     var generatedAt = Date()
+    var templateID: UUID?           // nil = default template
 
     var allTexts: [String] {
         [summary]
@@ -183,4 +186,6 @@ struct AppData: Codable {
     var interview = InterviewSession()
     var masterResume: ResumeDoc?
     var masterMissing: [String] = []
+    var templates: [TemplateSpec]?  // optional so older saved data still loads
+    var feed: [FeedJob]?
 }

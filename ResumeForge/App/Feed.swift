@@ -1,0 +1,462 @@
+import AppKit
+import Foundation
+
+// MARK: - Models
+
+/// How well a job fits you. `local` = quick on-device estimate; otherwise the AI read the JD against your stories.
+struct MatchResult: Codable, Hashable {
+    var score = 0                       // 0–100
+    var verdict = ""
+    var hardConflicts: [String] = []    // likely deal-breakers
+    var softGaps: [String] = []         // things a story or a cover note could address
+    var strengths: [String] = []
+    var why = ""
+    var local = true
+    var at = Date()
+}
+
+/// A job from the GitHub job collector's feed.
+struct FeedJob: Codable, Identifiable, Hashable {
+    var id: String
+    var source = ""
+    var publisher = ""
+    var title = ""
+    var company = ""
+    var location = ""
+    var url = ""
+    var description = ""
+    var posted = ""
+    var salary = ""
+    var experience = ""
+    var snippet = true
+    var firstSeen = ""
+    var status = "new"                  // new | added | dismissed
+    var match: MatchResult?
+    var jobID: UUID?
+
+    var score: Int { match?.score ?? 0 }
+    var conflicts: Int { match?.hardConflicts.count ?? 0 }
+
+    init?(json d: [String: Any]) {
+        let id = J.str(d, "id")
+        guard !id.isEmpty, !J.str(d, "title").isEmpty else { return nil }
+        self.id = id
+        source = J.str(d, "source"); publisher = J.str(d, "publisher"); title = J.str(d, "title")
+        company = J.str(d, "company"); location = J.str(d, "location"); url = J.str(d, "url")
+        description = J.str(d, "description"); posted = J.str(d, "posted"); salary = J.str(d, "salary")
+        experience = J.str(d, "experience"); firstSeen = J.str(d, "firstSeen")
+        snippet = d["snippet"] as? Bool ?? true
+    }
+}
+
+// MARK: - Settings
+
+enum FeedSettings {
+    static let defaultRepo = "ExpePine/Mac-Apps"
+    static var repo: String {
+        let r = UserDefaults.standard.string(forKey: "feedRepo") ?? ""
+        return r.isEmpty ? defaultRepo : r
+    }
+    static var feedURL: URL? {
+        URL(string: "https://github.com/\(repo)/releases/download/job-feed/jobs.json")
+    }
+    static var token: String { Keychain.load(account: "github-token") }
+
+    static func register() {
+        UserDefaults.standard.register(defaults: [
+            "feedEnabled": true, "feedAIMatch": true, "feedAIPerDay": 15, "feedMinLocal": 45,
+            "feedAutoAdd": false, "feedAutoAddScore": 80, "yearsExperience": 0
+        ])
+    }
+    static var enabled: Bool { UserDefaults.standard.bool(forKey: "feedEnabled") }
+    static var aiMatch: Bool { UserDefaults.standard.bool(forKey: "feedAIMatch") }
+    static var aiPerDay: Int { UserDefaults.standard.integer(forKey: "feedAIPerDay") }
+    static var minLocal: Int { UserDefaults.standard.integer(forKey: "feedMinLocal") }
+    static var autoAdd: Bool { UserDefaults.standard.bool(forKey: "feedAutoAdd") }
+    static var autoAddScore: Int { UserDefaults.standard.integer(forKey: "feedAutoAddScore") }
+
+    /// Roles/locations last saved for the collector (used for local scoring).
+    static var roles: [String] { UserDefaults.standard.stringArray(forKey: "feedRoles") ?? [] }
+    static var locations: [String] { UserDefaults.standard.stringArray(forKey: "feedLocations") ?? [] }
+}
+
+// MARK: - Quick on-device fit estimate
+
+enum MatchScorer {
+    /// Total years of experience: your Settings value, else estimated from the earliest role in your Profile.
+    static func years(_ p: Profile) -> Int {
+        let set = UserDefaults.standard.integer(forKey: "yearsExperience")
+        if set > 0 { return set }
+        let thisYear = Calendar.current.component(.year, from: Date())
+        let starts = p.roles.compactMap { r -> Int? in
+            guard let m = r.start.range(of: #"(19|20)\d{2}"#, options: .regularExpression) else { return nil }
+            return Int(r.start[m])
+        }
+        guard let first = starts.min() else { return 0 }
+        return max(0, thisYear - first)
+    }
+
+    /// "8-12 yrs", "10 to 15 years", "12+ years", "minimum 10 years"
+    static func yearsRange(in text: String) -> (Int, Int)? {
+        let t = text.lowercased()
+        if let r = t.range(of: #"(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s*\+?\s*(?:yrs|years|yr|year)"#, options: .regularExpression) {
+            let nums = t[r].components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init)
+            if nums.count >= 2, nums[0] <= nums[1] { return (nums[0], nums[1]) }
+        }
+        if let r = t.range(of: #"(?:minimum|min\.?|at least|over)?\s*(\d{1,2})\s*\+\s*(?:yrs|years)"#, options: .regularExpression) {
+            if let n = t[r].components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init).first { return (n, n + 10) }
+        }
+        return nil
+    }
+
+    static func local(title: String, text: String, location: String, experience: String,
+                      profile: Profile, stories: [Story]) -> MatchResult {
+        var m = MatchResult()
+        var hard: [String] = []
+        var soft: [String] = []
+        var strengths: [String] = []
+
+        // Skills / domain overlap
+        let mine = Prompts.words([profile.headline, profile.technicalSkills,
+                                  profile.roles.map(\.title).joined(separator: " "),
+                                  stories.map { $0.title + " " + $0.skills.joined(separator: " ") }.joined(separator: " ")]
+            .joined(separator: " "))
+        let jd = Prompts.words(title + " " + text)
+        let overlap = jd.intersection(mine)
+        let skill = min(1, Double(overlap.count) / Double(max(8, min(jd.count, 40)) ) * 1.6)
+        if overlap.count >= 6 { strengths.append("Overlap: " + overlap.sorted().prefix(6).joined(separator: ", ")) }
+
+        // Role/title fit vs the roles you search for (or your headline)
+        let targets = FeedSettings.roles.isEmpty ? [profile.headline] + profile.roles.prefix(1).map(\.title) : FeedSettings.roles
+        let titleWords = Prompts.words(title)
+        let best = targets.map { t -> Double in
+            let w = Prompts.words(t)
+            return w.isEmpty ? 0 : Double(w.intersection(titleWords).count) / Double(w.count)
+        }.max() ?? 0
+
+        // Location
+        var loc = 0.5
+        let locText = location.lowercased()
+        let wanted = FeedSettings.locations.map { $0.lowercased() }
+        if !wanted.isEmpty && !locText.isEmpty {
+            loc = wanted.contains { w in locText.contains(w) || (w == "remote" && (locText.contains("remote") || locText.contains("anywhere"))) } ? 1 : 0.15
+            if loc < 0.5 { soft.append("Location: \(location)") }
+        }
+
+        // Experience
+        var exp = 0.6
+        let years = years(profile)
+        if let (lo, hi) = yearsRange(in: experience + " " + text), years > 0 {
+            if years >= lo && years <= hi + 2 { exp = 1; strengths.append("Experience \(lo)–\(hi) yrs fits your \(years)") }
+            else if years < lo - 1 { exp = 0.1; hard.append("Asks for \(lo)+ years; you have about \(years)") }
+            else if years > hi + 5 { exp = 0.3; hard.append("Pitched at \(lo)–\(hi) years; you have \(years)+ (likely too senior / pay band)") }
+            else { exp = 0.6; soft.append("Experience range \(lo)–\(hi) yrs vs your \(years)") }
+        }
+
+        // Obvious seniority mismatch
+        if years >= 8, title.range(of: #"\b(intern|trainee|fresher|junior|jr\.?|graduate|entry level)\b"#,
+                                   options: [.regularExpression, .caseInsensitive]) != nil {
+            hard.append("Junior-level title")
+        }
+
+        let score = 40 * skill + 25 * best + 15 * loc + 20 * exp
+        m.score = Int(min(100, max(0, hard.isEmpty ? score : min(score, 50))).rounded())
+        m.hardConflicts = hard
+        m.softGaps = soft
+        m.strengths = strengths
+        m.verdict = m.score >= 75 ? "Looks like a strong fit" : m.score >= 55 ? "Possible fit" : "Weak fit"
+        m.why = "Quick estimate from keywords, title, location and experience. Run the AI check for a proper read."
+        m.local = true
+        return m
+    }
+}
+
+extension Prompts {
+    static func match(title: String, company: String, location: String, description: String,
+                      profile: Profile, stories: [Story], budget: Int) -> String {
+        let prof = profileBlock(profile, maxChars: 1500)
+        let jd = clip(description, max(1200, Int(Double(budget) * 0.4)))
+        let storyList = storiesBlock(stories, relevantTo: title + " " + description, maxChars: max(1200, budget - prof.count - jd.count - 1500))
+        return """
+        TASK: Judge how well this candidate fits the job, like a sharp recruiter shortlisting for a call. \
+        Be honest and specific; don't flatter.
+
+        Return:
+        {"score": 0-100, "verdict": "Strong fit | Good fit | Stretch | Poor fit",
+         "hardConflicts": ["likely deal-breakers: a must-have the candidate clearly lacks or contradicts — mandatory degree/certification, years far outside the range, a required domain/industry they've never worked in, location/relocation impossibility, a different function altogether"],
+         "softGaps": ["requirements not evidenced yet that a story, cover note or quick ramp-up could address"],
+         "strengths": ["their strongest matching evidence, citing the story or role"],
+         "why": "2 sentences: overall reasoning"}
+
+        CALIBRATION: 85+ = would shortlist, no hard conflicts. 70–84 = good, minor gaps. 50–69 = stretch. \
+        Any hard conflict caps the score at 55. Judge only from the profile and stories below; if something isn't mentioned, \
+        treat it as a soft gap, not a hard conflict — unless the JD says it's mandatory.
+
+        JOB: \(title) at \(company) — \(location)
+        \(jd)
+
+        CANDIDATE PROFILE:
+        \(prof)
+
+        CANDIDATE STORIES:
+        \(storyList)
+        """
+    }
+}
+
+// MARK: - Engine
+
+extension AppStore {
+
+    var feed: [FeedJob] { data.feed ?? [] }
+
+    func feedIndex(_ id: String) -> Int? { data.feed?.firstIndex { $0.id == id } }
+
+    /// Downloads the collector's jobs.json and merges it (keeps your status, matches and links).
+    func refreshFeed(manual: Bool = false) async {
+        guard FeedSettings.enabled || manual, let url = FeedSettings.feedURL else { return }
+        feedStatus = "Fetching job feed…"
+        defer { if feedStatus == "Fetching job feed…" { feedStatus = nil } }
+        do {
+            var req = URLRequest(url: url)
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+            req.timeoutInterval = 60
+            let (d, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 404 {
+                feedError = "No job feed yet. Add API keys as GitHub secrets, then press Collect now (Settings ▸ Job Feed)."
+                return
+            }
+            guard (200..<300).contains(code),
+                  let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
+                feedError = "Couldn't read the job feed (HTTP \(code))."
+                return
+            }
+            let items = J.dicts(obj, "items").compactMap(FeedJob.init(json:))
+            var current = data.feed ?? []
+            let known = Dictionary(current.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { a, _ in a })
+            var added = 0
+            for var it in items {
+                if let i = known[it.id] {
+                    if it.description.count > current[i].description.count {
+                        current[i].description = it.description
+                        current[i].snippet = it.snippet
+                    }
+                } else {
+                    it.match = MatchScorer.local(title: it.title, text: it.description, location: it.location,
+                                                 experience: it.experience, profile: data.profile, stories: data.stories)
+                    current.append(it)
+                    added += 1
+                }
+            }
+            // Forget old listings you never acted on.
+            let live = Set(items.map(\.id))
+            current.removeAll { !live.contains($0.id) && $0.status != "added" }
+            data.feed = current
+            feedLastRefresh = Date()
+            feedErrors = J.strings(obj, "errors")
+            feedError = nil
+            if manual || added > 0 { feedStatus = added > 0 ? "\(added) new job\(added == 1 ? "" : "s") in the feed" : "Feed is up to date" }
+            scheduleFeedMatching()
+        } catch {
+            feedError = "Couldn't fetch the job feed: \(error.localizedDescription)"
+        }
+    }
+
+    func startFeedTimer() {
+        feedTimer?.invalidate()
+        feedTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshFeed() }
+        }
+        Task { await refreshFeed() }
+    }
+
+    func rescoreFeedLocally() {
+        guard var f = data.feed else { return }
+        for i in f.indices where f[i].match?.local ?? true {
+            f[i].match = MatchScorer.local(title: f[i].title, text: f[i].description, location: f[i].location,
+                                           experience: f[i].experience, profile: data.profile, stories: data.stories)
+        }
+        data.feed = f
+    }
+
+    // MARK: AI fit check (top candidates only — saves your free quota)
+
+    private var aiMatchesToday: Int {
+        let key = "feedAIMatches." + ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withFullDate])
+        return UserDefaults.standard.integer(forKey: key)
+    }
+    private func countAIMatch() {
+        let key = "feedAIMatches." + ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withFullDate])
+        UserDefaults.standard.set(UserDefaults.standard.integer(forKey: key) + 1, forKey: key)
+    }
+
+    func scheduleFeedMatching() {
+        guard FeedSettings.aiMatch, ProviderSettings.anyKeyConfigured else { return }
+        let room = max(0, FeedSettings.aiPerDay - aiMatchesToday - feedMatchQueue.count)
+        guard room > 0 else { return }
+        let candidates = feed
+            .filter { $0.status == "new" && ($0.match?.local ?? true) && $0.score >= FeedSettings.minLocal && $0.conflicts == 0 }
+            .sorted { $0.score > $1.score }
+            .prefix(room)
+            .map(\.id)
+        for id in candidates where !feedMatchQueue.contains(id) { feedMatchQueue.append(id) }
+        startFeedWorker()
+    }
+
+    func queueFeedMatch(_ id: String) {
+        if !feedMatchQueue.contains(id) { feedMatchQueue.insert(id, at: 0) }
+        startFeedWorker()
+    }
+
+    private func startFeedWorker() {
+        guard feedWorker == nil, !feedMatchQueue.isEmpty else { return }
+        feedWorker = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while let id = self.feedMatchQueue.first {
+                if let i = self.feedIndex(id) {
+                    let f = self.feed[i]
+                    self.feedStatus = "Checking fit: \(f.title)"
+                    do {
+                        let m = try await self.aiMatch(title: f.title, company: f.company, location: f.location, description: f.description)
+                        if let k = self.feedIndex(id) { self.data.feed?[k].match = m }
+                        self.countAIMatch()
+                        self.autoAddIfStrong(id)
+                    } catch {
+                        if error.localizedDescription.contains(AppStore.quotaMarker) {
+                            self.feedStatus = "AI quota used up — fit checks paused"
+                            break
+                        }
+                    }
+                }
+                self.feedMatchQueue.removeAll { $0 == id }
+            }
+            if self.feedStatus?.hasPrefix("Checking fit") == true { self.feedStatus = nil }
+            self.feedWorker = nil
+        }
+    }
+
+    func aiMatch(title: String, company: String, location: String, description: String) async throws -> MatchResult {
+        let profile = data.profile, stories = data.stories
+        let o = try await ask(output: 900, temperature: 0.2) { budget in
+            Prompts.match(title: title, company: company, location: location, description: description,
+                          profile: profile, stories: stories, budget: max(3000, budget - 1800))
+        }
+        var m = MatchResult()
+        m.score = min(100, max(0, Int(J.str(o, "score")) ?? 0))
+        m.verdict = J.str(o, "verdict")
+        m.hardConflicts = J.strings(o, "hardConflicts")
+        m.softGaps = J.strings(o, "softGaps")
+        m.strengths = J.strings(o, "strengths")
+        m.why = J.str(o, "why")
+        if !m.hardConflicts.isEmpty { m.score = min(m.score, 55) }
+        m.local = false
+        return m
+    }
+
+    /// Fit check for a job already in your Jobs list (part of background processing).
+    func matchJob(_ id: UUID) async throws {
+        guard let i = jobIndex(id) else { return }
+        let j = data.jobs[i]
+        let m = try await aiMatch(title: j.title, company: j.company, location: j.location, description: j.description)
+        if let k = jobIndex(id) { data.jobs[k].match = m }
+    }
+
+    private func autoAddIfStrong(_ id: String) {
+        guard FeedSettings.autoAdd, let i = feedIndex(id), let m = feed[i].match, !m.local,
+              m.score >= FeedSettings.autoAddScore, m.hardConflicts.isEmpty, feed[i].status == "new" else { return }
+        addFeedJobToJobs(id)
+    }
+
+    /// Moves a feed job into Jobs (and the background steps). The match result comes along.
+    @discardableResult
+    func addFeedJobToJobs(_ id: String) -> UUID? {
+        guard let i = feedIndex(id) else { return nil }
+        let f = feed[i]
+        if let existing = f.jobID, jobIndex(existing) != nil { return existing }
+        let keys = Set(Self.jobKeys(url: f.url, title: f.title, company: f.company))
+        if let dupe = data.jobs.first(where: { !keys.isDisjoint(with: Self.jobKeys(url: $0.url, title: $0.title, company: $0.company)) }) {
+            data.feed?[i].status = "added"
+            data.feed?[i].jobID = dupe.id
+            return dupe.id
+        }
+        var j = JobPosting()
+        j.source = f.publisher.isEmpty ? f.source : f.publisher.lowercased()
+        j.url = f.url; j.title = f.title; j.company = f.company; j.location = f.location
+        j.experience = f.experience; j.salary = f.salary; j.description = f.description
+        j.rawText = f.description
+        j.parsed = !f.snippet && f.description.count > 600
+        j.match = f.match?.local == false ? f.match : nil
+        j.feedKey = f.id
+        j.capturedAt = Date()
+        data.jobs.insert(j, at: 0)
+        data.feed?[i].status = "added"
+        data.feed?[i].jobID = j.id
+        updateDockBadge()
+        if autoProcessEnabled { enqueueAuto(j.id) }
+        return j.id
+    }
+
+    // MARK: GitHub (save your search, run the collector)
+
+    func githubRequest(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> (Int, [String: Any]) {
+        guard let url = URL(string: "https://api.github.com/repos/\(FeedSettings.repo)/\(path)") else { throw GroqError(message: "Bad repo name") }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        let token = FeedSettings.token
+        if !token.isEmpty { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let body {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (d, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        return (code, (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:])
+    }
+
+    /// Reads JobCollector/config.json from the repo.
+    func loadCollectorConfig() async throws -> [String: Any] {
+        let (code, o) = try await githubRequest("contents/JobCollector/config.json")
+        guard code == 200, let b64 = o["content"] as? String,
+              let d = Data(base64Encoded: b64.replacingOccurrences(of: "\n", with: "")),
+              let cfg = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
+            throw GroqError(message: "Couldn't read the collector settings from GitHub (HTTP \(code)).")
+        }
+        return cfg
+    }
+
+    /// Writes your search to JobCollector/config.json (this also starts a collection run).
+    func saveCollectorConfig(_ updates: [String: Any]) async throws {
+        guard !FeedSettings.token.isEmpty else {
+            throw GroqError(message: "Add a GitHub token first (Settings ▸ Job Feed). It needs Contents: Read and write and Actions: Read and write on \(FeedSettings.repo).")
+        }
+        let (code, o) = try await githubRequest("contents/JobCollector/config.json")
+        guard code == 200, let sha = o["sha"] as? String, let b64 = o["content"] as? String,
+              let d = Data(base64Encoded: b64.replacingOccurrences(of: "\n", with: "")),
+              var cfg = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else {
+            throw GroqError(message: "Couldn't read the current collector settings (HTTP \(code)). Check the token and repo.")
+        }
+        for (k, v) in updates { cfg[k] = v }
+        let out = try JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted, .sortedKeys])
+        let (put, resp) = try await githubRequest("contents/JobCollector/config.json", method: "PUT", body: [
+            "message": "Job collector: update search from ResumeForge",
+            "content": out.base64EncodedString(),
+            "sha": sha
+        ])
+        guard (200..<300).contains(put) else {
+            throw GroqError(message: "GitHub refused the update (HTTP \(put)): \(resp["message"] as? String ?? "")")
+        }
+    }
+
+    func runCollectorNow() async throws {
+        guard !FeedSettings.token.isEmpty else {
+            throw GroqError(message: "Add a GitHub token first (Settings ▸ Job Feed).")
+        }
+        let (code, resp) = try await githubRequest("actions/workflows/job-collector.yml/dispatches", method: "POST", body: ["ref": "main"])
+        guard code == 204 else {
+            throw GroqError(message: "Couldn't start the collector (HTTP \(code)): \(resp["message"] as? String ?? "")")
+        }
+    }
+}

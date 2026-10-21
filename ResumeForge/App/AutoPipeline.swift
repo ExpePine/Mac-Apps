@@ -5,12 +5,13 @@ import Foundation
 /// Stops at the depth chosen in Settings. Survives restarts (unfinished jobs resume on launch).
 /// If Groq's daily allowance runs out, the queue pauses instead of failing every job.
 enum AutoStage: String {
-    case queued, cleaning, benchmark, gaps, resume, done, failed
+    case queued, cleaning, matching, benchmark, gaps, resume, done, failed
 
     var label: String {
         switch self {
         case .queued: return "Queued"
         case .cleaning: return "Reading JD…"
+        case .matching: return "Checking fit…"
         case .benchmark: return "Best resume…"
         case .gaps: return "Missing stories…"
         case .resume: return "Writing resume…"
@@ -19,7 +20,7 @@ enum AutoStage: String {
         }
     }
 
-    var isActive: Bool { [.queued, .cleaning, .benchmark, .gaps, .resume].contains(self) }
+    var isActive: Bool { [.queued, .cleaning, .matching, .benchmark, .gaps, .resume].contains(self) }
 }
 
 /// How far automatic processing goes for each new job.
@@ -76,8 +77,8 @@ extension AppStore {
 
     func startAutoWorker() {
         guard autoWorker == nil, autoPaused == nil, !autoQueue.isEmpty else { return }
-        guard !Keychain.load().isEmpty else {
-            autoPaused = "Add your Groq API key in Settings to process jobs automatically."
+        guard ProviderSettings.anyKeyConfigured else {
+            autoPaused = "Add an AI provider key in Settings to process jobs automatically."
             return
         }
         autoWorker = Task { @MainActor [weak self] in
@@ -117,6 +118,12 @@ extension AppStore {
                 }
             }
 
+            // 1b. Fit check (score + conflicts) — cheap, and tells you whether the rest is worth it.
+            if job()?.match == nil {
+                setStage(id, .matching); autoStatus = "Checking fit: \(name())"
+                try await matchJob(id)
+            }
+
             // 2. Best Resume
             if depth.rawValue >= AutoDepth.benchmark.rawValue, job()?.benchmark == nil {
                 setStage(id, .benchmark); autoStatus = "Best resume: \(name())"
@@ -141,12 +148,12 @@ extension AppStore {
             setStage(id, .done)
         } catch {
             let msg = error.localizedDescription
-            if msg.contains("today's Groq allowance") {
+            if msg.contains(AppStore.quotaMarker) {
                 setStage(id, .queued)
-                autoPaused = "Groq's daily limit is used up — automatic processing is paused. It resumes when you relaunch the app or press Resume."
-            } else if msg.contains("Add your Groq API key") {
+                autoPaused = "Your AI providers are out of free quota — automatic processing is paused. It resumes when you relaunch the app or press Resume (or add another provider in Settings)."
+            } else if msg.contains("Add an AI provider key") {
                 setStage(id, .queued)
-                autoPaused = "Add your Groq API key in Settings to process jobs automatically."
+                autoPaused = "Add an AI provider key in Settings to process jobs automatically."
             } else if error is CancellationError {
                 setStage(id, .queued)
             } else {

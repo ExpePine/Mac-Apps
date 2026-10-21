@@ -3,19 +3,23 @@ import Foundation
 import SwiftUI
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
+    case feed = "Job Feed"
     case jobs = "Jobs"
     case stories = "Stories"
     case interview = "Interview"
     case master = "Master Resume"
+    case templates = "Templates"
     case profile = "Profile"
 
     var id: String { rawValue }
     var icon: String {
         switch self {
+        case .feed: return "antenna.radiowaves.left.and.right"
         case .jobs: return "briefcase"
         case .stories: return "book"
         case .interview: return "bubble.left.and.bubble.right"
         case .master: return "doc.richtext"
+        case .templates: return "paintbrush"
         case .profile: return "person.crop.circle"
         }
     }
@@ -36,32 +40,36 @@ final class AppStore: ObservableObject {
     @Published var autoStatus: String?
     var autoWorker: Task<Void, Never>?
 
+    // Job feed from the GitHub collector (see Feed.swift)
+    @Published var feedStatus: String?
+    @Published var feedError: String?
+    @Published var feedErrors: [String] = []
+    @Published var feedLastRefresh: Date?
+    @Published var feedMatchQueue: [String] = []
+    var feedWorker: Task<Void, Never>?
+    var feedTimer: Timer?
+
     private var saveTask: Task<Void, Never>?
     private var midnightTimer: Timer?
     private var waitObserver: NSObjectProtocol?
     private var isLoading = true
 
-    static let defaultModel = "openai/gpt-oss-120b"
-
-    var model: String {
-        let m = UserDefaults.standard.string(forKey: "groqModel") ?? ""
-        return m.isEmpty ? Self.defaultModel : m
-    }
     var allowPlaceholdersDefault: Bool { UserDefaults.standard.bool(forKey: "allowPlaceholders") }
-    var client: GroqClient { GroqClient(apiKey: Keychain.load(), model: model) }
 
     init() {
         Self.registerAutoDefaults()
+        FeedSettings.register()
         load()
         isLoading = false
         DispatchQueue.main.async { self.resumePendingAuto() }
+        DispatchQueue.main.async { self.startFeedTimer() }
         DispatchQueue.main.async { self.updateDockBadge() }
         // Refresh the Dock count after midnight.
         midnightTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.updateDockBadge() }
         }        // Show "waiting for Groq's per-minute limit" in the status pill.
         waitObserver = NotificationCenter.default.addObserver(forName: GroqClient.waitingNotification, object: nil, queue: .main) { [weak self] n in
-            let msg = n.userInfo?["message"] as? String ?? "Waiting for Groq…"
+            let msg = n.userInfo?["message"] as? String ?? "Waiting for the AI provider…"
             Task { @MainActor in
                 guard let self else { return }
                 if self.busy != nil { self.busy = msg } else { self.autoStatus = msg }

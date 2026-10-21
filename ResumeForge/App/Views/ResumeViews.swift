@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 /// Live PDF preview + edit + export for any ResumeDoc.
 struct ResumePreview: View {
+    @EnvironmentObject var store: AppStore
     @Binding var doc: ResumeDoc
     let fileName: String
     var missing: [String] = []
@@ -13,7 +14,7 @@ struct ResumePreview: View {
     @State private var confirmVerify = false
 
     var body: some View {
-        let pdf = ResumePDFRenderer.render(doc)
+        let pdf = ResumePDFRenderer.render(doc, template: store.template(for: doc))
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 if doc.mode == "benchmark" {
@@ -36,6 +37,12 @@ struct ResumePreview: View {
                     }
                 }
                 Spacer()
+                Picker("Template", selection: Binding(
+                    get: { store.template(for: doc).id },
+                    set: { doc.templateID = $0 })) {
+                    ForEach(store.allTemplates) { t in Text(t.name).tag(t.id) }
+                }
+                .frame(maxWidth: 220)
                 Button { editing = true } label: { Label("Edit", systemImage: "pencil") }
                 Button {
                     if doc.verifyCount > 0 && doc.mode != "benchmark" { confirmVerify = true } else { export(pdf) }

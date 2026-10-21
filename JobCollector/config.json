@@ -1,0 +1,22 @@
+{
+  "roles": [
+    "Product Manager hardware",
+    "Head of Product Development",
+    "Program Manager embedded systems"
+  ],
+  "locations": [
+    "Ahmedabad",
+    "Bengaluru",
+    "Remote"
+  ],
+  "country": "in",
+  "exclude": ["intern", "fresher", "trainee"],
+  "maxAgeDays": 7,
+  "maxPerQuery": 20,
+  "keepDays": 30,
+  "jsearchMonthlyBudget": 150,
+  "sources": {"adzuna": true, "jooble": true, "jsearch": true, "email": true, "rss": true},
+  "emailSites": {"naukri": true, "wellfound": true, "linkedin": false},
+  "imapFolder": "INBOX",
+  "rss": []
+}

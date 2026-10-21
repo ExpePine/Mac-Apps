@@ -87,7 +87,7 @@ struct ImportStoriesSheet: View {
                 Text("Use AI to find the separate stories (keeps your wording)")
             }
             .disabled(Keychain.load().isEmpty)
-            .help(Keychain.load().isEmpty ? "Add a Groq key in Settings to enable this." : "")
+            .help(Keychain.load().isEmpty ? "Add an AI provider key in Settings to enable this." : "")
             Text(useAI
                  ? "Groq splits the text into stories and fills in company, period, metrics and skills where you mention them. It's told not to rewrite anything you wrote."
                  : "Without AI, each heading (# Title, \"Story 1:\") or block separated by two blank lines becomes one story.")

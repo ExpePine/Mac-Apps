@@ -3,32 +3,79 @@ import Foundation
 /// The AI workflows: parse JD → benchmark resume → missing stories → your resume → interview.
 extension AppStore {
 
-    // MARK: Budgeted AI call
+    // MARK: AI calls with provider fallback
 
-    /// Builds the prompt to fit the account's tokens-per-minute limit (free tier: 8,000 per request incl. output),
-    /// shrinking the variable parts until it fits. If Groq still says "too large", it learns the real limit and rebuilds once.
-    func ask(system: String = Prompts.system, output: Int, temperature: Double,
+    /// Request budget of the first provider that will be tried.
+    var primaryLimit: Int { ProviderSettings.usable.first.map(AIClient.tpmLimit(for:)) ?? 8000 }
+
+    static let quotaMarker = "out of free quota"
+
+    private func noProviderError(vision: Bool) -> Error {
+        GroqError(message: vision
+            ? "Reading screenshots needs an AI provider that can see images, such as Google Gemini. Add a Gemini key in Settings (⌘,), or tick \"Can read images\" for another provider whose model supports it."
+            : "Add an AI provider key in Settings (⌘,). Google Gemini's free tier is the roomiest.")
+    }
+
+    private func allQuotaError(_ last: Error?) -> Error {
+        let detail = (last as? AIClient.QuotaExceeded)?.detail ?? last?.localizedDescription ?? ""
+        return GroqError(message: "All your AI providers are \(Self.quotaMarker) right now. Add another provider in Settings, or try again later.\n\n\(detail)")
+    }
+
+    /// Builds the prompt to fit each provider's request size (shrinking the variable parts until it fits),
+    /// then tries providers in your order. Out-of-quota → next provider. "Too large" → learn the limit and rebuild.
+    func ask(system: String = Prompts.system, output: Int, temperature: Double, images: [Data] = [],
              build: (Int) -> String) async throws -> [String: Any] {
+        let providers = ProviderSettings.usable.filter { images.isEmpty || $0.vision }
+        guard !providers.isEmpty else { throw noProviderError(vision: !images.isEmpty) }
         var lastError: Error?
-        for _ in 0..<2 {
-            let limit = GroqClient.tpmLimit(for: model)
-            let out = min(output, Int(Double(limit) * 0.45))
-            let allowed = max(1200, limit - out - 350)
-            var budget = allowed * 3
-            var prompt = build(budget)
-            for _ in 0..<5 {
-                let est = GroqClient.estimateTokens(system) + GroqClient.estimateTokens(prompt) + 20
-                if est <= allowed { break }
-                budget = max(1200, budget - (est - allowed) * 3 - 300)
-                prompt = build(budget)
-            }
-            do {
-                return try await client.json(system: system, user: prompt, temperature: temperature, maxTokens: out)
-            } catch let e as GroqClient.RequestTooLarge {
-                lastError = e      // limit is now learned — loop rebuilds smaller
+        var quotaHit = false
+        for p in providers {
+            let client = AIClient(provider: p)
+            for _ in 0..<2 {
+                let limit = AIClient.tpmLimit(for: p)
+                let out = min(output, Int(Double(limit) * 0.45))
+                let allowed = max(1200, limit - out - 350 - images.count * 1600)
+                var budget = allowed * 3
+                var prompt = build(budget)
+                for _ in 0..<5 {
+                    let est = AIClient.estimateTokens(system) + AIClient.estimateTokens(prompt) + 20
+                    if est <= allowed { break }
+                    budget = max(1200, budget - (est - allowed) * 3 - 300)
+                    prompt = build(budget)
+                }
+                let messages = [AIClient.Message(role: "system", content: system),
+                                AIClient.Message(role: "user", content: prompt, images: images)]
+                do {
+                    return try await client.json(messages: messages, temperature: temperature, maxTokens: out)
+                } catch let e as AIClient.RequestTooLarge {
+                    lastError = e          // limit learned — rebuild smaller on this provider
+                } catch let e as AIClient.QuotaExceeded {
+                    lastError = e; quotaHit = true
+                    break                  // next provider
+                } catch {
+                    lastError = error
+                    break                  // next provider
+                }
             }
         }
-        throw lastError ?? GroqError(message: "Request too large for your Groq plan.")
+        if quotaHit && lastError is AIClient.QuotaExceeded { throw allQuotaError(lastError) }
+        throw lastError ?? noProviderError(vision: !images.isEmpty)
+    }
+
+    /// Multi-turn chat (interview) with provider fallback.
+    func chat(_ messages: [AIClient.Message], output: Int, temperature: Double) async throws -> [String: Any] {
+        let providers = ProviderSettings.usable
+        guard !providers.isEmpty else { throw noProviderError(vision: false) }
+        var lastError: Error?
+        for p in providers {
+            do {
+                return try await AIClient(provider: p).json(messages: messages, temperature: temperature, maxTokens: output)
+            } catch {
+                lastError = error
+            }
+        }
+        if lastError is AIClient.QuotaExceeded { throw allQuotaError(lastError) }
+        throw lastError ?? noProviderError(vision: false)
     }
 
     /// Maps the short story ids used in prompts ("1a2b3c4d") back to full ids.
@@ -199,16 +246,17 @@ extension AppStore {
 
         let systemPrompt = Prompts.interviewer(profile: data.profile, stories: data.stories,
                                                job: job, gap: gap, draft: session.draft)
-        var messages = [GroqClient.Message(role: "system", content: systemPrompt)]
+        var messages = [AIClient.Message(role: "system", content: systemPrompt)]
         if session.turns.isEmpty {
             messages.append(.init(role: "user", content: "(Start the interview with your first question.)"))
         } else {
             // Keep the most recent turns that fit the per-minute budget (the draft carries what was said earlier).
             let output = 900
-            var room = GroqClient.tpmLimit(for: model) - output - 400 - GroqClient.estimateTokens(systemPrompt)
-            var recent: [GroqClient.Message] = []
+            let smallest = ProviderSettings.usable.map(AIClient.tpmLimit(for:)).min() ?? 8000
+            var room = smallest - output - 400 - AIClient.estimateTokens(systemPrompt)
+            var recent: [AIClient.Message] = []
             for t in session.turns.reversed() {
-                let cost = GroqClient.estimateTokens(t.text) + 8
+                let cost = AIClient.estimateTokens(t.text) + 8
                 if cost > room && !recent.isEmpty { break }
                 room -= cost
                 recent.insert(.init(role: t.role, content: String(t.text.prefix(4000))), at: 0)
@@ -219,7 +267,7 @@ extension AppStore {
             messages += recent
         }
 
-        let o = try await client.json(messages: messages, temperature: 0.5, maxTokens: 900)
+        let o = try await chat(messages, output: 900, temperature: 0.5)
         let reply = J.str(o, "message")
         data.interview.turns.append(ChatTurn(role: "assistant",
                                              text: reply.isEmpty ? "Could you tell me a bit more about that?" : reply))
@@ -246,9 +294,12 @@ extension AppStore {
 
     // MARK: Import an existing resume
 
-    func importResume(text: String) async throws {
-        // Long CVs are read in parts so each request fits the per-minute limit.
-        let limit = GroqClient.tpmLimit(for: model)
+    func importResume(text original: String) async throws {
+        // Contact details are read locally; with "keep contact details private" on, they're masked before sending.
+        let found = Redactor.contacts(in: original)
+        let text = Redactor.enabled ? Redactor.mask(original) : original
+        // Long CVs are read in parts so each request fits the provider's limit.
+        let limit = primaryLimit
         let chunkChars = max(3000, Int(Double(limit - 1200) / 2.2) * 3 - 2200)
         let parts = StoryImport.chunks(text, maxChars: chunkChars)
         var o: [String: Any] = [:]
@@ -266,7 +317,10 @@ extension AppStore {
             if prof[keyPath: kp].isEmpty, !v.isEmpty { prof[keyPath: kp] = v }
         }
         fill(\.name, "name"); fill(\.headline, "headline"); fill(\.location, "location")
-        fill(\.phone, "phone"); fill(\.email, "email"); fill(\.linkedin, "linkedin")
+        if prof.email.isEmpty, let e = found.email { prof.email = e }
+        if prof.phone.isEmpty, let ph = found.phone { prof.phone = ph }
+        if prof.linkedin.isEmpty, let l = found.linkedin { prof.linkedin = l }
+        if !Redactor.enabled { fill(\.phone, "phone"); fill(\.email, "email"); fill(\.linkedin, "linkedin") }
         fill(\.languages, "languages"); fill(\.certifications, "certifications"); fill(\.technicalSkills, "technicalSkills")
         if prof.roles.isEmpty {
             prof.roles = J.dicts(p, "roles").map {
@@ -293,11 +347,11 @@ extension AppStore {
                       progress: @escaping (String) -> Void = { _ in }) async throws -> [Story] {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
-        guard useAI, !Keychain.load().isEmpty else { return StoryImport.splitByHeadings(clean) }
+        guard useAI, ProviderSettings.anyKeyConfigured else { return StoryImport.splitByHeadings(clean) }
 
         let companies = Array(Set(data.profile.roles.map(\.company).filter { !$0.isEmpty })).sorted()
-        // The reply repeats your text, so each part gets less than half the per-minute budget.
-        let limit = GroqClient.tpmLimit(for: model)
+        // The reply repeats your text, so each part gets less than half the request budget.
+        let limit = primaryLimit
         let chunkChars = max(2500, Int(Double(limit - 1300) / 2.3) * 3 - 1800)
         let parts = StoryImport.chunks(clean, maxChars: chunkChars)
         var out: [Story] = []

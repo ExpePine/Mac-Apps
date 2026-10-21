@@ -44,6 +44,8 @@ struct ContentView: View {
             case .stories: StoriesView()
             case .interview: InterviewView()
             case .master: MasterResumeView()
+            case .templates: TemplatesView()
+            case .feed: FeedView()
             case .profile: ProfileView()
             }
         }

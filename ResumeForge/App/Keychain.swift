@@ -1,33 +1,37 @@
 import Foundation
 import Security
 
-/// Stores the Groq API key in the macOS Keychain (not in UserDefaults or the data file).
+/// Stores API keys and tokens in the macOS Keychain (never in UserDefaults or the data file).
 enum Keychain {
     private static let service = "com.rajmishra.ResumeForge"
-    private static let account = "groq-api-key"
+    static let groqAccount = "groq-api-key"   // original account name, kept for existing installs
 
-    private static var baseQuery: [String: Any] {
+    private static func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account]
     }
 
-    static func save(_ value: String) {
-        SecItemDelete(baseQuery as CFDictionary)
+    static func save(_ value: String, account: String) {
+        SecItemDelete(query(account) as CFDictionary)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        var add = baseQuery
+        var add = query(account)
         add[kSecValueData as String] = Data(trimmed.utf8)
         SecItemAdd(add as CFDictionary, nil)
     }
 
-    static func load() -> String {
-        var query = baseQuery
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
+    static func load(account: String) -> String {
+        var q = query(account)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
               let data = out as? Data else { return "" }
         return String(decoding: data, as: UTF8.self)
     }
+
+    // Back-compat helpers: "is any AI key configured?"
+    static func save(_ value: String) { save(value, account: groqAccount) }
+    static func load() -> String { ProviderSettings.anyKeyConfigured ? "configured" : "" }
 }

@@ -14,7 +14,11 @@ The extension captures job descriptions from Naukri, Wellfound and LinkedIn. The
 1. Download **ResumeForge.dmg** from the [`resumeforge-latest` release](../../releases/tag/resumeforge-latest).
 2. Open the DMG and drag **ResumeForge** into **Applications**.
 3. Open the app once. It's ad-hoc signed and not notarized, so macOS blocks it the first time. Go to **System Settings ▸ Privacy & Security** and click **Open Anyway**.
-4. In the app, open **Settings** (⌘,), paste your Groq key from <https://console.groq.com/keys>, and click **Test & list models**. If the default model isn't listed, pick a large text model from the list.
+4. In the app, open **Settings ▸ AI Providers** (⌘,). Paste a key for at least one provider, then click **Test & list models** and pick a current model.
+   - **Google Gemini** ([get a key](https://aistudio.google.com/apikey)) has the roomiest free tier, and it's the provider that can read template screenshots.
+   - **Groq, Cerebras, Mistral, OpenRouter** and any **OpenAI-compatible** endpoint also work.
+   - Drag providers into the order you want them tried. When one runs out of free quota, the app falls back to the next.
+   - **Keep my contact details private** is on by default: your name, phone, email and LinkedIn are never sent to a provider, and the resume header is filled in on your Mac. Free tiers may use your inputs to improve their models; Google and Mistral both say so in their terms.
 5. Enable the Safari extension. Menu names vary a little by Safari version.
    1. Safari ▸ Settings ▸ Advanced ▸ ✓ *Show features for web developers*.
    2. Develop ▸ ✓ *Allow Unsigned Extensions*. Safari turns this off every time it quits, so re-tick it after each restart. That's the cost of not having a paid Apple Developer account.
@@ -36,13 +40,39 @@ The extension captures job descriptions from Naukri, Wellfound and LinkedIn. The
    | **?** | No job description found on this page. Open the job itself and click again. |
    | **ERR** | Sending failed. A status page opens with the reason and a *Copy job as JSON* fallback. |
 
-   To see recently sent jobs, reset today's count, or forget sent jobs (so you can send them again), go to **Safari ▸ Settings ▸ Extensions ▸ ResumeForge Capture ▸ Settings**.
+   To see recently sent jobs, reset today's count, forget sent jobs (so you can send them again), or turn on **auto-capture** (job pages are captured as soon as you open them, no click), go to **Safari ▸ Settings ▸ Extensions ▸ ResumeForge Capture ▸ Settings**.
 3. **Background processing.** Each new JD is automatically run through *clean up → Best Resume → Missing Stories → My Resume*, one job at a time, while you keep browsing. The Jobs list shows each job's progress (Queued, Best resume…, Ready). If a step fails, open the job and press Retry. On Groq's free tier the daily allowance covers roughly 8–12 full jobs. You can choose a shorter depth, or turn this off, under Settings ▸ Background processing. When the daily allowance runs out, the queue pauses and resumes later.
 4. **Then**, review each job's tabs: **Job Description → Best Resume → Missing Stories → (Interview) → My Resume → Export PDF**.
    - **Facts from my stories only** keeps every line traceable to something you said.
    - **Allow [VERIFY] placeholders** adds orange, clearly marked guesses for you to confirm or delete.
 
-Your data is stored in `~/Library/Application Support/ResumeForge/ResumeForge.json`. Your Groq key is kept in the macOS Keychain.
+Your data is stored in `~/Library/Application Support/ResumeForge/ResumeForge.json`. API keys and your GitHub token are kept in the macOS Keychain.
+
+## Templates (copy a CV design from a screenshot)
+
+Go to **Templates** in the sidebar and drop a screenshot of a CV you like. The AI reads the design (fonts, sizes, colours, heading style, single or two-column, section order) and saves it as a template. Fine-tune it in the editor, which shows a live preview. Pick a template on any resume, or set a default under **Settings ▸ Processing**. It approximates the design: photos, icons and charts aren't reproduced.
+
+## Job Feed (collected on GitHub, ranked by fit)
+
+`.github/workflows/job-collector.yml` runs `JobCollector/collect.py` three times a day. It also runs when you press **Collect now**, or when you save your search from the app. It collects jobs for your roles and locations from:
+
+| Source | Secret(s) to add in GitHub ▸ Settings ▸ Secrets ▸ Actions |
+|---|---|
+| Adzuna (job aggregator, India supported) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` — <https://developer.adzuna.com> |
+| Jooble | `JOOBLE_KEY` — <https://jooble.org/api/about> |
+| JSearch (Google for Jobs, often lists Naukri/LinkedIn jobs) | `RAPIDAPI_KEY` — subscribe to JSearch on RapidAPI (small free quota) |
+| **Naukri / Wellfound / LinkedIn job-alert emails** | `IMAP_HOST` (e.g. `imap.gmail.com`), `IMAP_USER`, `IMAP_PASSWORD` (an app password, not your normal password) |
+| Any site with an RSS/Atom feed | add the feed URLs in Settings ▸ Job Feed |
+
+The collector never crawls Naukri or Wellfound pages. Naukri's terms prohibit automated crawling, and Wellfound uses bot protection. Instead, set up saved searches and job-alert emails on both sites; the collector reads those emails from your inbox. When you open a posting, the Safari extension captures the full JD, and with **auto-capture** turned on that needs no click.
+
+The feed is published to the `job-feed` release. Because this repo is public, your search terms and the collected listings are visible to anyone. Your API keys stay in GitHub secrets, which are never shown.
+
+In the app, **Job Feed** lists every job with a fit score:
+- **Quick score (free, on your Mac):** keyword overlap, title, location and years of experience.
+- **AI fit check (top matches only):** a score plus **conflicts** (likely deal-breakers), **gaps** you could address, and strengths.
+
+**Add to my Jobs** sends a job through the background steps to your resume. You can also have strong matches (AI score ≥ 80, no conflicts) added automatically. Set roles, locations, the GitHub token, the number of daily AI checks and the auto-add rules under **Settings ▸ Job Feed**.
 
 ## Build
 

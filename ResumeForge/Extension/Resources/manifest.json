@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ResumeForge Capture",
   "description": "One click sends the job you're viewing on Naukri, Wellfound or LinkedIn to ResumeForge. The icon shows how many JDs you've sent today.",
-  "version": "1.1",
+  "version": "1.2",
   "icons": {
     "48": "icon-48.png",
     "96": "icon-96.png",
@@ -38,7 +38,8 @@
     "scripting",
     "nativeMessaging",
     "storage",
-    "alarms"
+    "alarms",
+    "tabs"
   ],
   "host_permissions": [
     "*://*.naukri.com/*",

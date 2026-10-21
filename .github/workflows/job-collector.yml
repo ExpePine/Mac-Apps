@@ -1,0 +1,53 @@
+name: Job Collector
+
+on:
+  schedule:
+    - cron: "17 0,6,12 * * *"     # 05:47, 11:47, 17:47 IST
+  workflow_dispatch:                # "Collect now" from the app or the Actions tab
+  push:
+    branches: [main]
+    paths:
+      - "JobCollector/**"
+      - ".github/workflows/job-collector.yml"
+
+permissions:
+  contents: write                   # to update the "job-feed" release
+
+concurrency:
+  group: job-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get previous feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p JobCollector/out
+          gh release download job-feed -p jobs.json -p state.json -D JobCollector/out --clobber || echo "No previous feed yet"
+
+      - name: Collect jobs
+        env:
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          JOOBLE_KEY: ${{ secrets.JOOBLE_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+        run: python3 JobCollector/collect.py
+
+      - name: Publish feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view job-feed >/dev/null 2>&1 || \
+            gh release create job-feed --title "Job feed (data)" \
+              --notes "Collected job listings for the ResumeForge app. Updated automatically by the Job Collector workflow." \
+              --latest=false
+          gh release upload job-feed JobCollector/out/jobs.json JobCollector/out/state.json --clobber

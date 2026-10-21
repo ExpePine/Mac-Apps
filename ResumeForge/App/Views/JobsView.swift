@@ -9,6 +9,8 @@ struct JobsView: View {
             VStack(spacing: 0) {
                 List(selection: $store.selectedJobID) {
                     ForEach(store.data.jobs) { job in
+                        HStack(alignment: .top, spacing: 8) {
+                        if job.match != nil { ScoreBadge(match: job.match) }
                         VStack(alignment: .leading, spacing: 3) {
                             Text(job.title.isEmpty ? "Untitled job" : job.title).font(.headline).lineLimit(2)
                             if !job.company.isEmpty {
@@ -26,6 +28,7 @@ struct JobsView: View {
                                 Spacer()
                                 Text(job.capturedAt, style: .date).font(.caption2).foregroundStyle(.tertiary)
                             }
+                        }
                         }
                         .padding(.vertical, 3)
                         .tag(job.id)
@@ -165,6 +168,13 @@ struct JobDetailView: View {
                     } label: { Label("Next: build the best resume", systemImage: "arrow.right.circle") }
                     .buttonStyle(.borderedProminent)
                     .disabled(job.description.isEmpty)
+                }
+                if let m = job.match {
+                    MatchCard(match: m)
+                } else {
+                    Button { store.run("Checking fit…") { try await store.matchJob(jobID) } } label: {
+                        Label("Check fit & conflicts", systemImage: "sparkles")
+                    }
                 }
                 if !job.skills.isEmpty {
                     Text("Skills: " + job.skills.joined(separator: " · ")).font(.callout).foregroundStyle(.secondary)

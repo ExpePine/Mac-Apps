@@ -16,6 +16,7 @@ async function render() {
   const jobs = (s.recent || []).length;
   $("remembered").textContent = jobs ? `Remembering ${jobs >= 30 ? "30+" : jobs} sent job${jobs === 1 ? "" : "s"}.` : "";
 
+  $("autoCapture").checked = !!s.autoCapture;
   lastJob = s.lastJob || null;
   $("errorCard").hidden = !s.lastError;
   $("errorText").textContent = s.lastError || "";
@@ -26,6 +27,7 @@ async function render() {
   ).join("") || `<tr><td class="muted">Nothing sent yet.</td></tr>`;
 }
 
+$("autoCapture").onchange = async (e) => { await api.runtime.sendMessage({ type: "RF_SET_AUTO", on: e.target.checked }); };
 $("resetToday").onclick = async () => { await send("RF_RESET_TODAY"); render(); };
 $("forgetAll").onclick = async () => {
   if (!confirm("Forget all sent jobs? You'll be able to send them again.")) return;

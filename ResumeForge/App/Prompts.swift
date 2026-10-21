@@ -323,9 +323,14 @@ enum Prompts {
     /// Compact plain-text profile (cheaper in tokens than JSON).
     static func profileBlock(_ p: Profile, maxChars: Int = 2000) -> String {
         var lines: [String] = []
-        lines.append("Name: \(p.name)")
+        if Redactor.enabled {
+            lines.append("Name: (added locally — not needed)")
+            if !p.location.isEmpty { lines.append("Based in: \(p.location)") }
+        } else {
+            lines.append("Name: \(p.name)")
+            if !p.contactLine.isEmpty { lines.append("Contact: \(p.contactLine)") }
+        }
         if !p.headline.isEmpty { lines.append("Headline: \(p.headline)") }
-        if !p.contactLine.isEmpty { lines.append("Contact: \(p.contactLine)") }
         if !p.roles.isEmpty {
             lines.append("Roles:")
             lines += p.roles.map { "- \($0.title) | \($0.company) | \($0.location) | \($0.start) - \($0.end)" }

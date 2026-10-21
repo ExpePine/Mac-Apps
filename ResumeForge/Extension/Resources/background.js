@@ -103,16 +103,24 @@ function looksLikeJob(job) {
 
 let busy = false;
 
-api.action.onClicked.addListener(async (tab) => {
+// Job detail pages that auto-capture watches (only when you turn it on in the status page).
+const JOB_PAGE = [
+  /naukri\.com\/job-listings-/i,
+  /wellfound\.com\/jobs\/\d+/i,
+  /wellfound\.com\/jobs\?.*job_listing_slug=/i,
+  /linkedin\.com\/jobs\/view\//i,
+];
+
+async function capture(tab, auto = false) {
   if (busy) return;
   busy = true;
   let job = null;
   try {
-    await setBadge("…", COLORS.none);
+    if (!auto) await setBadge("…", COLORS.none);
     job = await extract(tab);
 
     if (!looksLikeJob(job)) {
-      flash("?", COLORS.none, "No job description found on this page — open the job itself and click again.", 2500);
+      if (!auto) flash("?", COLORS.none, "No job description found on this page — open the job itself and click again.", 2500);
       return;
     }
 
@@ -120,7 +128,8 @@ api.action.onClicked.addListener(async (tab) => {
     const keys = jobKeys(job);
     const hit = keys.find((k) => state.seen[k]);
     if (hit) {
-      flash("DUP", COLORS.dup, `Already sent on ${state.seen[hit].d}: ${job.title || "this job"} — not sent again.`, 2500);
+      // Auto-capture stays quiet about pages you've already sent.
+      if (!auto) flash("DUP", COLORS.dup, `Already sent on ${state.seen[hit].d}: ${job.title || "this job"} — not sent again.`, 2500);
       return;
     }
 
@@ -132,14 +141,35 @@ api.action.onClicked.addListener(async (tab) => {
     prune(state.seen);
     state.count += 1;
     await api.storage.local.set({ day: d, count: state.count, seen: state.seen, lastError: null });
-    flash("✓", COLORS.ok, `Sent: ${job.title || "job"}${job.company ? " — " + job.company : ""}`, 1200);
+    flash("✓", COLORS.ok, `Sent${auto ? " automatically" : ""}: ${job.title || "job"}${job.company ? " — " + job.company : ""}`, 1200);
   } catch (e) {
     await api.storage.local.set({ lastError: String((e && e.message) || e), lastJob: job, lastErrorAt: Date.now() });
     await setBadge("ERR", COLORS.err, "Sending failed — see the status page.");
-    try { await api.tabs.create({ url: api.runtime.getURL("status.html") }); } catch (_) {}
+    if (!auto) { try { await api.tabs.create({ url: api.runtime.getURL("status.html") }); } catch (_) {} }
   } finally {
     busy = false;
   }
+}
+
+api.action.onClicked.addListener((tab) => capture(tab, false));
+
+// Auto-capture: when you open a job page (including in-page navigation on Wellfound), capture it after it renders.
+const recentAuto = new Map();
+api.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  const url = info.url || (info.status === "complete" ? tab && tab.url : null);
+  if (!url || !JOB_PAGE.some((r) => r.test(url))) return;
+  const { autoCapture } = await api.storage.local.get(["autoCapture"]);
+  if (!autoCapture) return;
+  const key = urlKey(url);
+  const last = recentAuto.get(key) || 0;
+  if (Date.now() - last < 15000) return;
+  recentAuto.set(key, Date.now());
+  setTimeout(async () => {
+    try {
+      const t = await api.tabs.get(tabId);
+      if (t && t.url && urlKey(t.url) === key) await capture(t, true);
+    } catch (_) { /* tab closed */ }
+  }, 2500);
 });
 
 // ---------- messages from the status page ----------
@@ -148,11 +178,14 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg?.type === "RF_STATUS") {
       const s = await loadState();
-      const extra = await api.storage.local.get(["lastError", "lastJob", "lastErrorAt"]);
+      const extra = await api.storage.local.get(["lastError", "lastJob", "lastErrorAt", "autoCapture"]);
       const recent = Object.values(s.seen)
         .filter((v, i, a) => a.findIndex((x) => x.t === v.t) === i)   // one row per job (it has 2 keys)
         .sort((a, b) => b.t - a.t).slice(0, 30);
       sendResponse({ count: s.count, day: s.day, recent, ...extra });
+    } else if (msg?.type === "RF_SET_AUTO") {
+      await api.storage.local.set({ autoCapture: !!msg.on });
+      sendResponse({ ok: true });
     } else if (msg?.type === "RF_RESET_TODAY") {
       await api.storage.local.set({ day: today(), count: 0 });
       await showCount();
