@@ -484,3 +484,20 @@ final class T3Tests: XCTestCase {
         XCTAssertNil(d.color(Array(flat.prefix(25))))                 // t3[1] still na
     }
 }
+
+final class DealsParseTests: XCTestCase {
+    func testAPIRow() {
+        let row: [String: Any] = ["BD_DT_DATE": "22-Aug-2023", "BD_SYMBOL": "ABC", "BD_SCRIP_NAME": "ABC Ltd", "BD_CLIENT_NAME": "XYZ FUND",
+                                  "BD_BUY_SELL": "SELL", "BD_QTY_TRD": 150000, "BD_TP_WATP": 123.45]
+        let d = NSEDealsClient.parse(row, kind: "Bulk")!
+        XCTAssertEqual(d.day, "2023-08-22"); XCTAssertEqual(d.symbol, "ABC"); XCTAssertFalse(d.isBuy)
+        XCTAssertEqual(d.qty, 150000); XCTAssertEqual(d.price, 123.45, accuracy: 1e-9); XCTAssertEqual(d.client, "XYZ FUND")
+    }
+    func testArchiveCSVRow() {
+        let h = CSVLine.split("Date,Symbol,Security Name,Client Name,Buy/Sell,Quantity Traded,Trade Price / Wght. Avg. Price,Remarks").map { $0.uppercased() }
+        let c = CSVLine.split("21-OCT-2026,TATAMOTORS,\"Tata Motors, Ltd\",SOME CLIENT,BUY,\"1,20,000\",745.50,-")
+        var d: [String: Any] = [:]; for (i, k) in h.enumerated() { d[k] = c[i] }
+        let x = NSEDealsClient.parse(d, kind: "Block")!
+        XCTAssertEqual(x.day, "2026-10-21"); XCTAssertTrue(x.isBuy); XCTAssertEqual(x.qty, 120000); XCTAssertEqual(x.price, 745.5, accuracy: 1e-9)
+    }
+}

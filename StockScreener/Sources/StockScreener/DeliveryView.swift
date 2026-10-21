@@ -31,6 +31,8 @@ struct DeliveryView: View {
     @State private var loadingChart = false
     @StateObject private var lw = LWChartHolder()
     @AppStorage("deliv.layers") private var layersRaw = ""
+    @ObservedObject private var newsTL = NewsTimeline.shared
+    @ObservedObject private var dealsC = DealsCenter.shared
     @AppStorage("t3.rev") private var t3Rev = 0
     @Environment(\.colorScheme) private var colorScheme
 
@@ -143,6 +145,8 @@ struct DeliveryView: View {
                     ForEach(["Sheet stocks", "My Filter", "All NSE"], id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
+                Button { if let s = selected { UserDefaults.standard.set(s, forKey: "news.symbol") }; openWindow(id: "newschart") } label: { Label("News & Deals", systemImage: "newspaper") }.fixedSize()
+                    .help("Candle chart with news labelled by Groq (3–4 words) and NSE bulk / block deals (⌥⌘N)")
                 Button { copyPine() } label: { Label("Copy Pine Script", systemImage: "doc.on.clipboard") }.fixedSize()
                     .help("A TradingView indicator that paints these exact signal days (orange + ▲DQ) on your TradingView charts — for the stocks in the selected scope")
                 SymbolField(vm: vm, placeholder: "Search any NSE stock", text: $search).frame(width: 200)
@@ -264,6 +268,8 @@ struct DeliveryView: View {
         .onChange(of: colorScheme) { _ in pushChart() }
         .onChange(of: layersRaw) { _ in pushChart() }
         .onChange(of: t3Rev) { _ in pushChart() }
+        .onChange(of: newsTL.revision) { _ in pushChart() }
+        .onChange(of: dealsC.revision) { _ in pushChart() }
     }
 
     /// One-line summary of the stock's delivery pattern.
@@ -299,7 +305,7 @@ struct DeliveryView: View {
         guard let s = selected else { return }
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
-                                 layers: ChartLayer.decode(layersRaw)))
+                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(s, layers: ChartLayer.decode(layersRaw))))
     }
 
     /// Pine Script that paints the same signal days on your TradingView charts (for the stocks in scope).
@@ -434,6 +440,8 @@ struct DeliveryMiniChart: View {
     @AppStorage("deliv.full") private var full = true
     @AppStorage("viewer.delivRange") private var range = "1Y"
     @AppStorage("viewer.delivLayers") private var layersRaw = ""
+    @ObservedObject private var news = NewsTimeline.shared
+    @ObservedObject private var deals = DealsCenter.shared
     @AppStorage("t3.rev") private var t3Rev = 0
 
     var body: some View {
@@ -471,6 +479,8 @@ struct DeliveryMiniChart: View {
         .onChange(of: colorScheme) { _ in push() }
         .onChange(of: layersRaw) { _ in push() }
         .onChange(of: t3Rev) { _ in push() }
+        .onChange(of: news.revision) { _ in push() }
+        .onChange(of: deals.revision) { _ in push() }
     }
 
     private func push() {
@@ -478,7 +488,7 @@ struct DeliveryMiniChart: View {
         guard let s = dc.book.series[sym] else { return }
         lw.show(LWChartData.make(symbol: sym, series: s, candles: [], metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
-                                 layers: ChartLayer.decode(layersRaw)))
+                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw))))
         if let f = focus, let w = Self.window(around: f) {
             let holder = lw
             for delay in [0.5, 1.5] {            // after the data has been drawn (first load can take a moment)

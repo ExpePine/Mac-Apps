@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, news, deals
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -23,6 +23,8 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .sma66: return "ta.sma(delivery, 66) line"
         case .per: return "Delivery % (DELIV_PER)"
         case .t3: return "T3 line (green rising / red falling) — \(T3Def.current.pine)"
+        case .news: return "News (3–4 word labels, blue ●)"
+        case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
         }
     }
     var color: Color? {
@@ -33,6 +35,8 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .sma66: return Color(red: 0.91, green: 0.12, blue: 0.39)
         case .per: return Color(red: 0.55, green: 0.76, blue: 0.29)
         case .t3: return .green
+        case .news: return .blue
+        case .deals: return .purple
         case .bands, .markers: return .orange
         default: return nil
         }
@@ -92,7 +96,16 @@ struct ChartLayersButton: View {
 struct LWChartData: Encodable {
     struct Candle: Encodable { let time: String; let open, high, low, close: Double }
     struct Point: Encodable { let time: String; let value: Double?; var color: String? = nil }   // value nil = empty day (gap)
-    struct Marker: Encodable { let time: String; let position = "belowBar"; let color = "#FF9800"; let shape = "arrowUp"; let text: String }
+    struct Marker: Encodable {
+        let time: String
+        var position = "belowBar"
+        var color = "#FF9800"
+        var shape = "arrowUp"
+        let text: String
+        init(time: String, text: String, position: String = "belowBar", color: String = "#FF9800", shape: String = "arrowUp") {
+            self.time = time; self.text = text; self.position = position; self.color = color; self.shape = shape
+        }
+    }
     var candles: [Candle] = []
     var deliv: [Point] = []
     var high: [Point] = []
@@ -113,7 +126,7 @@ struct LWChartData: Encodable {
     /// Builds the chart data for one stock from its delivery series and (optional) Yahoo candles.
     static func make(symbol: String, series: DeliverySeries?, candles: [YahooClient.Candle], metric: DeliveryMetric,
                      length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool, calendar: [String] = [],
-                     layers: Set<ChartLayer> = ChartLayer.defaults) -> LWChartData {
+                     layers: Set<ChartLayer> = ChartLayer.defaults, events: [Marker] = []) -> LWChartData {
         var d = LWChartData()
         d.title = symbol
         d.metric = metric.pine
@@ -172,10 +185,37 @@ struct LWChartData: Encodable {
                 d.deliv = d.deliv.map { Point(time: $0.time, value: nil) }
             }
         }
+        d.markers += events
         return d
     }
 
-    var json: String { (try? String(data: JSONEncoder().encode(self), encoding: .utf8)) ?? "{}" }
+    var json: String {
+        var d = self
+        d.markers.sort { $0.time < $1.time }          // the chart library wants markers in time order
+        return (try? String(data: JSONEncoder().encode(d), encoding: .utf8)) ?? "{}"
+    }
+
+    /// News and bulk / block deal markers for one stock (shared by every delivery / news chart).
+    @MainActor static func eventMarkers(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> [Marker] {
+        var out: [Marker] = []
+        let sym = symbol.uppercased()
+        if layers.contains(.news) {
+            for nd in NewsTimeline.shared.days(sym) where nd.day >= from {
+                guard let l = nd.label, l != "Not company news" else { continue }
+                out.append(Marker(time: nd.day, text: l, position: "aboveBar", color: "#2962FF", shape: "circle"))
+            }
+        }
+        if layers.contains(.deals) {
+            DealsCenter.shared.loadIfNeeded()
+            let byDay = Dictionary(grouping: DealsCenter.shared.bySymbol[sym] ?? [], by: \.day)
+            for (day, ds) in byDay where day >= from {
+                let buy = ds.filter(\.isBuy).reduce(0) { $0 + $1.valueCr }, sell = ds.filter { !$0.isBuy }.reduce(0) { $0 + $1.valueCr }
+                if buy > 0 { out.append(Marker(time: day, text: String(format: "B %.1fCr", buy), position: "belowBar", color: "#26a69a", shape: "arrowUp")) }
+                if sell > 0 { out.append(Marker(time: day, text: String(format: "S %.1fCr", sell), position: "aboveBar", color: "#ef5350", shape: "arrowDown")) }
+            }
+        }
+        return out
+    }
 }
 
 final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
@@ -346,7 +386,16 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var hasBars=d.deliv.some(function(x){ return x.value!=null; });
       var mk=hasCandles?candle:(hasBars?hist:(d.high.length?high:hist));
       [candle,hist,high].forEach(function(s){ if(s!==mk) s.setMarkers([]); });
-      mk.setMarkers(d.markers);
+      // markers must sit on a bar of their series: move weekend / holiday news to the next trading day
+      var st=(mk===candle?d.candles:(mk===hist?d.deliv:d.high)).filter(function(x){ return x.close!=null || x.value!=null; }).map(function(x){ return x.time; });
+      var snapped=d.markers.map(function(m){
+        if(!st.length) return m;
+        var lo=0,hi=st.length-1; if(m.time>st[hi]) return null;
+        while(lo<hi){ var md=(lo+hi)>>1; if(st[md]<m.time) lo=md+1; else hi=md; }
+        var c=Object.assign({},m); c.time=st[lo]; return c;
+      }).filter(function(m){ return m; });
+      snapped.sort(function(a,b){ return a.time<b.time?-1:(a.time>b.time?1:0); });
+      mk.setMarkers(snapped);
       var n={'6M':126,'1Y':252,'2Y':504}[d.range];
       var len=Math.max(d.candles.length,d.deliv.length);
       window._quiet=true;

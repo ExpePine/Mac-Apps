@@ -115,6 +115,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
+        Window("News & Deals", id: "newschart") {
+            NewsChartView()
+                .environmentObject(vm)
+                .frame(minWidth: 1000, minHeight: 640)
+        }
+        .keyboardShortcut("n", modifiers: [.command, .option])
+
         Window("AUTO-PREDICT", id: "autopredict") {
             AutoPredictView()
                 .environmentObject(vm)
@@ -180,6 +187,7 @@ struct ToolsCommands: Commands {
             Button("Experiments — compare your triggers (⌥⌘E)") { openWindow(id: "experiments") }
             Button("Multibaggers — ≥30% in a month, 2023 → now (⌥⌘M)") { openWindow(id: "multibaggers") }
             Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
+            Button("News & Deals — news labels (Groq) + bulk / block deals on a chart (⌥⌘N)") { openWindow(id: "newschart") }
             Button("AUTO-PREDICT — learns what comes before ≥30% monthly moves (⌥⌘A)") { openWindow(id: "autopredict") }
             Button("Gainer Charts — Chart 1 → Chart 2 of each top gainer (⌥⌘G)") { openWindow(id: "gainerCharts") }
             Button("Chart Reel — flick through charts (⌥⌘R)") { openWindow(id: "reel") }

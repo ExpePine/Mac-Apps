@@ -179,6 +179,8 @@ struct GainersView: View {
                 .help("Chart 1 then Chart 2 of every top gainer (daily ≥ 5% or monthly ≥ 30%), with the delivery chart (⌥⌘G)")
             Button { openWindow(id: "multibaggers") } label: { Label("Multibaggers", systemImage: "chart.line.uptrend.xyaxis.circle") }
                 .help("Every stock that gained ≥ 30% in a month since 2023 — and a Chart Reel jumped to each move (⌥⌘M)")
+            Button { openWindow(id: "newschart") } label: { Label("News & Deals", systemImage: "newspaper") }
+                .help("A stock's chart with news labelled by Groq and NSE bulk / block deals (⌥⌘N)")
             Button { openWindow(id: "delivery") } label: { Label("Delivery", systemImage: "shippingbox") }
                 .help("NSE delivery history: stocks whose delivery quantity just made a 300-day high (⌥⌘D)")
             Button { openWindow(id: "combi") } label: { Label("Combinatorix", systemImage: "square.stack.3d.up") }
