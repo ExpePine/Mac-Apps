@@ -138,10 +138,19 @@ def adzuna(cfg, role, loc):
     return out
 
 
-def jooble(cfg, role, loc):
+def jooble(cfg, role, loc, state):
     key = os.environ.get("JOOBLE_KEY")
     if not key:
         return []
+    # Jooble keys come with a limited number of requests — keep a running count and stop at the budget.
+    month = NOW.strftime("%Y-%m")
+    used = state.setdefault("joobleUsed", {}).get(month, 0)
+    total = state.get("joobleTotal", 0)
+    if used >= cfg.get("joobleMonthlyBudget", 120) or total >= cfg.get("joobleTotalBudget", 480):
+        log(f"  jooble: budget reached (this month {used}, all-time {total})")
+        return []
+    state["joobleUsed"][month] = used + 1
+    state["joobleTotal"] = total + 1
     body = {"keywords": role, "location": "" if (loc or "").lower() == "remote" else (loc or ""), "page": "1"}
     if (loc or "").lower() == "remote":
         body["keywords"] = f"{role} remote"
@@ -439,7 +448,7 @@ def main():
             if src.get("adzuna", True):
                 run("adzuna", adzuna, cfg, role, loc)
             if src.get("jooble", True):
-                run("jooble", jooble, cfg, role, loc)
+                run("jooble", jooble, cfg, role, loc, state)
             if src.get("jsearch", True):
                 run("jsearch", jsearch, cfg, role, loc, state)
     if src.get("email", True):

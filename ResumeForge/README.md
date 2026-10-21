@@ -68,13 +68,16 @@ Go to **Templates** in the sidebar and drop a screenshot of a CV you like. The A
 
 | Source | Secret(s) to add in GitHub ▸ Settings ▸ Secrets ▸ Actions |
 |---|---|
-| Adzuna (job aggregator, India supported) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` — <https://developer.adzuna.com> |
-| Jooble | `JOOBLE_KEY` — <https://jooble.org/api/about> |
+| **My Naukri sheet** (rajakrishna.in/naukri) | none — the app reads it straight from your Mac (see below) |
+| Jooble | `JOOBLE_KEY` — <https://jooble.org/api/about>. Capped at 120 requests a month and 480 in total (change `joobleMonthlyBudget` / `joobleTotalBudget` in `config.json`) |
+| Adzuna (off by default — its sign-up asks for a card) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` — <https://developer.adzuna.com> |
 | JSearch (Google for Jobs, often lists Naukri/LinkedIn jobs) | `RAPIDAPI_KEY` — subscribe to JSearch on RapidAPI (small free quota) |
 | **Naukri / Wellfound / LinkedIn job-alert emails** | `IMAP_HOST` (e.g. `imap.gmail.com`), `IMAP_USER`, `IMAP_PASSWORD` (an app password, not your normal password) |
 | Any site with an RSS/Atom feed | add the feed URLs in Settings ▸ Job Feed |
 
 The collector never crawls Naukri or Wellfound pages. Naukri's terms prohibit automated crawling, and Wellfound uses bot protection. Instead, set up saved searches and job-alert emails on both sites; the collector reads those emails from your inbox. When you open a posting, the Safari extension captures the full JD, and with **auto-capture** turned on that needs no click.
+
+**My Naukri sheet.** The app reads the same jobs you see in *Sheet View* on rajakrishna.in/naukri, using the site's `fetch_stored_jobs` endpoint. Each job comes with its full JD, company, experience, location, category and Naukri link. It fetches from your Mac when the app opens and every 2 hours (or press ⟳ in Job Feed), then merges the jobs into the Job Feed, where they're scored and fit-checked like the rest. You can turn it off or change the endpoint in Settings ▸ Job Feed.
 
 The feed is published to the `job-feed` release. Because this repo is public, your search terms and the collected listings are visible to anyone. Your API keys stay in GitHub secrets, which are never shown.
 

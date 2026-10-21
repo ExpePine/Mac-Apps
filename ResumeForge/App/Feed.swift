@@ -30,6 +30,7 @@ struct FeedJob: Codable, Identifiable, Hashable {
     var experience = ""
     var snippet = true
     var firstSeen = ""
+    var category: String?               // e.g. "Product-Manager" / "Edge-AI" from your Naukri sheet
     var status = "new"                  // new | added | dismissed
     var match: MatchResult?
     var jobID: UUID?
@@ -233,26 +234,7 @@ extension AppStore {
                 return
             }
             let items = J.dicts(obj, "items").compactMap(FeedJob.init(json:))
-            var current = data.feed ?? []
-            let known = Dictionary(current.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { a, _ in a })
-            var added = 0
-            for var it in items {
-                if let i = known[it.id] {
-                    if it.description.count > current[i].description.count {
-                        current[i].description = it.description
-                        current[i].snippet = it.snippet
-                    }
-                } else {
-                    it.match = MatchScorer.local(title: it.title, text: it.description, location: it.location,
-                                                 experience: it.experience, profile: data.profile, stories: data.stories)
-                    current.append(it)
-                    added += 1
-                }
-            }
-            // Forget old listings you never acted on.
-            let live = Set(items.map(\.id))
-            current.removeAll { !live.contains($0.id) && $0.status != "added" }
-            data.feed = current
+            let added = mergeFeed(items, owns: { $0.source != NaukriSheet.source })
             feedLastRefresh = Date()
             feedErrors = J.strings(obj, "errors")
             feedError = nil
@@ -263,12 +245,85 @@ extension AppStore {
         }
     }
 
+    /// Adds new items, refreshes known ones, and forgets listings (from the same source) that have gone — unless you added them.
+    @discardableResult
+    func mergeFeed(_ items: [FeedJob], owns: (FeedJob) -> Bool) -> Int {
+        var current = data.feed ?? []
+        let known = Dictionary(current.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { a, _ in a })
+        var added = 0
+        for var it in items {
+            if let i = known[it.id] {
+                if it.description.count > current[i].description.count {
+                    current[i].description = it.description
+                    current[i].snippet = it.snippet
+                }
+            } else {
+                it.match = MatchScorer.local(title: it.title, text: it.description, location: it.location,
+                                             experience: it.experience, profile: data.profile, stories: data.stories)
+                current.append(it)
+                added += 1
+            }
+        }
+        let live = Set(items.map(\.id))
+        current.removeAll { owns($0) && !live.contains($0.id) && $0.status != "added" }
+        data.feed = current
+        return added
+    }
+
     func startFeedTimer() {
         feedTimer?.invalidate()
         feedTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refreshFeed() }
+            Task { @MainActor in
+                await self?.refreshFeed()
+                await self?.refreshNaukriSheet()
+            }
         }
-        Task { await refreshFeed() }
+        Task {
+            await refreshFeed()
+            await refreshNaukriSheet()
+        }
+    }
+
+    // MARK: Your Naukri sheet (rajakrishna.in/naukri)
+
+    /// Pulls every page of your sheet (same data as "Sheet View") from your site, at most every 2 hours unless asked.
+    func refreshNaukriSheet(manual: Bool = false) async {
+        guard NaukriSheet.enabled, let url = URL(string: NaukriSheet.endpoint) else { return }
+        if !manual, let last = naukriSheetLast, Date().timeIntervalSince(last) < 2 * 3600 { return }
+        naukriSheetStatus = "Reading your Naukri sheet…"
+        var items: [FeedJob] = []
+        var page = 1, totalPages = 1, total = 0
+        do {
+            repeat {
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.timeoutInterval = 60
+                req.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+                req.httpBody = "action=\(NaukriSheet.action)&page=\(page)".data(using: .utf8)
+                let (d, resp) = try await URLSession.shared.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                guard code == 200, let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+                      (obj["success"] as? Bool) == true, let data = obj["data"] as? [String: Any] else {
+                    throw GroqError(message: "Your Naukri sheet didn't answer as expected (HTTP \(code), page \(page)).")
+                }
+                totalPages = max(1, Int(J.str(data, "total_pages")) ?? 1)
+                total = Int(J.str(data, "total_items")) ?? total
+                items += J.dicts(data, "items").compactMap(NaukriSheet.feedJob)
+                naukriSheetStatus = "Reading your Naukri sheet… page \(page) of \(totalPages)"
+                page += 1
+                if page <= totalPages { try await Task.sleep(nanoseconds: 300_000_000) }
+            } while page <= totalPages && page <= 200
+            // The sheet can list the same posting twice (e.g. under two categories) — keep one.
+            var seen = Set<String>()
+            items = items.filter { seen.insert($0.id).inserted }
+            let added = mergeFeed(items, owns: { $0.source == NaukriSheet.source })
+            naukriSheetLast = Date()
+            naukriSheetCount = items.count
+            naukriSheetStatus = "Naukri sheet: \(items.count) jobs\(added > 0 ? ", \(added) new" : "")"
+            scheduleFeedMatching()
+        } catch {
+            naukriSheetStatus = "Naukri sheet: \(error.localizedDescription)"
+        }
     }
 
     func rescoreFeedLocally() {
@@ -458,5 +513,47 @@ extension AppStore {
         guard code == 204 else {
             throw GroqError(message: "Couldn't start the collector (HTTP \(code)): \(resp["message"] as? String ?? "")")
         }
+    }
+}
+
+/// Your own job list at rajakrishna.in/naukri ("Sheet View"), read through the site's fetch_stored_jobs endpoint.
+enum NaukriSheet {
+    static let source = "naukri-sheet"
+    static let defaultEndpoint = "https://rajakrishna.in/wp-admin/admin-ajax.php"
+    static let action = "fetch_stored_jobs"
+
+    static var enabled: Bool { UserDefaults.standard.object(forKey: "naukriSheetEnabled") as? Bool ?? true }
+    static var endpoint: String {
+        let e = UserDefaults.standard.string(forKey: "naukriSheetURL") ?? ""
+        return e.isEmpty ? defaultEndpoint : e
+    }
+
+    /// Stable id from the Naukri link (falls back to company + designation).
+    static func id(_ link: String, _ company: String, _ title: String) -> String {
+        let key = AppStore.urlKey(link).isEmpty ? AppStore.norm(company + " " + title) : AppStore.urlKey(link)
+        var h: UInt64 = 0xcbf29ce484222325           // FNV-1a
+        for b in key.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return "nk-" + String(h, radix: 16)
+    }
+
+    static func feedJob(_ d: [String: Any]) -> FeedJob? {
+        let title = J.str(d, "designation"), company = J.str(d, "company")
+        guard !title.isEmpty else { return nil }
+        let link = J.str(d, "link")
+        var f = FeedJob(json: ["id": id(link, company, title), "title": title])!
+        f.source = source
+        f.publisher = "Naukri"
+        f.company = company
+        f.location = J.str(d, "location")
+        f.experience = J.str(d, "experience")
+        f.url = link
+        let jd = J.str(d, "jd"), about = J.str(d, "about")
+        f.description = [jd, about].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        f.snippet = jd.count < 400
+        f.posted = J.str(d, "date")
+        f.firstSeen = ISO8601DateFormatter().string(from: Date())
+        let cat = J.str(d, "pos").replacingOccurrences(of: "-", with: " ")
+        f.category = cat.isEmpty ? nil : cat
+        return f
     }
 }

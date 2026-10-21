@@ -50,6 +50,9 @@ final class AppStore: ObservableObject {
     @Published var feedMatchQueue: [String] = []
     var feedWorker: Task<Void, Never>?
     var feedTimer: Timer?
+    @Published var naukriSheetStatus: String?
+    @Published var naukriSheetCount = 0
+    var naukriSheetLast: Date?
 
     // Actions & workload commentary (see Actions.swift)
     @Published var commentaryBusy = false

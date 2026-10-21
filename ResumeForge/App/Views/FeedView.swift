@@ -15,7 +15,11 @@ struct FeedView: View {
         return store.feed
             .filter { !hideDismissed || $0.status != "dismissed" }
             .filter { !noConflictsOnly || $0.conflicts == 0 }
-            .filter { sourceFilter == "all" || $0.source == sourceFilter }
+            .filter { f in
+                if sourceFilter == "all" { return true }
+                if sourceFilter.hasPrefix("cat:") { return f.category == String(sourceFilter.dropFirst(4)) }
+                return f.source == sourceFilter
+            }
             .filter { q.isEmpty || ($0.title + " " + $0.company + " " + $0.location).lowercased().contains(q) }
             .sorted { a, b in
                 // AI-checked first, then by score
@@ -26,6 +30,7 @@ struct FeedView: View {
     }
 
     private var sources: [String] { Array(Set(store.feed.map(\.source))).sorted() }
+    private var categories: [String] { Array(Set(store.feed.compactMap(\.category))).sorted() }
 
     var body: some View {
         HSplitView {
@@ -51,7 +56,11 @@ struct FeedView: View {
                     Spacer()
                     Picker("", selection: $sourceFilter) {
                         Text("All sources").tag("all")
-                        ForEach(sources, id: \.self) { Text($0).tag($0) }
+                        ForEach(sources, id: \.self) { Text($0 == NaukriSheet.source ? "My Naukri sheet" : $0).tag($0) }
+                        if !categories.isEmpty {
+                            Divider()
+                            ForEach(categories, id: \.self) { Text("Category: \($0)").tag("cat:" + $0) }
+                        }
                     }
                     .labelsHidden()
                     .frame(width: 130)
@@ -65,6 +74,8 @@ struct FeedView: View {
             Group {
                 if let id = selected, let f = store.feed.first(where: { $0.id == id }) {
                     FeedDetail(job: f).id(id)
+                } else if store.feed.isEmpty && store.naukriSheetStatus?.hasPrefix("Reading") == true {
+                    VStack(spacing: 10) { ProgressView(); Text(store.naukriSheetStatus ?? "") }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if store.feed.isEmpty {
                     FeedEmptyState()
                 } else {
@@ -80,8 +91,13 @@ struct FeedView: View {
             HStack {
                 Text("Job Feed").font(.headline)
                 Spacer()
-                Button { Task { await store.refreshFeed(manual: true) } } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Fetch the latest feed")
+                Button {
+                    Task {
+                        await store.refreshFeed(manual: true)
+                        await store.refreshNaukriSheet(manual: true)
+                    }
+                } label: { Image(systemName: "arrow.clockwise") }
+                    .help("Fetch the latest feed and your Naukri sheet")
                 Button("Collect now") {
                     store.run("Starting the GitHub collector…") {
                         try await store.runCollectorNow()
@@ -96,7 +112,10 @@ struct FeedView: View {
                 Text("Updated \(t.formatted(date: .omitted, time: .shortened)) · \(store.feed.count) jobs")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let e = store.feedError {
+            if let s = store.naukriSheetStatus {
+                Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if let e = store.feedError, store.feed.isEmpty || !e.hasPrefix("No job feed yet") {
                 Text(e).font(.caption).foregroundStyle(.orange).lineLimit(3)
             }
             if !store.feedErrors.isEmpty {
@@ -142,7 +161,8 @@ struct FeedRow: View {
                 Text([job.company, job.location].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 HStack(spacing: 6) {
-                    Pill(text: job.publisher.isEmpty ? job.source : job.publisher, color: .gray)
+                    Pill(text: job.publisher.isEmpty ? job.source : job.publisher, color: job.source == NaukriSheet.source ? .blue : .gray)
+                    if let c = job.category { Pill(text: c, color: .purple) }
                     if job.conflicts > 0 { Pill(text: "\(job.conflicts) conflict\(job.conflicts == 1 ? "" : "s")", color: .red) }
                     if job.status == "added" { Pill(text: "in Jobs", color: .green) }
                     if job.status == "dismissed" { Pill(text: "dismissed", color: .gray) }
@@ -286,6 +306,8 @@ struct FeedSettingsView: View {
     @AppStorage("feedAutoAdd") private var autoAdd = false
     @AppStorage("feedAutoAddScore") private var autoAddScore = 80
     @AppStorage("yearsExperience") private var years = 0
+    @AppStorage("naukriSheetEnabled") private var sheetEnabled = true
+    @AppStorage("naukriSheetURL") private var sheetURL = ""
 
     @State private var token = ""
     @State private var roles = ""
@@ -319,6 +341,21 @@ struct FeedSettingsView: View {
                 Text("GitHub collector")
             } footer: {
                 Text("\(repo) is public, so your search terms and the collected listings are visible to anyone. Your API keys stay secret: GitHub never shows secrets, even in public repos.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Include my Naukri sheet (rajakrishna.in/naukri)", isOn: $sheetEnabled)
+                TextField("Endpoint", text: $sheetURL, prompt: Text(NaukriSheet.defaultEndpoint))
+                    .font(.callout.monospaced())
+                HStack {
+                    Button("Fetch now") { Task { await store.refreshNaukriSheet(manual: true) } }
+                    if let s = store.naukriSheetStatus { Text(s).font(.caption).foregroundStyle(.secondary) }
+                }
+            } header: {
+                Text("My Naukri sheet")
+            } footer: {
+                Text("Reads the same jobs as Sheet View on your page (full JD, company, experience, Naukri link). It's fetched from your Mac when the app opens and every 2 hours, then merged into the Job Feed and scored like everything else.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
