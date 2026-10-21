@@ -420,6 +420,8 @@ struct DeliveryMiniChart: View {
     let symbol: String
     @ObservedObject var lw: LWChartHolder
     var syncNote: String? = nil
+    /// Optional day (yyyy-MM-dd) to centre the chart on, e.g. a multibagger's move — about 4 months before to 3 after.
+    var focus: String? = nil
     @ObservedObject private var dc = DeliveryCenter.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("deliv.length") private var length = 300
@@ -458,7 +460,7 @@ struct DeliveryMiniChart: View {
             if s != nil { LWChartView(holder: lw) }
         }
         .onAppear { dc.loadIfNeeded(); push() }
-        .task(id: symbol) { push() }
+        .task(id: symbol + "|" + (focus ?? "")) { push() }
         .onChange(of: dc.revision) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
@@ -472,6 +474,19 @@ struct DeliveryMiniChart: View {
         lw.show(LWChartData.make(symbol: sym, series: s, candles: [], metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: ChartLayer.decode(layersRaw)))
+        if let f = focus, let w = Self.window(around: f) {
+            let holder = lw
+            for delay in [0.5, 1.5] {            // after the data has been drawn (first load can take a moment)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { holder.setRange(from: w.0, to: w.1) }
+            }
+        }
+    }
+
+    /// ~120 calendar days before to ~90 after `day`.
+    static func window(around day: String) -> (String, String)? {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: day) else { return nil }
+        return (f.string(from: d.addingTimeInterval(-120 * 86_400)), f.string(from: d.addingTimeInterval(90 * 86_400)))
     }
 }
 

@@ -9,6 +9,7 @@ struct ChartReelView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @StateObject private var pool = ReelPool()
+    @StateObject private var deliveryLW = LWChartHolder()
 
     @AppStorage("reel.source") private var source = ReelSource.gainers.rawValue
     @AppStorage("reel.column") private var column = ""
@@ -221,7 +222,7 @@ struct ChartReelView: View {
                 ForEach(ReelLayout.allCases) { Text($0.rawValue).tag($0.rawValue) }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .help("Chart 1 only, Chart 2 only, both (side by side / stacked), or 1 → 2: Chart 1 then Chart 2 for each stock")
+            .help("Chart 1 only, Chart 2 only, both (side by side / stacked), 1 → 2: Chart 1 then Chart 2 for each stock, or Chart 1 with the NSE delivery chart under it")
             Menu {
                 Toggle("Preload the next charts (faster, uses more memory)", isOn: $preload)
                 Divider()
@@ -330,6 +331,12 @@ struct ChartReelView: View {
             case .side: HSplitView { chartPane(it, 0); chartPane(it, 1) }
             case .stacked: VSplitView { chartPane(it, 0); chartPane(it, 1) }
             case .sequence: chartPane(it, phase)
+            case .withDelivery:
+                VSplitView {
+                    chartPane(it, 0).frame(minHeight: 250)
+                    DeliveryMiniChart(symbol: it.symbol, lw: deliveryLW, focus: it.goTo)
+                        .frame(minHeight: 110, idealHeight: 230)
+                }
             }
         } else {
             Color.clear
@@ -489,7 +496,7 @@ struct ChartReelView: View {
         shown = i
         guard preload else { return }
         let l = ReelLayout(rawValue: layout) ?? .chart1
-        let cols: [Int] = l == .chart1 ? [0] : (l == .chart2 ? [1] : [0, 1])
+        let cols: [Int] = l == .chart1 || l == .withDelivery ? [0] : (l == .chart2 ? [1] : [0, 1])
         var urls: [(URL, Int, String?)] = []
         for j in [i, i + 1, i + 2, i - 1] where list.indices.contains(j) {
             for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
@@ -506,7 +513,7 @@ enum ReelSource: String, CaseIterable, Identifiable {
 }
 
 enum ReelLayout: String, CaseIterable, Identifiable {
-    case chart1 = "Chart 1", chart2 = "Chart 2", side = "Both ⇆", stacked = "Both ⇅", sequence = "1 → 2"
+    case chart1 = "Chart 1", chart2 = "Chart 2", side = "Both ⇆", stacked = "Both ⇅", sequence = "1 → 2", withDelivery = "1 + Delivery"
     var id: String { rawValue }
 }
 

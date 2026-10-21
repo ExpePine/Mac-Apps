@@ -97,10 +97,14 @@ struct MultibaggerView: View {
                 SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 120)
                 Spacer()
                 if let s = mb.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                Button { openReel(start: nil) } label: { Label("Chart Reel (both charts)", systemImage: "film.stack") }
-                    .buttonStyle(.borderedProminent)
+                Menu {
+                    Button("Both charts side by side") { openReel(start: nil, layout: .side) }
+                    Button("Chart 1 + Delivery chart") { openReel(start: nil, layout: .withDelivery) }
+                    Button("Chart 1 → Chart 2") { openReel(start: nil, layout: .sequence) }
+                } label: { Label("Chart Reel", systemImage: "film.stack") } primaryAction: { openReel(start: nil) }
+                    .fixedSize()
                     .disabled(shown.isEmpty)
-                    .help("Flick through these multibaggers — Chart 1 and Chart 2 side by side, each jumped to the move's date")
+                    .help("Flick through these multibaggers, jumped to the move's date — click for your last layout, or pick: both charts, Chart 1 + Delivery chart, Chart 1 → Chart 2")
             }
         }
         .controlSize(.small)
@@ -155,6 +159,7 @@ struct MultibaggerView: View {
             .contextMenu(forSelectionType: MBEvent.ID.self) { ids in
                 if let id = ids.first, let e = rows.first(where: { $0.id == id }) {
                     Button("Chart Reel from \(e.symbol)") { openReel(start: e.id) }
+                    Button("Chart Reel (Chart 1 + Delivery) from \(e.symbol)") { openReel(start: e.id, layout: .withDelivery) }
                     Button("Copy date \(e.day(for: MBCenter(rawValue: centerRaw) ?? .start))") {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(e.day(for: MBCenter(rawValue: centerRaw) ?? .start), forType: .string)
                     }
@@ -164,14 +169,15 @@ struct MultibaggerView: View {
     }
 
     /// Hands the current list to the Chart Reel (both charts) and opens it.
-    private func openReel(start: MBEvent.ID?) {
+    private func openReel(start: MBEvent.ID?, layout: ReelLayout? = nil) {
         let d = UserDefaults.standard
         d.set(ReelSource.multibaggers.rawValue, forKey: "reel.source")
         d.set(month ?? "", forKey: "reel.mbMonth")
         d.set(scope, forKey: "reel.mbScope")
         d.set(start ?? "", forKey: "reel.mbStart")
         let l = ReelLayout(rawValue: d.string(forKey: "reel.layout") ?? "") ?? .chart1
-        if l == .chart1 || l == .chart2 { d.set(ReelLayout.side.rawValue, forKey: "reel.layout") }
+        if let layout { d.set(layout.rawValue, forKey: "reel.layout") }
+        else if l == .chart1 || l == .chart2 { d.set(ReelLayout.side.rawValue, forKey: "reel.layout") }
         openWindow(id: "reel")
     }
 }
