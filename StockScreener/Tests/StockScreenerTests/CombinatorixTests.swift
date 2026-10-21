@@ -374,3 +374,58 @@ final class GainerChartsTests: XCTestCase {
         XCTAssertNil(GainerChartsView.monthChange(s, day: "2026-10-21", window: .calendar))   // no bar that day
     }
 }
+
+final class AutoPredictTests: XCTestCase {
+    private func result(labeled: Int = 20, gainers: Int = 30) -> CombiHorizonResult {
+        var r = CombiHorizonResult()
+        r.horizon = .monthly
+        r.labeledDays = labeled
+        r.gainers = gainers
+        r.baseRate = 0.05
+        r.signals = [CombiSignal(name: "MS High (> 90)", kind: .level, group: "L:MS", column: "MS", flavour: "high"),
+                     CombiSignal(name: "DS High (> 80)", kind: .level, group: "L:DS", column: "DS", flavour: "high")]
+        var good = CombiCombo(signals: [0, 1], text: "MS High (> 90) + DS High (> 80)", total: 100, gainers: 20, hitRate: 0.2, lift: 4, safeLift: 2.5, pValue: 0.001)
+        good.testTotal = 40; good.testGainers = 10; good.testLift = 5; good.heldUp = true; good.todayMatches = ["AAA"]
+        var faded = CombiCombo(signals: [0], text: "MS High (> 90)", total: 300, gainers: 30, hitRate: 0.1, lift: 2, safeLift: 1.5, pValue: 0.01)
+        faded.testTotal = 50; faded.testGainers = 2; faded.testLift = 0.8; faded.heldUp = false; faded.todayMatches = ["AAA", "BBB"]
+        r.combos = [good, faded]
+        return r
+    }
+
+    func testActiveUsesOnlyProvenCombos() {
+        let s = APEngine.update(APState(), result: result(), liveDay: "2026-10-20", book: PriceBook(), threshold: 30)
+        XCTAssertEqual(s.phase, .active)
+        XCTAssertEqual(s.predictions.map(\.symbol), ["AAA"])
+        XCTAssertEqual(s.predictions[0].ruleKeys.count, 1)
+        XCTAssertEqual(s.runs.count, 1)
+    }
+
+    func testWaitsForEnoughData() {
+        let s = APEngine.update(APState(), result: result(labeled: 5), liveDay: "2026-10-20", book: PriceBook(), threshold: 30)
+        XCTAssertEqual(s.phase, .collecting)
+        XCTAssertTrue(s.predictions.isEmpty)
+    }
+
+    func testRetiresComboThatFailsLive() {
+        let first = APEngine.update(APState(), result: result(), liveDay: "2026-09-01", book: PriceBook(), threshold: 30)
+        let key = first.predictions[0].ruleKeys[0]
+        var old = first
+        old.predictions = (0..<8).map { i in
+            var p = APPrediction(day: "2026-08-\(10 + i)", symbol: "X\(i)", close: 1, chance: 0.1, rules: ["r"], ruleKeys: [key])
+            p.outcome = 2; p.hit = false
+            return p
+        }
+        let s = APEngine.update(old, result: result(), liveDay: "2026-10-20", book: PriceBook(), threshold: 30)
+        XCTAssertTrue(s.rules.first { $0.key == key }!.retired)
+        XCTAssertEqual(s.phase, .learning)
+        XCTAssertTrue(s.predictions.filter { $0.day == "2026-10-20" }.isEmpty)
+        XCTAssertEqual(s.liveHitRate, 0)
+    }
+
+    func testSameDayRerunReplacesPredictions() {
+        let a = APEngine.update(APState(), result: result(), liveDay: "2026-10-20", book: PriceBook(), threshold: 30)
+        let b = APEngine.update(a, result: result(), liveDay: "2026-10-20", book: PriceBook(), threshold: 30)
+        XCTAssertEqual(b.predictions.count, 1)
+        XCTAssertEqual(b.runs.count, 1)
+    }
+}

@@ -21,7 +21,7 @@ struct AlertsBrowserView: View {
     }
 
     enum KindFilter: String, CaseIterable, Identifiable {
-        case all = "All", alerts = "Alerts", emails = "Emails"
+        case all = "All", alerts = "Alerts", emails = "Emails", auto = "AUTO-PREDICT"
         var id: String { rawValue }
     }
 
@@ -77,6 +77,8 @@ struct AlertsBrowserView: View {
             }
             .fixedSize()
             Spacer()
+            Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT…", systemImage: "wand.and.stars") }
+                .help("Stocks AUTO-PREDICT expects to gain ≥ 30% within a month — turn “Show predictions in Alerts” on there")
         }
         .padding(10)
     }
@@ -167,6 +169,7 @@ struct AlertsBrowserView: View {
             if let start, e.date < start { return false }
             if kind == .alerts && e.kind != .alert { return false }
             if kind == .emails && e.kind != .email { return false }
+            if kind == .auto && e.ruleID != AutoPredictCenter.alertRuleID { return false }
             if rule != "All rules" && e.ruleName != rule { return false }
             if !q.isEmpty {
                 let hay = ([e.stock, e.ruleName, e.conditions] + e.values).joined(separator: " ")

@@ -241,6 +241,9 @@ final class ScreenerViewModel: ObservableObject {
             self.setTableKeepingRaw()
         }
         DeliveryCenter.shared.loadIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            if let self { AutoPredictCenter.shared.runIfDue(self) }
+        }
         observeWakeAndActivation()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
@@ -618,6 +621,7 @@ final class ScreenerViewModel: ObservableObject {
             }.value
             self?.historyDays = info.0
             self?.historyBytes = info.1
+            if let self { AutoPredictCenter.shared.runIfDue(self) }     // a new day → AUTO-PREDICT re-learns
         }
     }
 

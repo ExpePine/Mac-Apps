@@ -4,7 +4,7 @@ extension ScreenerViewModel {
 
     /// The signals Combinatorix tests besides the column levels: each Filter condition / group, the whole Filter,
     /// and every alert rule — each compiled against today's columns.
-    private func combiConditions() -> [(name: String, kind: CombiKind, filter: FilterGroup, pred: RowPredicate)] {
+    func combiConditions() -> [(name: String, kind: CombiKind, filter: FilterGroup, pred: RowPredicate)] {
         var out: [(String, CombiKind, FilterGroup, RowPredicate)] = []
         var issues: [String] = []
         func add(_ name: String, _ kind: CombiKind, _ g: FilterGroup) {
