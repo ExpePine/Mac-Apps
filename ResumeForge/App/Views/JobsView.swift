@@ -18,6 +18,7 @@ struct JobsView: View {
                             }
                             HStack(spacing: 6) {
                                 Pill(text: job.source)
+                                if job.appliedAt != nil { Pill(text: "applied", color: .green) }
                                 if let st = job.stage, st != .done {
                                     StagePill(stage: st)
                                 } else if job.tailored != nil {
@@ -146,6 +147,14 @@ struct JobDetailView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if let applied = job.appliedAt {
+                Label("Applied \(applied.formatted(date: .abbreviated, time: .omitted))", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+            } else if !job.url.isEmpty {
+                Button { store.applyJob(jobID) } label: { Label("Apply", systemImage: "paperplane.fill") }
+                    .buttonStyle(.borderedProminent).tint(.green)
+                    .help("Opens the posting to apply and tracks it, with a follow-up action in 5 days")
+            }
             if let url = URL(string: job.url), !job.url.isEmpty {
                 Link(destination: url) { Label("Open posting", systemImage: "safari") }
             }

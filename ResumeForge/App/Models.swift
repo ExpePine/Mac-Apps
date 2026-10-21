@@ -28,6 +28,7 @@ struct JobPosting: Codable, Identifiable, Hashable {
     var autoStage: String?
     var autoError: String?
     var match: MatchResult?         // fit score + conflicts against your profile and stories
+    var appliedAt: Date?
     var feedKey: String?            // set when the job came from the GitHub job feed
 }
 

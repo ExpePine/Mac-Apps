@@ -9,11 +9,14 @@ struct FeedView: View {
     @State private var hideDismissed = true
     @State private var noConflictsOnly = false
     @State private var sourceFilter = "all"
+    @AppStorage("feedSort") private var sortMode = "best"
+    @AppStorage("feedHideApplied") private var hideApplied = false
 
     private var items: [FeedJob] {
         let q = search.lowercased()
         return store.feed
             .filter { !hideDismissed || $0.status != "dismissed" }
+            .filter { !hideApplied || $0.appliedAt == nil }
             .filter { !noConflictsOnly || $0.conflicts == 0 }
             .filter { f in
                 if sourceFilter == "all" { return true }
@@ -22,10 +25,19 @@ struct FeedView: View {
             }
             .filter { q.isEmpty || ($0.title + " " + $0.company + " " + $0.location).lowercased().contains(q) }
             .sorted { a, b in
-                // AI-checked first, then by score
-                let ak = (a.match?.local ?? true) ? 0 : 1, bk = (b.match?.local ?? true) ? 0 : 1
-                if ak != bk { return ak > bk }
-                return a.score != b.score ? a.score > b.score : a.firstSeen > b.firstSeen
+                // Re-sorted live: as background AI checks finish, jobs move to their new place.
+                switch sortMode {
+                case "newest":
+                    return a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.score > b.score
+                case "company":
+                    return a.company.localizedCaseInsensitiveCompare(b.company) == .orderedAscending
+                case "checked":
+                    let ak = (a.match?.local ?? true) ? 0 : 1, bk = (b.match?.local ?? true) ? 0 : 1
+                    if ak != bk { return ak > bk }
+                    return a.score > b.score
+                default:   // best match
+                    return a.score != b.score ? a.score > b.score : a.firstSeen > b.firstSeen
+                }
             }
     }
 
@@ -41,6 +53,7 @@ struct FeedView: View {
                     ForEach(items) { f in
                         FeedRow(job: f).tag(f.id)
                             .contextMenu {
+                                Button("Apply (open link)") { store.applyFeedJob(f.id) }.disabled(f.url.isEmpty)
                                 Button("Add to my Jobs") { store.addFeedJobToJobs(f.id) }
                                 Button("Check fit with AI") { store.queueFeedMatch(f.id) }
                                 Divider()
@@ -52,6 +65,7 @@ struct FeedView: View {
                 Divider()
                 HStack {
                     Toggle("Hide dismissed", isOn: $hideDismissed)
+                    Toggle("Hide applied", isOn: $hideApplied)
                     Toggle("No conflicts", isOn: $noConflictsOnly)
                     Spacer()
                     Picker("", selection: $sourceFilter) {
@@ -91,6 +105,15 @@ struct FeedView: View {
             HStack {
                 Text("Job Feed").font(.headline)
                 Spacer()
+                Picker("Sort", selection: $sortMode) {
+                    Text("Best match").tag("best")
+                    Text("AI-checked first").tag("checked")
+                    Text("Newest").tag("newest")
+                    Text("Company A–Z").tag("company")
+                }
+                .labelsHidden()
+                .frame(width: 140)
+                .help("The list re-sorts by itself as background fit checks finish")
                 Button {
                     Task {
                         await store.refreshFeed(manual: true)
@@ -115,6 +138,7 @@ struct FeedView: View {
             if let s = store.naukriSheetStatus {
                 Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+            BackgroundCheckStatus()
             if let e = store.feedError, store.feed.isEmpty || !e.hasPrefix("No job feed yet") {
                 Text(e).font(.caption).foregroundStyle(.orange).lineLimit(3)
             }
@@ -164,7 +188,8 @@ struct FeedRow: View {
                     Pill(text: job.publisher.isEmpty ? job.source : job.publisher, color: job.source == NaukriSheet.source ? .blue : .gray)
                     if let c = job.category { Pill(text: c, color: .purple) }
                     if job.conflicts > 0 { Pill(text: "\(job.conflicts) conflict\(job.conflicts == 1 ? "" : "s")", color: .red) }
-                    if job.status == "added" { Pill(text: "in Jobs", color: .green) }
+                    if job.appliedAt != nil { Pill(text: "applied", color: .green) }
+                    else if job.status == "added" { Pill(text: "in Jobs", color: .green) }
                     if job.status == "dismissed" { Pill(text: "dismissed", color: .gray) }
                 }
             }
@@ -225,22 +250,31 @@ struct FeedDetail: View {
                         .font(.caption).foregroundStyle(.tertiary)
                 }
                 HStack {
+                    if let applied = job.appliedAt {
+                        Label("Applied \(applied.formatted(date: .abbreviated, time: .omitted))", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Color.green.opacity(0.12), in: Capsule())
+                    } else if !job.url.isEmpty {
+                        Button { store.applyFeedJob(job.id) } label: { Label("Apply", systemImage: "paperplane.fill") }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                            .help("Opens the \(job.publisher.isEmpty ? "job" : job.publisher) link to apply, and tracks it: Jobs ▸ Applied, plus a follow-up action in 5 days")
+                    }
                     if job.status == "added", let jid = job.jobID {
                         Button { store.section = .jobs; store.selectedJobID = jid } label: { Label("Open in Jobs", systemImage: "briefcase") }
-                            .buttonStyle(.borderedProminent)
                     } else {
                         Button { if let id = store.addFeedJobToJobs(job.id) { store.selectedJobID = id } } label: {
                             Label("Add to my Jobs", systemImage: "plus.circle")
                         }
-                        .buttonStyle(.borderedProminent)
                         .help("Adds it to Jobs, where the background steps write your resume")
                     }
-                    if let url = URL(string: job.url), !job.url.isEmpty {
+                    if let url = URL(string: job.url), !job.url.isEmpty, job.appliedAt != nil {
                         Button { NSWorkspace.shared.open(url) } label: { Label("Open posting", systemImage: "safari") }
-                            .help("Opens in your browser. On Naukri/Wellfound the Safari extension captures the full JD.")
                     }
-                    Button { store.queueFeedMatch(job.id) } label: { Label(job.match?.local == false ? "Re-check fit" : "Check fit with AI", systemImage: "sparkles") }
+                    Button { store.queueFeedMatch(job.id) } label: { Label(job.match?.local == false ? "Re-check" : "Check fit", systemImage: "sparkles") }
                         .disabled(store.feedMatchQueue.contains(job.id))
+                        .help("Runs in the background — keep browsing")
                     Spacer()
                     Button(job.status == "dismissed" ? "Restore" : "Dismiss") {
                         if let i = store.feedIndex(job.id) {
@@ -248,8 +282,13 @@ struct FeedDetail: View {
                         }
                     }
                 }
-                if store.feedMatchQueue.contains(job.id) {
+                if store.feedMatchQueue.first == job.id {
                     HStack { ProgressView().controlSize(.small); Text("Checking fit with AI…").font(.callout) }
+                } else if store.feedMatchQueue.contains(job.id) {
+                    Label("Queued for a background fit check", systemImage: "clock").font(.callout).foregroundStyle(.secondary)
+                } else if let m = job.match, !m.local, m.basis != store.matchBasis {
+                    Label("Your stories changed since this check — it'll be re-checked in the background", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if let m = job.match { MatchCard(match: m) }
                 Divider()
@@ -301,7 +340,8 @@ struct FeedSettingsView: View {
     @AppStorage("feedEnabled") private var enabled = true
     @AppStorage("feedRepo") private var repo = FeedSettings.defaultRepo
     @AppStorage("feedAIMatch") private var aiMatch = true
-    @AppStorage("feedAIPerDay") private var aiPerDay = 15
+    @AppStorage("feedAIPerDay") private var aiPerDay = 60
+    @AppStorage("feedRecheck") private var recheck = true
     @AppStorage("feedMinLocal") private var minLocal = 45
     @AppStorage("feedAutoAdd") private var autoAdd = false
     @AppStorage("feedAutoAddScore") private var autoAddScore = 80
@@ -400,7 +440,8 @@ struct FeedSettingsView: View {
                 Stepper("Your total experience: \(years == 0 ? "from Profile (\(MatchScorer.years(store.data.profile)) yrs)" : "\(years) yrs")",
                         value: $years, in: 0...45)
                 Toggle("Check the best matches with AI", isOn: $aiMatch)
-                Stepper("Up to \(aiPerDay) AI fit checks a day", value: $aiPerDay, in: 0...100, step: 5).disabled(!aiMatch)
+                Stepper("Up to \(aiPerDay) AI fit checks a day", value: $aiPerDay, in: 0...500, step: 10).disabled(!aiMatch)
+                Toggle("Re-check in the background when my stories or profile change", isOn: $recheck).disabled(!aiMatch)
                 Stepper("Only if the quick score is at least \(minLocal)", value: $minLocal, in: 0...90, step: 5).disabled(!aiMatch)
                 Toggle("Add strong matches to Jobs automatically", isOn: $autoAdd)
                 Stepper("…when the AI scores \(autoAddScore)+ with no conflicts", value: $autoAddScore, in: 50...95, step: 5).disabled(!autoAdd)
@@ -466,5 +507,28 @@ struct FeedSettingsView: View {
         } catch {
             status = error.localizedDescription
         }
+    }
+}
+
+/// "AI checks: 23 done · 12 queued · 37 left today" — the background fit-check worker's progress.
+struct BackgroundCheckStatus: View {
+    @EnvironmentObject var store: AppStore
+    var body: some View {
+        if FeedSettings.aiMatch && ProviderSettings.anyKeyConfigured {
+            HStack(spacing: 6) {
+                if !store.feedMatchQueue.isEmpty { ProgressView().controlSize(.mini) }
+                Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .help("Fit checks run in the background, best quick scores first, then re-checks of jobs judged on older stories. Daily limit in Settings ▸ Job Feed.")
+        }
+    }
+    private var text: String {
+        var parts: [String] = []
+        if store.feedChecksDone > 0 { parts.append("\(store.feedChecksDone) checked") }
+        if !store.feedMatchQueue.isEmpty { parts.append("\(store.feedMatchQueue.count) queued") }
+        let stale = store.feedStaleCount
+        if stale > 0 { parts.append("\(stale) to re-check") }
+        parts.append("\(store.feedChecksLeftToday) left today")
+        return "AI checks: " + parts.joined(separator: " · ")
     }
 }

@@ -85,6 +85,12 @@ In the app, **Job Feed** lists every job with a fit score:
 - **Quick score (free, on your Mac):** keyword overlap, title, location and years of experience.
 - **AI fit check (top matches only):** a score plus **conflicts** (likely deal-breakers), **gaps** you could address, and strengths.
 
+**Apply** (green button) opens the job's link, such as the Naukri link from your sheet, so you can apply. The app then tracks the application: the job moves into Jobs marked *Applied*, a done "Applied" action is logged, and a follow-up action is set for 5 days later.
+
+**Sorting:** Best match, AI-checked first, Newest, or Company A–Z. The list re-sorts by itself as background checks finish.
+
+**Background fit checks:** these run all the time, up to 60 a day by default. Unchecked jobs with the best quick score go first. Then the app re-checks any job that was judged against an older version of your stories or profile.
+
 **Add to my Jobs** sends a job through the background steps to your resume. You can also have strong matches (AI score ≥ 80, no conflicts) added automatically. Set roles, locations, the GitHub token, the number of daily AI checks and the auto-add rules under **Settings ▸ Job Feed**.
 
 ## Build

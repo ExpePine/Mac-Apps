@@ -13,6 +13,7 @@ struct MatchResult: Codable, Hashable {
     var why = ""
     var local = true
     var at = Date()
+    var basis: String?                  // fingerprint of your profile + stories when checked (re-check when they change)
 }
 
 /// A job from the GitHub job collector's feed.
@@ -31,6 +32,7 @@ struct FeedJob: Codable, Identifiable, Hashable {
     var snippet = true
     var firstSeen = ""
     var category: String?               // e.g. "Product-Manager" / "Edge-AI" from your Naukri sheet
+    var appliedAt: Date?
     var status = "new"                  // new | added | dismissed
     var match: MatchResult?
     var jobID: UUID?
@@ -65,7 +67,7 @@ enum FeedSettings {
 
     static func register() {
         UserDefaults.standard.register(defaults: [
-            "feedEnabled": true, "feedAIMatch": true, "feedAIPerDay": 15, "feedMinLocal": 45,
+            "feedEnabled": true, "feedAIMatch": true, "feedAIPerDay": 60, "feedMinLocal": 45, "feedRecheck": true,
             "feedAutoAdd": false, "feedAutoAddScore": 80, "yearsExperience": 0
         ])
     }
@@ -75,6 +77,7 @@ enum FeedSettings {
     static var minLocal: Int { UserDefaults.standard.integer(forKey: "feedMinLocal") }
     static var autoAdd: Bool { UserDefaults.standard.bool(forKey: "feedAutoAdd") }
     static var autoAddScore: Int { UserDefaults.standard.integer(forKey: "feedAutoAddScore") }
+    static var recheck: Bool { UserDefaults.standard.bool(forKey: "feedRecheck") }
 
     /// Roles/locations last saved for the collector (used for local scoring).
     static var roles: [String] { UserDefaults.standard.stringArray(forKey: "feedRoles") ?? [] }
@@ -271,6 +274,10 @@ extension AppStore {
     }
 
     func startFeedTimer() {
+        feedCheckTimer?.invalidate()
+        feedCheckTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.scheduleFeedMatching() }
+        }
         feedTimer?.invalidate()
         feedTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -346,16 +353,38 @@ extension AppStore {
         UserDefaults.standard.set(UserDefaults.standard.integer(forKey: key) + 1, forKey: key)
     }
 
+    /// Fingerprint of what the AI judges you on. When your profile or stories change, older AI checks are re-done in the background.
+    var matchBasis: String {
+        var s = data.profile.headline + "|" + data.profile.technicalSkills + "|" + data.profile.roles.map { $0.company + $0.title }.joined()
+        for st in data.stories {
+            s += "|" + String(st.id.uuidString.prefix(8)) + String(Int(st.updatedAt.timeIntervalSince1970))
+        }
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return String(h, radix: 16)
+    }
+
+    var feedChecksLeftToday: Int { max(0, FeedSettings.aiPerDay - aiMatchesToday) }
+    var feedStaleCount: Int {
+        let basis = matchBasis
+        return feed.filter { $0.status != "dismissed" && $0.match?.local == false && $0.match?.basis != basis }.count
+    }
+
+    /// Queues AI fit checks in the background: unchecked jobs (best quick score first), then re-checks of jobs
+    /// judged against an older version of your profile/stories. Stops at the daily cap.
     func scheduleFeedMatching() {
         guard FeedSettings.aiMatch, ProviderSettings.anyKeyConfigured else { return }
         let room = max(0, FeedSettings.aiPerDay - aiMatchesToday - feedMatchQueue.count)
         guard room > 0 else { return }
-        let candidates = feed
-            .filter { $0.status == "new" && ($0.match?.local ?? true) && $0.score >= FeedSettings.minLocal && $0.conflicts == 0 }
+        let basis = matchBasis
+        let live = feed.filter { $0.status != "dismissed" && $0.appliedAt == nil && !feedMatchQueue.contains($0.id) }
+        let unchecked = live
+            .filter { ($0.match?.local ?? true) && $0.score >= FeedSettings.minLocal && $0.conflicts == 0 }
             .sorted { $0.score > $1.score }
-            .prefix(room)
-            .map(\.id)
-        for id in candidates where !feedMatchQueue.contains(id) { feedMatchQueue.append(id) }
+        let stale = FeedSettings.recheck
+            ? live.filter { $0.match?.local == false && $0.match?.basis != basis }.sorted { $0.score > $1.score }
+            : []
+        for f in (unchecked + stale).prefix(room) { feedMatchQueue.append(f.id) }
         startFeedWorker()
     }
 
@@ -375,6 +404,7 @@ extension AppStore {
                     do {
                         let m = try await self.aiMatch(title: f.title, company: f.company, location: f.location, description: f.description)
                         if let k = self.feedIndex(id) { self.data.feed?[k].match = m }
+                        self.feedChecksDone += 1
                         self.countAIMatch()
                         self.autoAddIfStrong(id)
                     } catch {
@@ -406,6 +436,7 @@ extension AppStore {
         m.why = J.str(o, "why")
         if !m.hardConflicts.isEmpty { m.score = min(m.score, 55) }
         m.local = false
+        m.basis = matchBasis
         return m
     }
 
@@ -425,7 +456,7 @@ extension AppStore {
 
     /// Moves a feed job into Jobs (and the background steps). The match result comes along.
     @discardableResult
-    func addFeedJobToJobs(_ id: String) -> UUID? {
+    func addFeedJobToJobs(_ id: String, process: Bool = true) -> UUID? {
         guard let i = feedIndex(id) else { return nil }
         let f = feed[i]
         if let existing = f.jobID, jobIndex(existing) != nil { return existing }
@@ -448,8 +479,48 @@ extension AppStore {
         data.feed?[i].status = "added"
         data.feed?[i].jobID = j.id
         updateDockBadge()
-        if autoProcessEnabled { enqueueAuto(j.id) }
+        if process && autoProcessEnabled { enqueueAuto(j.id) }
         return j.id
+    }
+
+    // MARK: Apply
+
+    /// Opens the posting's link (from your sheet / the source) to apply, and records it:
+    /// the job goes into Jobs as Applied, with a done "Applied" action and a follow-up in 5 days.
+    func applyFeedJob(_ id: String) {
+        guard let i = feedIndex(id) else { return }
+        let f = feed[i]
+        if let url = URL(string: f.url), !f.url.isEmpty { NSWorkspace.shared.open(url) }
+        guard f.appliedAt == nil else { return }
+        let jobID = addFeedJobToJobs(id, process: false)
+        markApplied(jobID: jobID, feedID: id, company: f.company, title: f.title, url: f.url, via: f.publisher.isEmpty ? f.source : f.publisher)
+    }
+
+    func applyJob(_ jobID: UUID) {
+        guard let j = data.jobs.first(where: { $0.id == jobID }) else { return }
+        if let url = URL(string: j.url), !j.url.isEmpty { NSWorkspace.shared.open(url) }
+        guard j.appliedAt == nil else { return }
+        markApplied(jobID: jobID, feedID: j.feedKey, company: j.company, title: j.title, url: j.url, via: j.source)
+    }
+
+    private func markApplied(jobID: UUID?, feedID: String?, company: String, title: String, url: String, via _: String) {
+        let now = Date()
+        if let fid = feedID, let k = feedIndex(fid) { data.feed?[k].appliedAt = now }
+        if let jid = jobID, let k = jobIndex(jid) { data.jobs[k].appliedAt = now }
+        var done = ActionItem()
+        done.kind = "apply"; done.text = "Applied"; done.title = "Applied to \(title)\(company.isEmpty ? "" : " at \(company)")"
+        done.jobID = jobID; done.company = company; done.pageURL = url
+        done.status = "done"; done.doneAt = now; done.enriched = true
+        var follow = ActionItem()
+        follow.kind = "custom"; follow.text = "Follow up on application"
+        follow.title = "Follow up: \(title)\(company.isEmpty ? "" : " at \(company)")"
+        follow.jobID = jobID; follow.company = company; follow.pageURL = url
+        follow.due = Calendar.current.date(byAdding: .day, value: 5, to: now).flatMap { Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: $0) }
+        follow.dueText = "5 days after applying"; follow.enriched = true
+        var list = data.actions ?? []
+        list.insert(contentsOf: [follow, done], at: 0)
+        data.actions = list
+        scheduleCommentary()
     }
 
     // MARK: GitHub (save your search, run the collector)
