@@ -25,13 +25,27 @@ jobs:
           sw_vers
           swift --version
 
+      # On failure, the error lines are also posted as annotations (shown on the run page).
       - name: Unit tests (CSV parser + analysis)
-        run: swift test
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! swift test 2>&1 | tee test.log; then
+            msg="$(grep -E 'error:|failed|XCTAssert' test.log | grep -v '^\s*$' | head -40 | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            echo "::error title=swift test failed::${msg}"
+            exit 1
+          fi
 
       - name: Build app and DMG
+        shell: bash
         run: |
+          set -o pipefail
           chmod +x scripts/build-dmg.sh
-          ./scripts/build-dmg.sh "1.0.${{ github.run_number }}" "${{ github.run_number }}"
+          if ! ./scripts/build-dmg.sh "1.0.${{ github.run_number }}" "${{ github.run_number }}" 2>&1 | tee build.log; then
+            msg="$(grep -E 'error:' build.log | sort -u | head -40 | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            echo "::error title=build failed::${msg}"
+            exit 1
+          fi
 
       - name: Render screenshots (made-up sample data)
         continue-on-error: true
@@ -47,7 +61,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 3
         run: |
-          "dist/Samsara Expenses.app/Contents/MacOS/SamsaraExpenses" --probe-fetch
+          "dist/Samsara Expenses.app/Contents/MacOS/SamsaraExpenses" --probe-fetch | tee probe.log
+          echo "::notice title=probe::$(grep '^PROBE' probe.log | tr '\n' ' ')"
 
       - name: Upload screenshots
         if: always()
