@@ -344,3 +344,21 @@ final class JumpTests: XCTestCase {
         XCTAssertEqual(j ?? 0, 100.0 / 100.0, accuracy: 1e-9)   // PR at bar 6 (5 vs 1,1,1) = 100, now 100
     }
 }
+
+final class DelSmaTests: XCTestCase {
+    func testNilUntilEnoughBars() {
+        let x = (0..<321).map { Double($0) }
+        XCTAssertNil(DeliveryColumns.delSma(x, at: 320))
+        let y = (0..<322).map { Double($0) }
+        XCTAssertEqual(DeliveryColumns.delSma(y, at: 321), 100)   // rising series: SMA beats all 300 previous
+    }
+    func testMatchesManual() {
+        let x = (0..<400).map { Double(($0 * 37) % 101) }
+        let sm = DeliverySignal.sma(x, 22)
+        let valid = Array(sm[21...])
+        let i = 399
+        var c = 0
+        for k in (i - 21 - 300)..<(i - 21) where valid[k] <= valid[i - 21] { c += 1 }
+        XCTAssertEqual(DeliveryColumns.delSma(x, at: i)!, Double(c) / 300 * 100, accuracy: 1e-9)
+    }
+}

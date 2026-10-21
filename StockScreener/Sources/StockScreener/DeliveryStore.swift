@@ -285,6 +285,7 @@ struct DeliveryColumns {
     let safety: Double?      // ta.sma(DELIV_QTY, 100) × 0.05 (shares)
     var pctRank: Double? = nil   // ta.percentrank(DELIV_QTY, 300) on the latest day (0–100)
     var jump: Double? = nil      // JUMP (see DeliverySignal.jump)
+    var delSma: Double? = nil    // DELSMA = ta.percentrank(ta.sma(DELIV_QTY*close, 22), 300) (0–100)
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -304,7 +305,16 @@ struct DeliveryColumns {
         let safety: Double? = i >= 99 ? s.qty[(i - 99)...i].reduce(0, +) / 100 * 0.05 : nil
         let mode = UserDefaults.standard.integer(forKey: "deliv.jumpMode")
         return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
-                               jump: DeliverySignal.jump(m, at: i, mode: mode), day: latestDay)
+                               jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i), day: latestDay)
+    }
+
+    /// ta.percentrank(ta.sma(x, 22), 300) at bar i — Pine rules: the SMA is na for the first 21 bars, and the
+    /// percent rank needs 300 earlier SMA values, so it's nil until bar 21 + 300.
+    static func delSma(_ x: [Double], at i: Int, smaLength: Int = 22, length: Int = 300) -> Double? {
+        guard i < x.count, i >= smaLength - 1 + length else { return nil }
+        let sm = DeliverySignal.sma(Array(x[...i]), smaLength)
+        let valid = Array(sm[(smaLength - 1)...])
+        return percentRank(valid, length: length, at: valid.count - 1)
     }
 
     /// Binary search in sorted day keys.

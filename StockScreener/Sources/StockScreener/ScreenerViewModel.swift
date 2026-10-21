@@ -234,6 +234,10 @@ final class ScreenerViewModel: ObservableObject {
                 UserDefaults.standard.set(true, forKey: "deliv.colsAdded3")
                 for n in ["DLVR", "Safety", "DQ_PRANK", "JUMP"] where !self.settings.filterColumns.contains(n) { self.settings.filterColumns.append(n) }
             }
+            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAdded4") {
+                UserDefaults.standard.set(true, forKey: "deliv.colsAdded4")
+                if !self.settings.filterColumns.contains("DELSMA") { self.settings.filterColumns.append("DELSMA") }
+            }
             self.setTableKeepingRaw()
         }
         DeliveryCenter.shared.loadIfNeeded()
@@ -390,15 +394,17 @@ final class ScreenerViewModel: ObservableObject {
         let sName = t.index(of: "Safety") == nil ? "Safety" : "Safety (NSE)"
         let pName = t.index(of: "DQ_PRANK") == nil ? "DQ_PRANK" : "DQ_PRANK (NSE)"
         let jName = t.index(of: "JUMP") == nil ? "JUMP" : "JUMP (NSE)"
+        let mName = t.index(of: "DELSMA") == nil ? "DELSMA" : "DELSMA (NSE)"
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
-            let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump      // DLVR 0 = no new 300-day high today
+            let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump, ms = c?.delSma      // DLVR 0 = no new 300-day high today
             return SheetRow(id: row.id,
                             cells: row.cells + [d == 0 ? "0" : String(format: "%.2f", d), sf.map { String(format: "%.0f", $0) } ?? "",
-                                                pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? ""],
-                            numbers: row.numbers + [d, sf, pr, jp])
+                                                pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? "",
+                                                ms.map { String(format: "%.1f", $0) } ?? ""],
+                            numbers: row.numbers + [d, sf, pr, jp, ms])
         }
-        let extra = [dName, sName, pName, jName]
+        let extra = [dName, sName, pName, jName, mName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
