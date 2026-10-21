@@ -362,3 +362,15 @@ final class DelSmaTests: XCTestCase {
         XCTAssertEqual(DeliveryColumns.delSma(x, at: i)!, Double(c) / 300 * 100, accuracy: 1e-9)
     }
 }
+
+final class GainerChartsTests: XCTestCase {
+    func testMonthChange() {
+        var days: [String] = [], closes: [Double] = []
+        for d in 1...30 { days.append(String(format: "2026-09-%02d", d)); closes.append(100) }
+        for d in 1...20 { days.append(String(format: "2026-10-%02d", d)); closes.append(100 + Double(d) * 2) }
+        let s = PriceSeries(days: days, closes: closes)
+        XCTAssertEqual(GainerChartsView.monthChange(s, day: "2026-10-20", window: .calendar)!, 40, accuracy: 1e-9)
+        XCTAssertEqual(GainerChartsView.monthChange(s, day: "2026-10-20", window: .rolling)!, 40, accuracy: 1e-9)  // 21 bars back = Sep 30
+        XCTAssertNil(GainerChartsView.monthChange(s, day: "2026-10-21", window: .calendar))   // no bar that day
+    }
+}

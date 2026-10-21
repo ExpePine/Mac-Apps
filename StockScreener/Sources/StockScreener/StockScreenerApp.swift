@@ -115,6 +115,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
+        Window("Gainer Charts", id: "gainerCharts") {
+            GainerChartsView()
+                .environmentObject(vm)
+                .frame(minWidth: 1000, minHeight: 700)
+        }
+        .keyboardShortcut("g", modifiers: [.command, .option])
+
         Window("Delivery Analysis", id: "delivery") {
             DeliveryView()
                 .environmentObject(vm)
@@ -166,6 +173,7 @@ struct ToolsCommands: Commands {
             Button("Experiments — compare your triggers (⌥⌘E)") { openWindow(id: "experiments") }
             Button("Multibaggers — ≥30% in a month, 2023 → now (⌥⌘M)") { openWindow(id: "multibaggers") }
             Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
+            Button("Gainer Charts — Chart 1 → Chart 2 of each top gainer (⌥⌘G)") { openWindow(id: "gainerCharts") }
             Button("Chart Reel — flick through charts (⌥⌘R)") { openWindow(id: "reel") }
             Button("Combinatorix — combinations behind gainers (⌥⌘X)") { openWindow(id: "combi") }
             Button("Symbols — add / hide (⌥⌘Y)") { openWindow(id: "symbols") }
