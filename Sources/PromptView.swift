@@ -52,7 +52,7 @@ struct PromptView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "quote.opening").foregroundStyle(.secondary)
-                Text("You said you'd: ").foregroundStyle(.secondary) + Text(intent.text).fontWeight(.semibold)
+                Text("You said you'd: ").foregroundColor(.secondary) + Text(intent.text).fontWeight(.semibold)
             }
             .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 6) {
