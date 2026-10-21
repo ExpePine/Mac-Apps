@@ -225,7 +225,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         session.onStuck = { [weak self] in self?.showMain(.stuck) }
         activeSession = session
         windows.showPrompt(session)
-        guessPosition(for: session)
     }
 
     /// Goals, active plan steps and time-per-goal for the one-tap check-in.
@@ -263,26 +262,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let week = Calendar.current.dateInterval(of: .weekOfYear, for: Date())
         let weekEntries = store.entries.filter { week?.contains($0.periodEnd) ?? false }
         session.weekRows = GoalAccounting.rows(weekEntries, goals: all)
-    }
-
-    private func guessPosition(for session: PromptSession) {
-        guard settings.guessPosition, coach.hasKey,
-              !session.goalOptions.isEmpty || !session.planPaths.isEmpty else { return }
-        session.guessing = true
-        let prompt = session.prompt
-        let plansForGuess = session.planPaths.compactMap { plans.plan($0.id) }
-        let previous = store.entries
-            .filter { $0.status != .missed && $0.status != .skipped && $0.periodEnd <= prompt.start.addingTimeInterval(60) }
-            .max { $0.periodEnd < $1.periodEnd }
-        let usage = usageSummary(tracker.usage.usage(for: prompt.end), from: prompt.start, to: prompt.end)
-        Task { [weak self] in
-            guard let self else { return }
-            let guess = await self.coach.guessPosition(goals: session.goalOptions, plans: plansForGuess,
-                                                       previous: previous, usageText: usage,
-                                                       intent: session.previousIntent?.text)
-            session.guessing = false
-            if let guess { session.applyGuess(guess) }
-        }
     }
 
     private func resolve(_ entry: Entry) {

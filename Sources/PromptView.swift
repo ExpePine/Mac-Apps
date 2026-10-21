@@ -154,15 +154,6 @@ struct PromptView: View {
 
     private var pathSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if session.guessing {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Guessing where you are…").font(.caption).foregroundStyle(.secondary)
-                }
-            } else if let note = session.guessNote {
-                Label(note, systemImage: "sparkles").font(.caption).foregroundStyle(Color.accentColor)
-            }
-
             ForEach(session.planPaths) { path in
                 VStack(alignment: .leading, spacing: 4) {
                     Text("PLAN · \(path.goal)").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
