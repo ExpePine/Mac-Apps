@@ -272,6 +272,8 @@ struct FeedDetail: View {
                     if let url = URL(string: job.url), !job.url.isEmpty, job.appliedAt != nil {
                         Button { NSWorkspace.shared.open(url) } label: { Label("Open posting", systemImage: "safari") }
                     }
+                    Button { store.findPeopleForFeed(job.id) } label: { Label("Find people", systemImage: "person.2.wave.2") }
+                        .help("Find the hiring manager, recruiters and leaders at \(job.company) on LinkedIn")
                     Button { store.queueFeedMatch(job.id) } label: { Label(job.match?.local == false ? "Re-check" : "Check fit", systemImage: "sparkles") }
                         .disabled(store.feedMatchQueue.contains(job.id))
                         .help("Runs in the background — keep browsing")

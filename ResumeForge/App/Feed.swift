@@ -521,6 +521,12 @@ extension AppStore {
         list.insert(contentsOf: [follow, done], at: 0)
         data.actions = list
         scheduleCommentary()
+        if let jid = jobID, Self.autoFindOnApply, !WebSearch.usable.isEmpty {
+            Task { @MainActor in
+                do { try await self.findPeople(jobID: jid) }
+                catch { self.peopleSearchStatus = nil }
+            }
+        }
     }
 
     // MARK: GitHub (save your search, run the collector)

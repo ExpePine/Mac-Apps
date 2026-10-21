@@ -6,6 +6,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case feed = "Job Feed"
     case jobs = "Jobs"
     case actions = "Actions"
+    case connections = "Connections"
     case stories = "Stories"
     case interview = "Interview"
     case master = "Master Resume"
@@ -18,6 +19,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         case .feed: return "antenna.radiowaves.left.and.right"
         case .jobs: return "briefcase"
         case .actions: return "checklist"
+        case .connections: return "person.2.wave.2"
         case .stories: return "book"
         case .interview: return "bubble.left.and.bubble.right"
         case .master: return "doc.richtext"
@@ -51,6 +53,7 @@ final class AppStore: ObservableObject {
     var feedWorker: Task<Void, Never>?
     var feedTimer: Timer?
     @Published var feedChecksDone = 0
+    @Published var peopleSearchStatus: String?
     var feedCheckTimer: Timer?
     @Published var naukriSheetStatus: String?
     @Published var naukriSheetCount = 0

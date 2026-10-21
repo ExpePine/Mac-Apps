@@ -58,6 +58,25 @@ Your data is stored in `~/Library/Application Support/ResumeForge/ResumeForge.js
 
 The app never sends messages for you. It opens the right place, and you send.
 
+## Connections (LinkedIn networking)
+
+- **When you press Apply**, the app finds key people at that company: the likely hiring manager, recruiters and HR, leaders of the function, and a couple of peers.
+  - The AI writes the Google searches (`site:linkedin.com/in "Company" ("Head of Product" OR …)`). They run through **Serper** (Google results) or **Tavily**, and the AI then ranks the results.
+  - The top 8 are added to **Connections**, grouped by company. You can also press **Find people** on any job.
+- **Messages:** pick a person, a **connection type** and a **tone**, and the AI writes the messages from your real story highlights and their headline.
+  - Connection types: referral, hiring manager, recruiter, informational chat, common ground, after applying, or thank you.
+  - You get **3 connection notes**, each at most 200 characters (LinkedIn's limit), and **2 longer messages** for after they accept.
+  - **Copy & connect** copies the note, opens their profile and logs it in their history. You paste and send it yourself.
+  - The AI never invents shared history or mutual connections.
+- **History:** drop or paste screenshots of LinkedIn conversations, invites or profiles, or paste the text. The AI reads who it's with and the messages, adds them to that person's history (creating them if needed), and updates the status (requested → connected → replied → meeting).
+- Pending and replied connections feed into the **workload commentary**.
+- Keys and limits are under **Settings ▸ Networking**:
+  - **Serper:** 2,500 free searches, one-time. Use a fresh key, not one that's visible on a web page.
+  - **Tavily:** 1,000 a month.
+  - A daily search cap.
+
+Free LinkedIn accounts get only a few personalised notes a month. When you run out, connect without a note and send the "after they accept" message.
+
 ## Templates (copy a CV design from a screenshot)
 
 Go to **Templates** in the sidebar and drop a screenshot of a CV you like. The AI reads the design (fonts, sizes, colours, heading style, single or two-column, section order) and saves it as a template. Fine-tune it in the editor, which shows a live preview. Pick a template on any resume, or set a default under **Settings ▸ Processing**. It approximates the design: photos, icons and charts aren't reproduced.

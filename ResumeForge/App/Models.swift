@@ -191,4 +191,5 @@ struct AppData: Codable {
     var feed: [FeedJob]?
     var actions: [ActionItem]?
     var commentary: Commentary?
+    var contacts: [Contact]?
 }

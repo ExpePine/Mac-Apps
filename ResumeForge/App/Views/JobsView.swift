@@ -155,6 +155,11 @@ struct JobDetailView: View {
                     .buttonStyle(.borderedProminent).tint(.green)
                     .help("Opens the posting to apply and tracks it, with a follow-up action in 5 days")
             }
+            Button {
+                store.run("Finding people at \(job.company)…") { try await store.findPeople(jobID: jobID) }
+                store.section = .connections
+            } label: { Label("Find people", systemImage: "person.2.wave.2") }
+            .disabled(job.company.isEmpty)
             if let url = URL(string: job.url), !job.url.isEmpty {
                 Link(destination: url) { Label("Open posting", systemImage: "safari") }
             }

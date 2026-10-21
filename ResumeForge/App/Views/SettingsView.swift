@@ -12,6 +12,8 @@ struct SettingsView: View {
                 .tabItem { Label("Processing", systemImage: "gearshape.2") }
             FeedSettingsView()
                 .tabItem { Label("Job Feed", systemImage: "antenna.radiowaves.left.and.right") }
+            NetworkingSettings()
+                .tabItem { Label("Networking", systemImage: "person.2.wave.2") }
         }
         .environmentObject(store)
         .frame(width: 700, height: 680)

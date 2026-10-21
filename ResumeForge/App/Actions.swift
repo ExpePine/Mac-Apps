@@ -294,10 +294,15 @@ extension AppStore {
             let fit = j.match.map { "fit \($0.score)\($0.hardConflicts.isEmpty ? "" : " (conflicts)")" } ?? "fit ?"
             return "- \(j.title) · \(j.company) · \(fit) · \(progress) · \(n) open action(s) · captured \(Int(Date().timeIntervalSince(j.capturedAt) / 86400))d ago"
         }.joined(separator: "\n")
+        let net = contacts.filter { ["requested", "connected", "replied"].contains($0.status) }.prefix(25).map { c in
+            let last = c.lastInteraction.map { "\(Int(Date().timeIntervalSince($0) / 86400))d ago" } ?? "no messages"
+            return "- NETWORKING: \(c.name) (\(c.company)) · \(ConnectionStatus(rawValue: c.status)?.label ?? c.status) · last contact \(last)"
+        }.joined(separator: "\n")
+        let allActions = [actionLines, net].filter { !$0.isEmpty }.joined(separator: "\n")
         let now = Self.nowFormatter.string(from: Date())
         do {
             let o = try await ask(output: 900, temperature: 0.3) { budget in
-                Prompts.commentary(now: now, actions: Prompts.clip(actionLines.isEmpty ? "(none)" : actionLines, budget / 2),
+                Prompts.commentary(now: now, actions: Prompts.clip(allActions.isEmpty ? "(none)" : allActions, budget / 2),
                                    jobs: Prompts.clip(jobLines.isEmpty ? "(none)" : jobLines, budget / 2 - 1500))
             }
             var c = Commentary()
