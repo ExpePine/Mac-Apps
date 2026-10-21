@@ -448,3 +448,20 @@ final class LiveQuotesTests: XCTestCase {
         XCTAssertEqual(m.dailyChange(on: "2026-10-21")!, 6, accuracy: 1e-9)
     }
 }
+
+final class StreakTests: XCTestCase {
+    func testStreakCountsConsecutiveDays() {
+        var x = (0..<400).map { 100 + Double($0 % 7) }          // ordinary days
+        x += [Double](repeating: 10, count: 25)                  // delivery dries up → SMA rank falls to 0
+        x += [Double](repeating: 10_000, count: 5)               // 5 huge days → SMA at a 300-bar high each day
+        var d = StreakDef(); d.sma = 22; d.length = 300; d.op = ">"; d.value = 99
+        XCTAssertEqual(d.streak(x, at: x.count - 1), 5)
+        XCTAssertEqual(d.streak(x, at: 424), 0)
+        d.op = "<"; d.value = 1
+        XCTAssertGreaterThan(d.streak(x, at: 424) ?? 0, 0)
+    }
+    func testNilWithoutHistory() {
+        let d = StreakDef(sma: 22, length: 300, op: ">", value: 99)
+        XCTAssertNil(d.streak([Double](repeating: 1, count: 100), at: 99))
+    }
+}

@@ -132,6 +132,7 @@ struct DeliveryView: View {
                     .help("The Filter's JUMP column. 1: ta.percentrank(DELIV_QTY*close, 300) today ÷ the percent rank's previous peak. 2: DELIV_QTY*close today ÷ the previous (different) ta.highest(DELIV_QTY*close, 300).")
                     .onChange(of: jumpMode) { _ in DeliveryCenter.shared.refreshColumns() }
                 }.fixedSize()
+                StreakButton().fixedSize()
                 HStack(spacing: 4) {
                     Text("Within last").font(.caption)
                     Stepper("\(within) day\(within == 1 ? "" : "s")", value: $within, in: 1...250)
@@ -593,5 +594,58 @@ struct FlowLayout: Layout {
             }
             y += rh + lineSpacing
         }
+    }
+}
+
+
+/// "STREAK" button + popover: how the Filter's STREAK column is defined — consecutive trading days (ending on
+/// the data day) where ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, 22 or 66), length) passes a condition.
+struct StreakButton: View {
+    @AppStorage("streak.sma") private var sma = 0          // 0 = follow the Delivery Analysis signal
+    @AppStorage("streak.length") private var length = 300
+    @AppStorage("streak.op") private var op = ">"
+    @AppStorage("streak.value") private var value = 99.0
+    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: { Label("STREAK", systemImage: "flame") }
+            .help("Defines the Filter's STREAK column: \(StreakDef.current.pine) — counted in consecutive trading days")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("STREAK column").font(.headline)
+                    Text("Number of consecutive trading days, ending on the Filter's data day, where:").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE,").font(.caption.monospaced())
+                        Picker("", selection: $sma) {
+                            Text("signal's (\(DeliveryMetric(rawValue: metricRaw) == .sma66 ? 66 : 22))").tag(0)
+                            Text("22").tag(22)
+                            Text("66").tag(66)
+                        }
+                        .labelsHidden().fixedSize()
+                        .help("“signal's” follows the SMA picked in Delivery Analysis' Signal (22 unless ta.sma(…, 66) is selected)")
+                        Text("),").font(.caption.monospaced())
+                        TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                        Text(")").font(.caption.monospaced())
+                        Picker("", selection: $op) { ForEach([">", "≥", "<", "≤"], id: \.self) { Text($0).tag($0) } }
+                            .labelsHidden().fixedSize()
+                        TextField("", value: $value, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                    }
+                    Text("0 = the condition fails on the data day. Blank = not enough history yet (needs SMA length − 1 + \(length) + 1 trading days of NSE data, like Pine's na). A day with no NSE row for the stock is skipped, not counted as a break.")
+                        .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text(StreakDef.current.pine).font(.caption.monospaced()).foregroundStyle(.orange)
+                        Spacer()
+                        Button("Reset") { sma = 0; length = 300; op = ">"; value = 99 }
+                    }
+                }
+                .padding(14)
+                .onChange(of: sma) { _ in DeliveryCenter.shared.refreshColumns() }
+                .onChange(of: length) { _ in DeliveryCenter.shared.refreshColumns() }
+                .onChange(of: op) { _ in DeliveryCenter.shared.refreshColumns() }
+                .onChange(of: value) { _ in DeliveryCenter.shared.refreshColumns() }
+                .onChange(of: metricRaw) { _ in DeliveryCenter.shared.refreshColumns() }
+            }
     }
 }

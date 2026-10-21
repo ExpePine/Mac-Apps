@@ -278,6 +278,59 @@ enum DeliverySignal {
     }
 }
 
+// MARK: - STREAK: consecutive days a condition on ta.percentrank(ta.sma(DELIV_QTY*close, n), length) holds
+
+struct StreakDef: Equatable {
+    var sma: Int = 22            // 22 or 66 (0 = follow the Delivery Analysis signal: its SMA, else 22)
+    var length: Int = 300
+    var op: String = ">"         // > ≥ < ≤
+    var value: Double = 99
+
+    /// The SMA actually used (resolves "follow the signal").
+    var smaUsed: Int {
+        if sma > 1 { return sma }
+        switch DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") {
+        case .sma66?: return 66
+        default: return 22
+        }
+    }
+
+    var pine: String { "ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(smaUsed)), \(length)) \(op) \(CombiEngine.fmt(value))" }
+
+    static var current: StreakDef {
+        let d = UserDefaults.standard
+        var s = StreakDef()
+        if d.object(forKey: "streak.sma") != nil { s.sma = d.integer(forKey: "streak.sma") } else { s.sma = 0 }
+        let l = d.integer(forKey: "streak.length"); if l >= 2 { s.length = l }
+        if let o = d.string(forKey: "streak.op"), [">", "≥", "<", "≤"].contains(o) { s.op = o }
+        if d.object(forKey: "streak.value") != nil { s.value = d.double(forKey: "streak.value") }
+        return s
+    }
+
+    func passes(_ v: Double) -> Bool {
+        switch op {
+        case "≥": return v >= value
+        case "<": return v < value
+        case "≤": return v <= value
+        default: return v > value
+        }
+    }
+
+    /// Consecutive bars ending at bar i (the data day) where the condition holds; 0 if it fails at i,
+    /// nil when there isn't enough history to compute the percent rank at i (Pine: na).
+    func streak(_ x: [Double], at i: Int) -> Int? {
+        let n = smaUsed
+        guard i < x.count, i >= n - 1 + length else { return nil }
+        let sm = DeliverySignal.sma(Array(x[...i]), n)
+        let valid = Array(sm[(n - 1)...])
+        var k = valid.count - 1, count = 0
+        while k >= length, let pr = DeliveryColumns.percentRank(valid, length: length, at: k), passes(pr) {
+            count += 1; k -= 1
+        }
+        return count
+    }
+}
+
 // MARK: - DLVR and Safety (Filter-table columns)
 
 struct DeliveryColumns {
@@ -286,6 +339,7 @@ struct DeliveryColumns {
     var pctRank: Double? = nil   // ta.percentrank(DELIV_QTY, 300) on the latest day (0–100)
     var jump: Double? = nil      // JUMP (see DeliverySignal.jump)
     var delSma: Double? = nil    // DELSMA = ta.percentrank(ta.sma(DELIV_QTY*close, 22), 300) (0–100)
+    var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -305,7 +359,8 @@ struct DeliveryColumns {
         let safety: Double? = i >= 99 ? s.qty[(i - 99)...i].reduce(0, +) / 100 * 0.05 : nil
         let mode = UserDefaults.standard.integer(forKey: "deliv.jumpMode")
         return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
-                               jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i), day: latestDay)
+                               jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i),
+                               streak: StreakDef.current.streak(m, at: i), day: latestDay)
     }
 
     /// ta.percentrank(ta.sma(x, 22), 300) at bar i — Pine rules: the SMA is na for the first 21 bars, and the

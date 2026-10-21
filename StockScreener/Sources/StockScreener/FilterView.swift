@@ -196,7 +196,8 @@ struct FilterView: View {
                 } label: {
                     Label("Columns", systemImage: "rectangle.split.3x1")
                 }
-                .help("Choose which columns are visible and their order")
+                .help("Choose which columns the Filter shows and their order — hidden ones stay in Data Import")
+                StreakButton()
 
                 Button {
                     vm.importNow()
@@ -406,7 +407,7 @@ struct ColumnChooser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Visible columns").font(.title2.bold())
-            Text("Tick the columns to show on the Filter screen. Drag in the right list to change their order.")
+            Text("Tick the columns to show on the Filter screen. Drag in the right list to change their order. Columns you leave out are only hidden here — Data Import always shows every column, including the computed ones (DLVR, Safety, DQ_PRANK, JUMP, DELSMA, STREAK). Tip: right-click a column header in the Filter to hide it quickly, or drag headers to reorder.")
                 .foregroundStyle(.secondary)
 
             HStack(alignment: .top, spacing: 16) {
