@@ -5,6 +5,7 @@ struct FilterView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var showColumns = false
+    @AppStorage("filter.markChanges") private var markChanges = true
     @AppStorage("filterConditionsVisible") private var conditionsVisible = true
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var flashedDay: String?
@@ -12,14 +13,16 @@ struct FilterView: View {
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
-    private func openReel(_ source: ReelSource, value: String? = nil) {
+    private func openReel(_ source: ReelSource, value: String? = nil, column: String? = nil, op: String = "=", sequence: Bool = false) {
         let d = UserDefaults.standard
         d.set(source.rawValue, forKey: "reel.source")
         if let value {
-            d.set(vm.settings.triggerColumn, forKey: "reel.column")
-            d.set("=", forKey: "reel.op")
+            d.set(column ?? vm.settings.triggerColumn, forKey: "reel.column")
+            d.set(op, forKey: "reel.op")
             d.set(value, forKey: "reel.value")
         }
+        if sequence { d.set(ReelLayout.sequence.rawValue, forKey: "reel.layout") }      // Chart 1 → Chart 2, then next stock
+        d.set(UUID().uuidString + "|", forKey: "reel.jump")                               // restart an open reel
         openWindow(id: "reel")
     }
 
@@ -69,6 +72,9 @@ struct FilterView: View {
                                        ChartPeek.shared.preload(vm.rowKey(row), vm: vm)
                                        ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm)        // blue dot = Chart 1, orange = Chart 2
                                    } : nil,
+                                   chartDotsAfter: vm.labelIndex,
+                                   changedCell: markChanges && vm.timelineIndex == nil ? { row, c in vm.previousValue(row, column: c) } : nil,
+                                   changedVersion: markChanges ? 1 : 0,
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
@@ -165,6 +171,17 @@ struct FilterView: View {
                     Button("\(vm.settings.triggerColumn) = 1") { openReel(.column, value: "1") }
                     Button("\(vm.settings.triggerColumn) = 0") { openReel(.column, value: "0") }
                     Button("Daily gainers") { openReel(.gainers) }
+                    Divider()
+                    Section("Chart 1 → Chart 2 for each stock") {
+                        Button("\(vm.settings.triggerColumn) has a value") { openReel(.column, value: "", op: "has a value", sequence: true) }
+                        Button("This Filter's stocks") { openReel(.filter, sequence: true) }
+                        Menu("Any column has a value…") {
+                            ForEach(vm.filterColumnIndices.map { vm.headers[$0] }, id: \.self) { h in
+                                Button(h) { openReel(.column, value: "", column: h, op: "has a value", sequence: true) }
+                            }
+                        }
+                        Button("Any column / value… (set it in the reel)") { openReel(.column, value: "1", sequence: true) }
+                    }
                 } label: {
                     Label("Chart Reel", systemImage: "film.stack")
                 } primaryAction: { openReel(.filter) }
@@ -207,6 +224,9 @@ struct FilterView: View {
                 StreakButton()
                 T3Button()
                 PeekMenu()
+                Toggle(isOn: $markChanges) { Label("Changed", systemImage: "square.dashed") }
+                    .toggleStyle(.button)
+                    .help("Shade the border of every cell whose value changed since the previous stored day\(vm.previousStoredDay.map { " (\($0))" } ?? "") — hover a cell to see the old value")
 
                 Button {
                     vm.importNow()

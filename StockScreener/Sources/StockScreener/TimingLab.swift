@@ -479,7 +479,7 @@ struct TimingLabView: View {
             }
             .controlSize(.small).padding(.horizontal, 10).padding(.top, 6)
             Table(list, selection: $selTrade) {
-                TableColumn("Symbol") { t in Text(t.symbol).bold() }.width(min: 80, ideal: 100)
+                TableColumn("Symbol") { t in SymbolWithDots(symbol: t.symbol) }.width(min: 110, ideal: 130)
                 TableColumn("Entry") { t in Text(t.entryName) }.width(min: 80, ideal: 100)
                 TableColumn("Shortlist") { t in Text(t.shortlistDay).monospacedDigit() }.width(min: 80, ideal: 90)
                 TableColumn("Bought") { t in Text(t.day).monospacedDigit() }.width(min: 80, ideal: 90)

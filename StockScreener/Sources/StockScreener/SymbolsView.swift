@@ -59,7 +59,7 @@ struct SymbolsView: View {
                         .help(m.foundOnYahoo == true ? "Found on Yahoo (NSE)" : (m.foundOnYahoo == false ? "Not found on Yahoo — check the symbol" : "Not checked yet"))
                 }
                 .width(22)
-                TableColumn("Symbol") { m in Text(m.symbol).fontWeight(.semibold) }.width(min: 80, ideal: 100)
+                TableColumn("Symbol") { m in SymbolWithDots(symbol: m.symbol, bold: false) }.width(min: 110, ideal: 130)
                 TableColumn("Company") { m in
                     TextField("Company name", text: binding(m.symbol, \.name)).textFieldStyle(.plain)
                 }

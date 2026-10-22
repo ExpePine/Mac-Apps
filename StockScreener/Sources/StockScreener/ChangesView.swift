@@ -178,7 +178,7 @@ struct ChangeRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(item.symbol).fontWeight(.semibold).lineLimit(1).frame(minWidth: 90, alignment: .leading)
+            SymbolWithDots(symbol: item.symbol, bold: false).frame(minWidth: 110, alignment: .leading)
             Spacer(minLength: 4)
             if !item.old.isEmpty || !item.new.isEmpty {
                 Text(item.old.isEmpty ? "—" : item.old).foregroundStyle(.secondary).lineLimit(1)

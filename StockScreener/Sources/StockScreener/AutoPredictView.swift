@@ -127,7 +127,7 @@ struct AutoPredictView: View {
                     .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(list, selection: $selPred) {
-                    TableColumn("Symbol") { p in Text(p.symbol).bold() }.width(min: 80, ideal: 100)
+                    TableColumn("Symbol") { p in SymbolWithDots(symbol: p.symbol) }.width(min: 110, ideal: 130)
                     TableColumn("Chance (≥)") { p in Text(pct(p.chance)).monospacedDigit() }.width(min: 60, ideal: 70)
                     TableColumn("Combos") { p in Text("\(p.rules.count)").monospacedDigit() }.width(min: 45, ideal: 50)
                     TableColumn("Close") { p in Text(p.close.map { String(format: "%.2f", $0) } ?? "—").monospacedDigit() }.width(min: 60, ideal: 70)
@@ -174,7 +174,7 @@ struct AutoPredictView: View {
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12)
             Table(past) {
                 TableColumn("Day") { p in Text(p.day).monospacedDigit() }.width(min: 80, ideal: 90)
-                TableColumn("Symbol") { p in Text(p.symbol).bold() }.width(min: 80, ideal: 100)
+                TableColumn("Symbol") { p in SymbolWithDots(symbol: p.symbol) }.width(min: 110, ideal: 130)
                 TableColumn("Chance (≥)") { p in Text(pct(p.chance)).monospacedDigit() }.width(min: 60, ideal: 70)
                 TableColumn("Peak gain in 21d") { p in
                     Text(p.outcome.map { String(format: "%+.1f%%", $0) } ?? "pending").monospacedDigit()

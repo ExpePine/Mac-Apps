@@ -146,3 +146,52 @@ struct PeekMenu: View {
         .help("Rest the pointer on the blue dot next to a symbol = Chart 1, orange dot = Chart 2 — choose delay, time and size here")
     }
 }
+
+/// The two quick-chart dots for SwiftUI lists: rest on blue = Chart 1, orange = Chart 2 (or click).
+struct ChartDots: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    let symbol: String
+    @AppStorage("peek.enabled") private var enabled = true
+    @State private var hover: Int?
+    @State private var work: DispatchWorkItem?
+
+    var body: some View {
+        if enabled {
+            HStack(spacing: 4) {
+                dot(0, .blue)
+                dot(1, .orange)
+            }
+            .help("Rest on blue = Chart 1 · orange = Chart 2")
+        }
+    }
+
+    private func dot(_ c: Int, _ color: Color) -> some View {
+        Circle()
+            .fill(color.opacity(hover == c ? 1 : 0.35))
+            .overlay(Circle().stroke(color, lineWidth: 1))
+            .frame(width: 10, height: 10)
+            .contentShape(Rectangle().inset(by: -3))
+            .onHover { inside in
+                work?.cancel()
+                if inside {
+                    hover = c
+                    let w = DispatchWorkItem { if hover == c { ChartPeek.shared.show(symbol, chart: c, vm: vm) } }
+                    work = w
+                    DispatchQueue.main.asyncAfter(deadline: .now() + ChartDotsCell.delay, execute: w)
+                } else if hover == c { hover = nil }
+            }
+            .onTapGesture { work?.cancel(); ChartPeek.shared.show(symbol, chart: c, vm: vm) }
+    }
+}
+
+/// A symbol followed by its two quick-chart dots.
+struct SymbolWithDots: View {
+    let symbol: String
+    var bold = true
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(symbol).fontWeight(bold ? .bold : .semibold).lineLimit(1)
+            ChartDots(symbol: symbol)
+        }
+    }
+}

@@ -25,6 +25,11 @@ struct SheetTableView: NSViewRepresentable {
     var onDoubleRightClickRow: ((SheetRow) -> Void)? = nil
     /// Two small dots next to the first column: rest the pointer on one (or click it) → (row, 0 = Chart 1 / 1 = Chart 2).
     var onHoverChart: ((SheetRow, Int) -> Void)? = nil
+    /// Column (index into headers) the dots sit after — normally the symbol; nil = the first column.
+    var chartDotsAfter: Int? = nil
+    /// Previous day's text when this cell's value changed since then (cell gets a shaded border), else nil.
+    var changedCell: ((SheetRow, Int) -> String?)? = nil
+    var changedVersion = 0
     /// When set, each header shows a small ▼ that opens this panel for the column.
     var columnMenu: ((Int) -> AnyView)? = nil
     /// Columns that have conditions or colors (their ▼ is highlighted).
@@ -140,7 +145,11 @@ struct SheetTableView: NSViewRepresentable {
             if eColor != nil {
                 c.addEColumn(to: frozen.isEmpty ? right : left)
             }
-            if onHoverChart != nil { c.addChartDotsColumn(to: frozen.isEmpty ? right : left) }
+            if onHoverChart != nil {
+                let after = chartDotsAfter
+                let target = after.map { a in left.tableColumns.contains { Coordinator.columnIndex($0) == a } ? left : right } ?? (frozen.isEmpty ? right : left)
+                c.addChartDotsColumn(to: target, after: after)
+            }
             c.updateLeftWidth()
         }
 
@@ -168,9 +177,9 @@ struct SheetTableView: NSViewRepresentable {
 
         let flashToken = flash?.token ?? 0
         let findKey = findQuery + "|\(findCurrent?.row ?? -1),\(findCurrent?.column ?? -1)"
-        if version != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
+        if version &+ changedVersion &* 7919 != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
             c.flashToken = flashToken
-            c.renderedVersion = version
+            c.renderedVersion = version &+ changedVersion &* 7919
             c.findKey = findKey
             left.reloadData()
             right.reloadData()
@@ -360,13 +369,14 @@ struct SheetTableView: NSViewRepresentable {
         private let cCellID = NSUserInterfaceItemIdentifier("CCell")
 
         /// The ①② column, placed right after the first data column (the symbol).
-        func addChartDotsColumn(to table: NSTableView) {
+        func addChartDotsColumn(to table: NSTableView, after: Int? = nil) {
             let column = NSTableColumn(identifier: Self.cID)
             column.width = 34; column.minWidth = 34; column.maxWidth = 34
             column.title = ""
             column.headerToolTip = "Rest the pointer on the blue dot = Chart 1, orange dot = Chart 2 (or click a dot)"
             table.addTableColumn(column)
-            let firstData = table.tableColumns.firstIndex { Self.columnIndex($0) != nil } ?? 0
+            let firstData = (after.flatMap { a in table.tableColumns.firstIndex { Self.columnIndex($0) == a } })
+                ?? table.tableColumns.firstIndex { Self.columnIndex($0) != nil } ?? 0
             table.moveColumn(table.numberOfColumns - 1, toColumn: min(table.numberOfColumns - 1, firstData + 1))
             updateLeftWidth()
         }
@@ -491,6 +501,7 @@ struct SheetTableView: NSViewRepresentable {
                            alignRight: isNumber,
                            bold: index == parent.emphasizedColumn || tableView === leftTable,
                            background: parent.painter?.color(for: data, column: index))
+            cell.setChanged(parent.changedCell?(data, index))
             let q = parent.findQuery
             if !q.isEmpty, text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
                 cell.setFindHighlight(parent.findCurrent == FindMatch(row: row, column: index) ? .current : .match)
@@ -558,6 +569,30 @@ final class SheetCellView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private var flashLayer: CALayer?
+    private var changeLayer: CALayer?
+
+    /// Shaded border when the value changed since the previous day (tooltip = yesterday's value).
+    func setChanged(_ previous: String?) {
+        guard let layer else { return }
+        if let previous {
+            let l = changeLayer ?? {
+                let l = CALayer(); l.cornerRadius = 3; l.borderWidth = 1.5
+                layer.addSublayer(l); changeLayer = l; return l
+            }()
+            l.borderColor = NSColor.systemYellow.withAlphaComponent(0.85).cgColor
+            l.frame = bounds.insetBy(dx: 1, dy: 1)
+            l.isHidden = false
+            toolTip = "Changed since the previous day — was: \(previous.isEmpty ? "(blank)" : previous)"
+        } else {
+            changeLayer?.isHidden = true
+            toolTip = nil
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        changeLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
+    }
 
     /// Glows `color` and fades out over `duration` seconds.
     func flash(_ color: NSColor, duration: Double) {

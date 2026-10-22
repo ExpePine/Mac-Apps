@@ -147,7 +147,7 @@ struct MultibaggerView: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Table(rows, selection: $selection) {
-                TableColumn("Symbol") { e in Text(e.symbol).bold() }.width(min: 80, ideal: 100)
+                TableColumn("Symbol") { e in SymbolWithDots(symbol: e.symbol) }.width(min: 110, ideal: 130)
                 TableColumn("Month") { e in Text(e.monthTitle) }.width(min: 60, ideal: 70)
                 TableColumn("Gain") { e in Text(String(format: "%+.0f%%", e.gain)).monospacedDigit().foregroundStyle(.green) }.width(min: 50, ideal: 60)
                 TableColumn("Best in month") { e in Text(String(format: "%+.0f%%", e.peakGain)).monospacedDigit() }.width(min: 70, ideal: 80)

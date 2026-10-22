@@ -31,6 +31,7 @@ struct AlertsBrowserView: View {
     @State private var rule = "All rules"
     @State private var selection: AlertEvent.ID?
     @State private var sortOrder = [KeyPathComparator(\AlertEvent.date, order: .reverse)]
+    @State private var showShortlist = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +55,7 @@ struct AlertsBrowserView: View {
             footer
         }
         .navigationTitle("Alerts")
+        .sheet(isPresented: $showShortlist) { ShortlistAlertsEditor().environmentObject(vm) }
         .onAppear { vm.markAlertsSeen() }
         .onDisappear { vm.markAlertsSeen() }
     }
@@ -77,6 +79,8 @@ struct AlertsBrowserView: View {
             }
             .fixedSize()
             Spacer()
+            Button { showShortlist = true } label: { Label("Shortlist alerts…", systemImage: "list.bullet.rectangle") }
+                .help("e.g. D_Trigger is the shortlist → alert when MS > 99 or DS > 99 (becomes true)")
             Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT…", systemImage: "wand.and.stars") }
                 .help("Stocks AUTO-PREDICT expects to gain ≥ 30% within a month — turn “Show predictions in Alerts” on there")
         }
@@ -92,7 +96,7 @@ struct AlertsBrowserView: View {
                 }
             }
             .width(min: 120, ideal: 140)
-            TableColumn("Stock", value: \.stock) { e in Text(e.stock).fontWeight(.semibold) }
+            TableColumn("Stock", value: \.stock) { e in SymbolWithDots(symbol: e.stock, bold: false) }
                 .width(min: 80, ideal: 110)
             TableColumn("Rule", value: \.ruleName)
                 .width(min: 100, ideal: 150)

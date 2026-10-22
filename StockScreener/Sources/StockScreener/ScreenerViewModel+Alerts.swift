@@ -113,6 +113,10 @@ extension ScreenerViewModel {
 
     /// In-app alerts: which enabled rules are met right now, and by which stocks.
     func computeInAppAlerts() -> [InAppAlert] {
+        ruleAlerts() + shortlistInAppAlerts()
+    }
+
+    private func ruleAlerts() -> [InAppAlert] {
         settings.buyTriggers
             .filter { $0.isEnabled && $0.alertInApp && $0.filter.activeCount > 0 }
             .compactMap { t in

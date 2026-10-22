@@ -102,7 +102,8 @@ struct ChartReelView: View {
 
     private var columnPredicate: RowPredicate? {
         guard !column.isEmpty, vm.table.index(of: column) != nil else { return nil }
-        let ops: [String: RuleOperator] = ["=": .equals, "≠": .notEquals, ">": .greaterThan, "≥": .greaterOrEqual, "<": .lessThan, "≤": .lessOrEqual, "contains": .contains]
+        let ops: [String: RuleOperator] = ["=": .equals, "≠": .notEquals, ">": .greaterThan, "≥": .greaterOrEqual, "<": .lessThan, "≤": .lessOrEqual, "contains": .contains,
+                                           "has a value": .hasValue]
         var issues: [String] = []
         return FilterCompiler.compile(FilterCondition(column: column, op: ops[op] ?? .equals, value: value), table: vm.table, issues: &issues)
     }
@@ -297,6 +298,7 @@ struct ChartReelView: View {
             if vm.table.index(of: vm.settings.triggerColumn) != nil {
                 Button("\(vm.settings.triggerColumn) = 0") { column = vm.settings.triggerColumn; op = "="; value = "0" }
                 Button("\(vm.settings.triggerColumn) = 1") { column = vm.settings.triggerColumn; op = "="; value = "1" }
+                Button("\(vm.settings.triggerColumn) has a value") { column = vm.settings.triggerColumn; op = "has a value"; value = "" }
                 Divider().frame(height: 16)
             }
             Picker("", selection: $column) {
@@ -305,10 +307,10 @@ struct ChartReelView: View {
             }
             .labelsHidden().frame(width: 150)
             Picker("", selection: $op) {
-                ForEach(["=", "≠", ">", "≥", "<", "≤", "contains"], id: \.self) { Text($0).tag($0) }
+                ForEach(["=", "≠", ">", "≥", "<", "≤", "contains", "has a value"], id: \.self) { Text($0).tag($0) }
             }
             .labelsHidden().fixedSize()
-            TextField("value", text: $value).frame(width: 70).textFieldStyle(.roundedBorder)
+            if op != "has a value" { TextField("value", text: $value).frame(width: 70).textFieldStyle(.roundedBorder) }
             let options = distinctValues
             if !options.isEmpty {
                 Menu {

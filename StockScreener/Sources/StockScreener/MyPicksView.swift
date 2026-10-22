@@ -113,7 +113,7 @@ struct MyPicksView: View {
                 }
                 .width(30)
                 TableColumn("Day", value: \.day) { Text($0.pick.day).monospacedDigit() }.width(85)
-                TableColumn("Symbol", value: \.symbol) { Text($0.pick.symbol).fontWeight(.semibold) }.width(min: 80, ideal: 100)
+                TableColumn("Symbol", value: \.symbol) { SymbolWithDots(symbol: $0.pick.symbol, bold: false) }.width(min: 110, ideal: 130)
                 TableColumn("That day", value: \.changeSort) { r in
                     Text(r.pick.change.map { String(format: "%+.1f%%", $0) } ?? "—").monospacedDigit().foregroundStyle(.green)
                 }

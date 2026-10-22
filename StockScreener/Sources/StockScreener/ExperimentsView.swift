@@ -550,7 +550,7 @@ struct CommandCard: View {
             if showEntries {
                 let hs = cmd.plan.horizons
                 Table(r.entries) {
-                    TableColumn("Symbol") { e in Text(e.symbol).bold() }.width(min: 80, ideal: 100)
+                    TableColumn("Symbol") { e in SymbolWithDots(symbol: e.symbol) }.width(min: 110, ideal: 130)
                     TableColumn("Entry type") { e in Text(e.arm) }.width(min: 80, ideal: 120)
                     TableColumn("Entry day") { e in Text(e.day).monospacedDigit() }.width(min: 80, ideal: 90)
                     TableColumn("Entry") { e in Text(String(format: "%.2f", e.entry)).monospacedDigit() }.width(min: 55, ideal: 65)

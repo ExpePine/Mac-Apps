@@ -199,7 +199,7 @@ struct DeliveryView: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Table(shownRows, selection: $selected) {
-                TableColumn("Symbol") { r in Text(r.symbol).bold() }.width(min: 80, ideal: 100)
+                TableColumn("Symbol") { r in SymbolWithDots(symbol: r.symbol) }.width(min: 110, ideal: 130)
                 TableColumn("Signal day") { r in Text(r.lastSignal ?? "—").monospacedDigit() }.width(min: 80, ideal: 90)
                 TableColumn("Ago") { r in Text(r.barsAgo.map { $0 == 0 ? "today" : "\($0)d" } ?? "—").monospacedDigit() }.width(min: 40, ideal: 48)
                 TableColumn(metric.short) { r in Text(Self.short(r.qty)).monospacedDigit() }.width(min: 70, ideal: 85)

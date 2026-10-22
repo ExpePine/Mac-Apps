@@ -38,6 +38,9 @@ struct ImportView: View {
                                    },
                                    onSelectRow: { vm.selectStock(from: $0) },
                                    onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.importRows.map { vm.rowKey($0) }, openWindow: openWindow) },
+                                   onHoverChart: ChartPeek.enabled ? { row, chart in ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm) } : nil,
+                                   chartDotsAfter: vm.labelIndex,
+
                                    findQuery: finder.activeQuery,
                                    findCurrent: finder.currentMatch,
                                    onSelectRows: { importSelection = $0 },

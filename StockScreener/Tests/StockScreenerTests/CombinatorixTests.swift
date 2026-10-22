@@ -585,3 +585,18 @@ final class EventScanTests: XCTestCase {
         XCTAssertNil(ScanCond.parse("nonsense 5"))
     }
 }
+
+final class ShortlistTests: XCTestCase {
+    func testShortlistRules() {
+        var a = ShortlistAlert()
+        let has = SheetRow(id: 0, cells: ["12"], numbers: [12]), blank = SheetRow(id: 1, cells: [""], numbers: [nil])
+        XCTAssertTrue(a.onShortlist(has, column: 0)); XCTAssertFalse(a.onShortlist(blank, column: 0))
+        a.shortlistOp = "≤"; a.shortlistValue = 10
+        XCTAssertFalse(a.onShortlist(has, column: 0))
+        a.shortlistValue = 20
+        XCTAssertTrue(a.onShortlist(has, column: 0))
+        XCTAssertTrue(ShortlistCond(column: "MS", op: ">", value: 99).passes(99.5))
+        XCTAssertFalse(ShortlistCond(column: "MS", op: ">", value: 99).passes(99))
+        XCTAssertEqual(a.name, "Shortlist D_Trigger ≤ 20 → MS > 99 or DS > 99")
+    }
+}

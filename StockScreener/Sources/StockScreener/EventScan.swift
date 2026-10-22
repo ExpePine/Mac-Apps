@@ -294,7 +294,7 @@ struct EventScanView: View {
 
     private func row(_ r: ScanRow) -> some View {
         HStack(spacing: 0) {
-            Text(r.symbol).bold().frame(width: 120, alignment: .leading)
+            SymbolWithDots(symbol: r.symbol).frame(width: 120, alignment: .leading)
             ForEach(conds) { c in
                 Group {
                     if let h = r.hits[c.id] {

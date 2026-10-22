@@ -107,7 +107,7 @@ struct WatchlistView: View {
             Divider()
 
             Table(rows, selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("Symbol", value: \.symbol) { row in Text(row.symbol).fontWeight(.semibold) }
+                TableColumn("Symbol", value: \.symbol) { row in SymbolWithDots(symbol: row.symbol, bold: false) }
                     .width(min: 80, ideal: 110)
                 TableColumn("Added", value: \.item.addedAt) { row in
                     Text(row.item.addedAt.formatted(date: .abbreviated, time: .omitted))
