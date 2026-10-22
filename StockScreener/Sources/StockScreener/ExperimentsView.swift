@@ -137,6 +137,7 @@ struct ExperimentsView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var ec = ExperimentCenter.shared
     @State private var selected: UUID?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HSplitView {
@@ -151,7 +152,11 @@ struct ExperimentsView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                HStack { Button { let e = Experiment(); ec.experiments.append(e); selected = e.id } label: { Label("New experiment", systemImage: "plus") }; Spacer() }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack { Button { let e = Experiment(); ec.experiments.append(e); selected = e.id } label: { Label("New experiment", systemImage: "plus") }; Spacer() }
+                    Button { openWindow(id: "timinglab") } label: { Label("Timing Lab (shortlist → triggers)", systemImage: "timer") }
+                        .help("Special experiment: days-ago columns for a shortlist and buy triggers → 5 / 21 / 63-day and to-today results (⌥⌘T)")
+                }
                     .padding(8)
             }
             .frame(minWidth: 210, idealWidth: 240, maxWidth: 320)

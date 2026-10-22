@@ -537,3 +537,31 @@ final class HiT3Tests: XCTestCase {
         XCTAssertGreaterThan(DeliveryColumns.hiOverT3(x, t3Source: x, sma: 22)!, 1)
     }
 }
+
+final class TimingLabTests: XCTestCase {
+    private func series() -> PriceSeries {
+        var days: [String] = [], closes: [Double] = []
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
+        var d = f.date(from: "2026-01-01")!
+        for i in 0..<200 { days.append(f.string(from: d)); closes.append(100 + Double(i)); d = d.addingTimeInterval(86_400) }
+        return PriceSeries(days: days, closes: closes)
+    }
+    func testBarsAgoAndAfterShortlistRule() {
+        let s = series()
+        let asOf = s.days[199]
+        let rows = [TLInputRow(symbol: "AAA", asOf: asOf, shortlist: 100, triggers: [90, 150])]     // var2 after, var3 before shortlist
+        let r = TLEngine.run(rows, names: ["var2", "var3"], series: ["AAA": s])
+        let v2 = r.trades.first { $0.entryName == "var2" }!
+        XCTAssertEqual(v2.day, s.days[109]); XCTAssertEqual(v2.wait, 10)
+        XCTAssertEqual(v2.ret[5]!, (s.closes[114] / s.closes[109] - 1) * 100, accuracy: 1e-9)
+        XCTAssertEqual(v2.toToday, (s.closes[199] / s.closes[109] - 1) * 100, accuracy: 1e-9)
+        XCTAssertEqual(r.stats.first { $0.name == "var3" }!.beforeShortlist, 1)
+        XCTAssertEqual(r.stats.first { $0.isReference }!.trades, 1)
+    }
+    func testSheetDates() {
+        XCTAssertTrue(TLSheet.monthFirst(["10/22/2026", "10/21/2026"]))
+        XCTAssertEqual(TLSheet.day("10/22/2026", monthFirst: true), "2026-10-22")
+        XCTAssertEqual(TLSheet.day("22/10/2026", monthFirst: false), "2026-10-22")
+        XCTAssertNil(TLSheet.bars("∅")); XCTAssertEqual(TLSheet.bars("101.00"), 101); XCTAssertNil(TLSheet.bars(""))
+    }
+}

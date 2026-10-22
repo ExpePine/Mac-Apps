@@ -115,6 +115,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
+        Window("Timing Lab", id: "timinglab") {
+            TimingLabView()
+                .environmentObject(vm)
+                .frame(minWidth: 1100, minHeight: 640)
+        }
+        .keyboardShortcut("t", modifiers: [.command, .option])
+
         Window("News & Deals", id: "newschart") {
             NewsChartView()
                 .environmentObject(vm)
@@ -187,6 +194,7 @@ struct ToolsCommands: Commands {
             Button("Experiments — compare your triggers (⌥⌘E)") { openWindow(id: "experiments") }
             Button("Multibaggers — ≥30% in a month, 2023 → now (⌥⌘M)") { openWindow(id: "multibaggers") }
             Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
+            Button("Timing Lab — how buy triggers after a shortlist performed (⌥⌘T)") { openWindow(id: "timinglab") }
             Button("News & Deals — news labels (Groq) + bulk / block deals on a chart (⌥⌘N)") { openWindow(id: "newschart") }
             Button("AUTO-PREDICT — learns what comes before ≥30% monthly moves (⌥⌘A)") { openWindow(id: "autopredict") }
             Button("Gainer Charts — Chart 1 → Chart 2 of each top gainer (⌥⌘G)") { openWindow(id: "gainerCharts") }
