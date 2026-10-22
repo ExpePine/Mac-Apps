@@ -175,6 +175,7 @@ struct MultibaggerView: View {
         d.set(month ?? "", forKey: "reel.mbMonth")
         d.set(scope, forKey: "reel.mbScope")
         d.set(start ?? "", forKey: "reel.mbStart")
+        d.set(UUID().uuidString + "|" + (start ?? ""), forKey: "reel.jump")      // tells an already-open reel to move
         let l = ReelLayout(rawValue: d.string(forKey: "reel.layout") ?? "") ?? .chart1
         if let layout { d.set(layout.rawValue, forKey: "reel.layout") }
         else if l == .chart1 || l == .chart2 { d.set(ReelLayout.side.rawValue, forKey: "reel.layout") }

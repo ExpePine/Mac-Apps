@@ -250,6 +250,11 @@ struct DeliveryView: View {
                 } else {
                     LWChartView(holder: lw)
                         .frame(minHeight: 380)
+                    if !lw.hoverLines.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(lw.hoverLines.prefix(4).enumerated()), id: \.offset) { _, l in Text(l).font(.caption).lineLimit(1).help(l) }
+                        }
+                    }
                 }
                 Text("Orange bands + ▲DQ = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated") · bars at the bottom = \(metricName) · blue = the rolling highest")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)

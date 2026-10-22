@@ -501,3 +501,17 @@ final class DealsParseTests: XCTestCase {
         XCTAssertEqual(x.day, "2026-10-21"); XCTAssertTrue(x.isBuy); XCTAssertEqual(x.qty, 120000); XCTAssertEqual(x.price, 745.5, accuracy: 1e-9)
     }
 }
+
+final class EventCodeTests: XCTestCase {
+    func testCodesAndGuess() {
+        let list = EventCodes.defaults
+        XCTAssertEqual(EventCodes.code(for: "Dividend", in: list), "D")
+        XCTAssertEqual(EventCodes.code(for: "factory fire", in: list), "FF")
+        XCTAssertEqual(EventCodes.code(for: nil, in: list), "N")
+        XCTAssertEqual(EventCodes.code(for: "Weather", in: list), "W")
+        let h = [Headline(title: "Fire breaks out at XYZ plant in Gujarat", source: "ET", date: nil, link: "")]
+        XCTAssertEqual(EventCodes.guess(h, in: list), "Factory fire")
+        let d = [Headline(title: "ABC declares interim dividend of Rs 5", source: "BS", date: nil, link: "")]
+        XCTAssertEqual(EventCodes.guess(d, in: list), "Dividend")
+    }
+}

@@ -24,6 +24,8 @@ struct NewsChartView: View {
     @State private var candles: [YahooClient.Candle] = []
     @State private var chartError: String?
     @State private var selected: String?
+    @State private var showCodes = false
+    @AppStorage(EventCodes.key) private var codesData = Data()
 
     struct Event: Identifiable {
         let id: String
@@ -39,7 +41,9 @@ struct NewsChartView: View {
         var out: [Event] = []
         if showNews {
             for nd in news.days(symbol) {
-                out.append(Event(id: "n" + nd.day, day: nd.day, kind: "News", text: nd.label ?? "…",
+                let code = EventCodes.code(for: nd.category)
+                out.append(Event(id: "n" + nd.day, day: nd.day, kind: "News",
+                                 text: "\(code) · \(nd.label ?? "…")" + (nd.category.map { "  (\($0))" } ?? ""),
                                  detail: nd.headlines.prefix(3).map { "\($0.title) (\($0.source))" }.joined(separator: " · "),
                                  link: nd.headlines.first?.link))
             }
@@ -72,6 +76,7 @@ struct NewsChartView: View {
                         if let e = chartError { Text("Yahoo: \(e)").font(.caption).foregroundStyle(.orange).padding(4) }
                         if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red) }
                         LWChartView(holder: lw)
+                        hoverPanel
                     }
                     .frame(minHeight: 300)
                     eventTable.frame(minHeight: 140, idealHeight: 220)
@@ -93,6 +98,8 @@ struct NewsChartView: View {
         .onChange(of: range) { _ in push() }
         .onChange(of: colorScheme) { _ in push() }
         .onChange(of: candles.count) { _ in push() }
+        .onChange(of: codesData) { _ in push() }
+        .sheet(isPresented: $showCodes) { EventCodesEditor() }
     }
 
     private var header: some View {
@@ -125,6 +132,11 @@ struct NewsChartView: View {
                 Button { deals.update(days: 730, force: true) } label: { Label("Update deals", systemImage: "arrow.down.circle") }
                     .disabled(deals.busy).fixedSize()
                     .help("NSE bulk & block deals for every stock, last 2 years (then only new days)")
+                Button { showCodes = true } label: { Label("Event letters…", systemImage: "character.book.closed") }.fixedSize()
+                    .help("The dictionary of news events → letters on the chart (Dividend = D, Factory fire = FF …) — edit any time")
+                Button { news.reclassify(symbol: symbol, company: company, groqModel: vm.settings.groqModel) } label: { Label("Re-classify", systemImage: "tag") }
+                    .disabled(symbol.isEmpty || news.busy != nil).fixedSize()
+                    .help("Ask Groq again which event each news day is (use after editing the event list)")
                 Toggle("News", isOn: $showNews).toggleStyle(.checkbox).fixedSize()
                 Toggle("Bulk / block deals", isOn: $showDeals).toggleStyle(.checkbox).fixedSize()
                 Toggle("Delivery bars", isOn: $showDeliv).toggleStyle(.checkbox).fixedSize()
@@ -144,6 +156,22 @@ struct NewsChartView: View {
             .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// Under the chart: the full headlines (Google News title — source) of the day under the crosshair.
+    private var hoverPanel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if lw.hoverLines.isEmpty {
+                Text("Move the crosshair over a letter to read that day's news here").font(.caption).foregroundStyle(.tertiary)
+            } else {
+                ForEach(Array(lw.hoverLines.prefix(6).enumerated()), id: \.offset) { _, l in
+                    Text(l).font(.callout).lineLimit(1).truncationMode(.tail).textSelection(.enabled).help(l)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
     }
 
     private var eventTable: some View {
@@ -199,5 +227,51 @@ struct NewsChartView: View {
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
                                  full: true, onlyRises: true, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: layers, events: LWChartData.eventMarkers(s, layers: layers)))
+    }
+}
+
+
+/// Edit the dictionary of news events → letters drawn on the chart.
+struct EventCodesEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var rows: [EventCode] = EventCodes.all
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Event letters").font(.title2.bold())
+            Text("Each news day gets one event from this list (Groq picks it from the headlines; without Groq the keywords are used). The letters are what the chart shows. Changes apply to the chart at once; press Re-classify for Groq to re-pick events after adding new ones.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack { Text("Event").bold().frame(width: 200, alignment: .leading); Text("Letters").bold().frame(width: 70, alignment: .leading); Text("Keywords (comma-separated)").bold(); Spacer() }
+                .font(.caption)
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach($rows) { $r in
+                        HStack {
+                            TextField("Event", text: $r.name).frame(width: 200)
+                            TextField("Letters", text: $r.code).frame(width: 70).font(.body.monospaced())
+                            TextField("keywords", text: $r.keywords)
+                            Button { rows.removeAll { $0.id == r.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                        }
+                        .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
+            .frame(minHeight: 320)
+            HStack {
+                Button { rows.insert(EventCode(name: "New event", code: "X", keywords: ""), at: max(0, rows.count - 1)) } label: { Label("Add event", systemImage: "plus") }
+                Button("Reset to defaults") { rows = EventCodes.defaults }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    EventCodes.all = rows.map { var r = $0; r.code = r.code.trimmingCharacters(in: .whitespaces).uppercased(); return r }
+                        .filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && !$0.code.isEmpty }
+                    NewsTimeline.shared.touch()
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 720, height: 560)
     }
 }

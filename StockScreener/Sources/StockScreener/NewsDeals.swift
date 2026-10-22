@@ -248,6 +248,60 @@ struct NewsDay: Codable, Identifiable {
     var headlines: [Headline]
     var label: String?               // Groq's 3–4 words (nil = not labelled yet)
     var labelIsGuess = false         // true = first words of the top headline (no Groq)
+    var category: String?            // an event name from the code dictionary (e.g. "Dividend"), "Other", or nil
+}
+
+// MARK: - Event dictionary: news category → letters on the chart (editable)
+
+struct EventCode: Codable, Hashable, Identifiable {
+    var id = UUID()
+    var name: String          // e.g. "Dividend"
+    var code: String          // e.g. "D"
+    var keywords: String      // comma-separated words used when Groq isn't available
+
+    var words: [String] { keywords.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+}
+
+enum EventCodes {
+    static let key = "news.eventCodes"
+    static let defaults: [EventCode] = [
+        EventCode(name: "Dividend", code: "D", keywords: "dividend, record date"),
+        EventCode(name: "Results", code: "R", keywords: "results, q1, q2, q3, q4, quarterly, profit, net loss, revenue, earnings"),
+        EventCode(name: "Order win", code: "O", keywords: "order, contract, bags, wins, letter of award"),
+        EventCode(name: "Factory fire", code: "FF", keywords: "fire, blaze, explosion, blast"),
+        EventCode(name: "Rating change", code: "RT", keywords: "upgrade, downgrade, rating, target price"),
+        EventCode(name: "Stake sale", code: "SS", keywords: "stake sale, sells stake, offloads, ofs, offer for sale"),
+        EventCode(name: "Stake buy", code: "SB", keywords: "buys stake, acquires stake, raises stake, increases stake"),
+        EventCode(name: "Acquisition / merger", code: "A", keywords: "acquire, acquisition, merger, amalgamation, takeover"),
+        EventCode(name: "Bonus / split", code: "BS", keywords: "bonus, split, sub-division"),
+        EventCode(name: "Buyback", code: "BB", keywords: "buyback, buy-back"),
+        EventCode(name: "Fund raise", code: "FR", keywords: "qip, preferential, rights issue, fund raise, ncd, raises"),
+        EventCode(name: "Expansion / new plant", code: "EX", keywords: "expansion, new plant, capacity, capex, commissioning, facility"),
+        EventCode(name: "Management change", code: "MC", keywords: "ceo, md, resigns, appoints, appointed, cfo, director"),
+        EventCode(name: "Regulatory / legal", code: "L", keywords: "sebi, penalty, court, nclt, probe, raid, notice, gst, tax demand"),
+        EventCode(name: "Product / launch", code: "P", keywords: "launch, launches, unveils, approval, usfda"),
+        EventCode(name: "Block / bulk deal", code: "BD", keywords: "block deal, bulk deal"),
+        EventCode(name: "Other", code: "N", keywords: ""),
+    ]
+    static var all: [EventCode] {
+        get {
+            guard let d = UserDefaults.standard.data(forKey: key), let l = try? JSONDecoder().decode([EventCode].self, from: d), !l.isEmpty else { return defaults }
+            return l
+        }
+        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: key) }
+    }
+    /// Letters for a category (unknown → its first letter, none → "N").
+    static func code(for category: String?, in list: [EventCode] = all) -> String {
+        guard let c = category?.trimmingCharacters(in: .whitespaces), !c.isEmpty else { return list.first { $0.name == "Other" }?.code ?? "N" }
+        if let e = list.first(where: { $0.name.caseInsensitiveCompare(c) == .orderedSame }) { return e.code }
+        return String(c.prefix(1)).uppercased()
+    }
+    /// Keyword match on the headlines (used without Groq).
+    static func guess(_ headlines: [Headline], in list: [EventCode] = all) -> String {
+        let text = headlines.prefix(4).map(\.title).joined(separator: " ").lowercased()
+        for e in list where !e.words.isEmpty { if e.words.contains(where: { text.contains($0) }) { return e.name } }
+        return "Other"
+    }
 }
 
 struct NewsHistory: Codable {
@@ -277,6 +331,23 @@ struct NewsHistory: Codable {
         if let d = try? JSONEncoder().encode(h) { try? d.write(to: Self.url(h.symbol), options: .atomic) }
         revision &+= 1
     }
+
+    /// Re-runs the labels and categories for one stock (e.g. after editing the event dictionary).
+    func reclassify(symbol: String, company: String?, groqModel: String) {
+        let sym = symbol.uppercased()
+        guard busy == nil, var h = history(sym) else { return }
+        for k in h.days.keys { h.days[k]?.category = nil }
+        busy = sym
+        Task {
+            await label(&h, company: company ?? sym, model: groqModel)
+            store(h)
+            busy = nil
+            status = "News: \(sym) re-classified"
+        }
+    }
+
+    /// Bumps the revision so charts redraw (event letters changed).
+    func touch() { revision &+= 1 }
 
     /// News days for the chart, oldest first.
     func days(_ symbol: String) -> [NewsDay] { (history(symbol)?.days.values.map { $0 } ?? []).sorted { $0.day < $1.day } }
@@ -341,7 +412,9 @@ struct NewsHistory: Codable {
 
     /// 3–4 word label per day: Groq when a key + model are set, otherwise the top headline's first words.
     private func label(_ h: inout NewsHistory, company: String, model: String) async {
-        let todo = h.days.values.filter { $0.label == nil || $0.labelIsGuess }.map(\.day).sorted()
+        let todo = h.days.values.filter { $0.label == nil || $0.labelIsGuess || $0.category == nil }.map(\.day).sorted()
+        let codes = EventCodes.all
+        let names = codes.map(\.name).joined(separator: ", ")
         guard !todo.isEmpty else { return }
         let canGroq = !model.isEmpty && !GroqClient.apiKey.isEmpty
         if canGroq {
@@ -352,17 +425,24 @@ struct NewsHistory: Codable {
                     return d + ": " + nd.headlines.prefix(4).map(\.title).joined(separator: " | ")
                 }.joined(separator: "\n")
                 let system = """
-                You label news days on a stock chart for \(company) (NSE: \(h.symbol)). For each date, write a 3–4 word label \
-                that says what the news was about (e.g. "Q2 profit jumps", "Big order win", "Promoter stake sale", "SEBI penalty"). \
-                Use only the headlines given; if they are not about this company, write "Not company news". No advice, no hype. \
-                Reply as JSON: {"labels": {"yyyy-MM-dd": "label"}}.
+                You label news days on a stock chart for \(company) (NSE: \(h.symbol)). For each date: \
+                (1) a 3–4 word label that says what the news was about (e.g. "Q2 profit jumps", "Big order win", "Promoter stake sale"); \
+                (2) the ONE best category from this list: \(names). \
+                Use only the headlines given. If they are not about this company itself (e.g. the company rating or reporting on \
+                others), use the label "Not company news" and category "Other". No advice, no hype. \
+                Reply as JSON: {"days": {"yyyy-MM-dd": {"label": "…", "category": "…"}}}.
                 """
                 if let text = try? await GroqClient.chat(model: model, system: system, user: lines, json: true),
                    let d = text.data(using: .utf8), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-                   let labels = j["labels"] as? [String: Any] {
-                    for (day, v) in labels { if let s = v as? String, var nd = h.days[day] {
-                        nd.label = String(s.split(separator: " ").prefix(5).joined(separator: " ").prefix(40)); nd.labelIsGuess = false; h.days[day] = nd
-                    } }
+                   let labels = (j["days"] as? [String: Any]) ?? (j["labels"] as? [String: Any]) {
+                    for (day, v) in labels {
+                        guard var nd = h.days[day] else { continue }
+                        let lab = (v as? [String: Any])?["label"] as? String ?? (v as? String)
+                        let cat = (v as? [String: Any])?["category"] as? String
+                        if let s = lab { nd.label = String(s.split(separator: " ").prefix(5).joined(separator: " ").prefix(40)); nd.labelIsGuess = false }
+                        nd.category = cat.map { c in codes.first { $0.name.caseInsensitiveCompare(c) == .orderedSame }?.name ?? c } ?? EventCodes.guess(nd.headlines, in: codes)
+                        h.days[day] = nd
+                    }
                 }
             }
         }
@@ -370,6 +450,11 @@ struct NewsHistory: Codable {
             guard var nd = h.days[d], let t = nd.headlines.first?.title else { continue }
             nd.label = t.split(separator: " ").prefix(4).joined(separator: " ")
             nd.labelIsGuess = true
+            h.days[d] = nd
+        }
+        for d in todo where h.days[d]?.category == nil {
+            guard var nd = h.days[d] else { continue }
+            nd.category = EventCodes.guess(nd.headlines, in: codes)
             h.days[d] = nd
         }
         if !canGroq { status = "News labels are the first words of each headline — add a Groq key + model (Daily Gainers → … → News & AI settings) for 3–4 word summaries." }

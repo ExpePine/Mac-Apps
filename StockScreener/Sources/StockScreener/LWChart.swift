@@ -102,8 +102,12 @@ struct LWChartData: Encodable {
         var color = "#FF9800"
         var shape = "arrowUp"
         let text: String
-        init(time: String, text: String, position: String = "belowBar", color: String = "#FF9800", shape: String = "arrowUp") {
+        var info: String? = nil           // shown on the chart while the crosshair is on this day
+        var full: [String]? = nil         // shown under the chart (headlines + source / deal details)
+        init(time: String, text: String, position: String = "belowBar", color: String = "#FF9800", shape: String = "arrowUp",
+             info: String? = nil, full: [String]? = nil) {
             self.time = time; self.text = text; self.position = position; self.color = color; self.shape = shape
+            self.info = info; self.full = full
         }
     }
     var candles: [Candle] = []
@@ -200,9 +204,15 @@ struct LWChartData: Encodable {
         var out: [Marker] = []
         let sym = symbol.uppercased()
         if layers.contains(.news) {
+            let codes = EventCodes.all
             for nd in NewsTimeline.shared.days(sym) where nd.day >= from {
                 guard let l = nd.label, l != "Not company news" else { continue }
-                out.append(Marker(time: nd.day, text: l, position: "aboveBar", color: "#2962FF", shape: "circle"))
+                let code = EventCodes.code(for: nd.category, in: codes)
+                out.append(Marker(time: nd.day, text: code, position: "aboveBar", color: "#2962FF", shape: "circle",
+                                  info: "\(code) · \(l)" + (nd.category.map { " (\($0))" } ?? ""),
+                                  full: nd.headlines.prefix(6).map { h in
+                                      "\(nd.day) · \(h.title)" + (h.source.isEmpty ? "" : " — \(h.source)")
+                                  }))
             }
         }
         if layers.contains(.deals) {
@@ -210,8 +220,11 @@ struct LWChartData: Encodable {
             let byDay = Dictionary(grouping: DealsCenter.shared.bySymbol[sym] ?? [], by: \.day)
             for (day, ds) in byDay where day >= from {
                 let buy = ds.filter(\.isBuy).reduce(0) { $0 + $1.valueCr }, sell = ds.filter { !$0.isBuy }.reduce(0) { $0 + $1.valueCr }
-                if buy > 0 { out.append(Marker(time: day, text: String(format: "B %.1fCr", buy), position: "belowBar", color: "#26a69a", shape: "arrowUp")) }
-                if sell > 0 { out.append(Marker(time: day, text: String(format: "S %.1fCr", sell), position: "aboveBar", color: "#ef5350", shape: "arrowDown")) }
+                let lines = ds.map { d in "\(d.day) · \(d.kind) \(d.isBuy ? "BUY" : "SELL") · \(d.client) · \(DeliveryView.short(d.qty)) shares @ \(String(format: "%.2f", d.price)) (\(String(format: "%.2f", d.valueCr)) Cr)" }
+                if buy > 0 { out.append(Marker(time: day, text: "B", position: "belowBar", color: "#26a69a", shape: "arrowUp",
+                                               info: String(format: "B · deal buys %.2f Cr", buy), full: lines.filter { $0.contains(" BUY ") })) }
+                if sell > 0 { out.append(Marker(time: day, text: "S", position: "aboveBar", color: "#ef5350", shape: "arrowDown",
+                                                info: String(format: "S · deal sells %.2f Cr", sell), full: lines.filter { $0.contains(" SELL ") })) }
             }
         }
         return out
@@ -224,6 +237,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     private var pending: String?
     @Published var failed = false
     @Published var lastError: String?
+    /// Lines for the day under the crosshair (news headlines / deals) — shown under the chart.
+    @Published var hoverLines: [String] = []
     /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
     var onUserRange: ((String, String) -> Void)?
 
@@ -240,6 +255,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         view = WKWebView(frame: .zero, configuration: cfg)
         super.init()
         ucc.add(WeakHandler(self), name: "range")
+        ucc.add(WeakHandler(self), name: "hover")
         view.navigationDelegate = self
         view.setValue(false, forKey: "drawsBackground")
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
@@ -257,6 +273,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     }
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+        if m.name == "hover" { let l = (m.body as? [String]) ?? []; if l != hoverLines { hoverLines = l }; return }
         guard let a = m.body as? [String], a.count == 2 else { return }
         onUserRange?(a[0], a[1])
     }
@@ -279,11 +296,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       #c{position:absolute;inset:0}
       #legend{position:absolute;left:8px;top:6px;z-index:5;pointer-events:none;line-height:1.5}
       #legend b{font-size:13px}
+      #tip{position:absolute;z-index:6;pointer-events:none;display:none;padding:3px 7px;border-radius:5px;font-size:12px;font-weight:600;
+           background:rgba(41,98,255,0.92);color:#fff;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.3)}
       #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#888}
     </style>
     <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
-    </head><body><div id="c"></div><div id="legend"></div><div id="err">Chart library couldn't load (needs internet once).</div>
+    </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
     var chart=null, candle, hist, high, bands, prank, sma22, sma66, per, t3s, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
@@ -321,12 +340,28 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       });
       chart.subscribeCrosshairMove(function(p){
         if(!last) return;
+        hover(p);
         if(!p || !p.time || !p.seriesData){ legendLast(); return; }
         var g=function(s){ return p.seriesData.get(s)||null; };
         legend(g(candle),g(hist),g(high),p.time,g(prank),g(sma22),g(sma66),g(per),g(t3s));
       });
       return true;
     }
+    // Crosshair over a news / deal day: short text on the chart, full lines to the app (shown under the chart)
+    var lastHover='';
+    function hover(p){
+      var tip=document.getElementById('tip');
+      var key=(p&&p.time)?day(p.time):'';
+      var h=key&&window._hover?window._hover[key]:null;
+      if(!h || !p.point){ tip.style.display='none'; if(lastHover!==''){ lastHover=''; post([]); } return; }
+      tip.innerHTML=h.map(function(x){ return '<div style="color:'+(x.color==='#2962FF'?'#fff':'#fff')+'">'+x.info+'</div>'; }).join('');
+      tip.style.background=h[0].color==='#2962FF'?'rgba(41,98,255,0.92)':(h[0].color==='#26a69a'?'rgba(38,166,154,0.92)':'rgba(239,83,80,0.92)');
+      tip.style.display='block';
+      var w=document.body.clientWidth, x=p.point.x+14; if(x+tip.offsetWidth>w-70) x=p.point.x-14-tip.offsetWidth;
+      tip.style.left=Math.max(4,x)+'px'; tip.style.top=Math.max(40,p.point.y-36)+'px';
+      if(key!==lastHover){ lastHover=key; post([].concat.apply([],h.map(function(x){ return x.full||[]; }))); }
+    }
+    function post(lines){ if(window.webkit&&window.webkit.messageHandlers.hover) window.webkit.messageHandlers.hover.postMessage(lines); }
     function day(t){ if(typeof t==='string') return t; if(typeof t==='number'){ var d=new Date(t*1000); return d.toISOString().slice(0,10); }
       return t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'); }
     // Shows days f…t even when they run past the data (TradingView often shows empty days on the right):
@@ -395,7 +430,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         var c=Object.assign({},m); c.time=st[lo]; return c;
       }).filter(function(m){ return m; });
       snapped.sort(function(a,b){ return a.time<b.time?-1:(a.time>b.time?1:0); });
-      mk.setMarkers(snapped);
+      window._hover={};
+      snapped.forEach(function(m){ if(m.info){ (window._hover[m.time]=window._hover[m.time]||[]).push({info:m.info,full:m.full,color:m.color}); } });
+      mk.setMarkers(snapped.map(function(m){ return {time:m.time,position:m.position,color:m.color,shape:m.shape,text:m.text}; }));
       var n={'6M':126,'1Y':252,'2Y':504}[d.range];
       var len=Math.max(d.candles.length,d.deliv.length);
       window._quiet=true;

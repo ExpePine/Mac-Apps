@@ -11,6 +11,7 @@ struct ChartReelView: View {
     @StateObject private var pool = ReelPool()
     @StateObject private var deliveryLW = LWChartHolder()
     @AppStorage("reel.syncDelivery") private var syncDelivery = true
+    @AppStorage("reel.jump") private var jump = ""            // "<nonce>|<item key>" from Multibaggers when the reel is already open
     @State private var syncNote: String?
     @State private var lastTV = ""
     @State private var syncFails = 0
@@ -157,6 +158,19 @@ struct ChartReelView: View {
         .onChange(of: vm.gainersDay) { _ in restart() }
         .onChange(of: layout) { _ in phase = 0; show(shown, items) }
         .onChange(of: shown) { _ in lastTV = ""; syncFails = 0; syncNote = nil }
+        .onChange(of: jump) { j in
+            // after the source / month changes above have reset the list, go to the chosen stock
+            DispatchQueue.main.async {
+                let key = j.split(separator: "|", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
+                UserDefaults.standard.set("", forKey: "reel.mbStart")
+                refresh += 1
+                let list = items
+                let i = key.isEmpty ? 0 : (list.firstIndex { $0.key == key } ?? 0)
+                phase = 0
+                index = Double(i)
+                show(i, list)
+            }
+        }
         .onReceive(syncTimer) { _ in pollTV(current) }
         .onAppear {
             // delivery chart → TradingView: when you pan / zoom the delivery chart, Chart 1 follows
