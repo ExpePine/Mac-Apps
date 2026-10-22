@@ -352,6 +352,17 @@ struct NewsHistory: Codable {
         revision &+= 1
     }
 
+    /// The current month is looked at again after this long (older months are kept as saved).
+    static let refreshAfter: TimeInterval = 2 * 3600
+
+    /// True when the stock has no saved news, or its current month was last checked > refreshAfter ago.
+    func needsUpdate(_ symbol: String) -> Bool {
+        guard let h = history(symbol) else { return true }
+        let fm = DateFormatter(); fm.locale = Locale(identifier: "en_US_POSIX"); fm.timeZone = TimeZone(identifier: "Asia/Kolkata"); fm.dateFormat = "yyyy-MM"
+        guard let t = h.monthsFetched[fm.string(from: Date())] else { return true }
+        return Date().timeIntervalSince(t) > Self.refreshAfter
+    }
+
     /// Re-runs the labels and categories for one stock (e.g. after editing the event dictionary).
     func reclassify(symbol: String, company: String?, groqModel: String) {
         let sym = symbol.uppercased()
@@ -390,7 +401,7 @@ struct NewsHistory: Codable {
                 guard let mDate = cal.date(byAdding: .month, value: -k, to: now) else { continue }
                 let key = fm.string(from: mDate)
                 let isCurrent = k == 0
-                if !force, let t = h.monthsFetched[key], !isCurrent || now.timeIntervalSince(t) < 6 * 3600 { continue }
+                if !force, let t = h.monthsFetched[key], !isCurrent || now.timeIntervalSince(t) < Self.refreshAfter { continue }
                 let start = key + "-01"
                 let next = fm.string(from: cal.date(byAdding: .month, value: 1, to: fd.date(from: start)!)!) + "-01"
                 status = "News: \(sym) · \(key)…"

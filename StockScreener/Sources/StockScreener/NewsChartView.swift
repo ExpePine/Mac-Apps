@@ -218,7 +218,7 @@ struct NewsChartView: View {
         let s = symbol.uppercased()
         guard !s.isEmpty else { return }
         dc.loadIfNeeded()
-        if news.history(s) == nil { news.fetch(symbol: s, company: company, months: months, groqModel: vm.settings.groqModel) }
+        if news.needsUpdate(s) { news.fetch(symbol: s, company: company, months: months, groqModel: vm.settings.groqModel) }
         Task {
             do { let c = try await YahooClient.candles(s, range: "5y"); if symbol.uppercased() == s { candles = c } }
             catch { if symbol.uppercased() == s { chartError = error.localizedDescription } }
@@ -378,7 +378,8 @@ struct NewsStrip: View {
         .padding(.horizontal, 10).padding(.vertical, 4)
         .task(id: symbol) {
             expanded = nil
-            if !symbol.isEmpty, news.history(symbol) == nil, news.busy == nil {
+            // on every visit: only the new news (current month, if last checked over 2 h ago); saved months stay as they are
+            if !symbol.isEmpty, news.busy == nil, news.needsUpdate(symbol) {
                 news.fetch(symbol: symbol, company: company, months: months, groqModel: vm.settings.groqModel)
             }
         }
