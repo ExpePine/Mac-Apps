@@ -589,11 +589,6 @@ final class SheetCellView: NSTableCellView {
         }
     }
 
-    override func layout() {
-        super.layout()
-        changeLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
-    }
-
     /// Glows `color` and fades out over `duration` seconds.
     func flash(_ color: NSColor, duration: Double) {
         guard duration > 0.05, let layer else { return }
@@ -647,6 +642,7 @@ final class SheetCellView: NSTableCellView {
         super.layout()
         flashLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
         findLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
+        changeLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
     }
 
     func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?) {
