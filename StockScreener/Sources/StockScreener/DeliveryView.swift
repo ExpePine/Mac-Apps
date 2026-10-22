@@ -67,7 +67,7 @@ struct DeliveryView: View {
         .onChange(of: length) { _ in recompute() }
         .onChange(of: onlyRises) { _ in recompute() }
         .onChange(of: full) { _ in recompute() }
-        .onChange(of: metricRaw) { _ in recompute() }
+        .onChange(of: metricRaw) { _ in recompute(); DeliveryCenter.shared.refreshColumns() }   // STREAK / HI/T3 follow the signal SMA
         .onChange(of: within) { _ in recompute() }
         .onChange(of: scope) { _ in recompute() }
         .onChange(of: selected) { s in loadCandles(s); pushChart() }

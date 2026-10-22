@@ -38,7 +38,7 @@ extension ScreenerViewModel {
     func withDeliveryValues(_ t: SheetTable, asOf day: String) -> SheetTable {
         let dc = DeliveryCenter.shared
         guard !dc.storedDays.isEmpty, let label = labelIndex else { return t }
-        let names = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "t3Color (NSE)", "DLVR (NSE)", "Safety (NSE)", "DQ_PRANK (NSE)", "JUMP (NSE)", "DELSMA (NSE)", "STREAK (NSE)"]
+        let names = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "t3Color (NSE)", "HI/T3", "HI/T3 (NSE)", "DLVR (NSE)", "Safety (NSE)", "DQ_PRANK (NSE)", "JUMP (NSE)", "DELSMA (NSE)", "STREAK (NSE)"]
         let idx = names.compactMap { n in t.headers.firstIndex(of: n).map { (n, $0) } }
         guard !idx.isEmpty else { return t }
         let cols = DeliveryColumns.all(dc.book, asOf: day)
@@ -47,8 +47,8 @@ extension ScreenerViewModel {
             let c = cols[r.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
             for (n, i) in idx where i < cells.count {
                 let v: Double?
-                if n.hasPrefix("DLVR") { v = c?.dlvr ?? 0 } else if n.hasPrefix("Safety") { v = c?.safety } else if n.hasPrefix("JUMP") { v = c?.jump } else if n.hasPrefix("DELSMA") { v = c?.delSma } else if n.hasPrefix("STREAK") { v = c?.streak.map(Double.init) } else if n.hasPrefix("t3Color") { v = c?.t3Color.map(Double.init) } else { v = c?.pctRank }
-                cells[i] = v.map { n.hasPrefix("DLVR") ? ($0 == 0 ? "0" : String(format: "%.2f", $0)) : (n.hasPrefix("Safety") || n.hasPrefix("STREAK") || n.hasPrefix("t3Color") ? String(format: "%.0f", $0) : (n.hasPrefix("JUMP") ? String(format: "%.2f", $0) : String(format: "%.1f", $0))) } ?? ""
+                if n.hasPrefix("DLVR") { v = c?.dlvr ?? 0 } else if n.hasPrefix("Safety") { v = c?.safety } else if n.hasPrefix("JUMP") { v = c?.jump } else if n.hasPrefix("DELSMA") { v = c?.delSma } else if n.hasPrefix("STREAK") { v = c?.streak.map(Double.init) } else if n.hasPrefix("t3Color") { v = c?.t3Color.map(Double.init) } else if n.hasPrefix("HI/T3") { v = c?.hiT3 } else { v = c?.pctRank }
+                cells[i] = v.map { n.hasPrefix("DLVR") ? ($0 == 0 ? "0" : String(format: "%.2f", $0)) : (n.hasPrefix("Safety") || n.hasPrefix("STREAK") || n.hasPrefix("t3Color") ? String(format: "%.0f", $0) : (n.hasPrefix("JUMP") || n.hasPrefix("HI/T3") ? String(format: "%.2f", $0) : String(format: "%.1f", $0))) } ?? ""
                 nums[i] = v
             }
             return SheetRow(id: r.id, cells: cells, numbers: nums)

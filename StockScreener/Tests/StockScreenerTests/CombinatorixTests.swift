@@ -525,3 +525,15 @@ final class NewsImpactTests: XCTestCase {
         XCTAssertEqual(NewsImpact.dots(nil), "?")
     }
 }
+
+final class HiT3Tests: XCTestCase {
+    func testConstantSeriesRatioIsOne() {
+        let x = [Double](repeating: 50, count: 400)
+        XCTAssertEqual(DeliveryColumns.hiOverT3(x, t3Source: x, sma: 22)!, 1, accuracy: 1e-9)
+        XCTAssertNil(DeliveryColumns.hiOverT3(Array(x.prefix(300)), t3Source: x, sma: 22))   // needs 21 + 300 bars
+    }
+    func testSpikeRaisesRatio() {
+        var x = [Double](repeating: 50, count: 380); for i in 300..<320 { x[i] = 500 }    // spike earlier, back to normal
+        XCTAssertGreaterThan(DeliveryColumns.hiOverT3(x, t3Source: x, sma: 22)!, 1)
+    }
+}

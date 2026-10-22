@@ -405,6 +405,7 @@ struct DeliveryColumns {
     var delSma: Double? = nil    // DELSMA = ta.percentrank(ta.sma(DELIV_QTY*close, 22), 300) (0–100)
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
+    var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -426,7 +427,20 @@ struct DeliveryColumns {
         return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
                                jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i),
                                streak: StreakDef.current.streak(m, at: i),
-                               t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)), day: latestDay)
+                               t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)),
+                               hiT3: hiOverT3(m, t3Source: T3Def.current.source(s, upTo: i)), day: latestDay)
+    }
+
+    /// SMA length for HI/T3: follows Delivery Analysis' Signal (66 when ta.sma(…, 66) is picked, else 22).
+    static var hiSma: Int { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") == .sma66 ? 66 : 22 }
+
+    /// ta.highest(ta.sma(x, n), 300) / t3 on the last bar of x (nil until both exist: n − 1 + 300 bars for the
+    /// highest, ~6 × T3 length for T3, like Pine's na; nil when T3 ≤ 0).
+    static func hiOverT3(_ x: [Double], t3Source: [Double], sma n: Int = hiSma, length: Int = 300) -> Double? {
+        guard x.count >= n - 1 + length else { return nil }
+        let sm = DeliverySignal.sma(x, n)
+        guard let hi = sm.suffix(length).max(), let t = T3Def.current.t3(t3Source).last ?? nil, t > 0 else { return nil }
+        return hi / t
     }
 
     /// ta.percentrank(ta.sma(x, 22), 300) at bar i — Pine rules: the SMA is na for the first 21 bars, and the
