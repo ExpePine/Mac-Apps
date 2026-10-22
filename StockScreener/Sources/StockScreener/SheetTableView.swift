@@ -21,6 +21,8 @@ struct SheetTableView: NSViewRepresentable {
     var onHeaderClick: ((Int) -> Void)? = nil
     var onSelectRow: ((SheetRow?) -> Void)? = nil
     var onDoubleClickRow: ((SheetRow) -> Void)? = nil
+    /// Double right-click on a row (the right-click menu waits a moment so a second click can be noticed).
+    var onDoubleRightClickRow: ((SheetRow) -> Void)? = nil
     /// When set, each header shows a small ▼ that opens this panel for the column.
     var columnMenu: ((Int) -> AnyView)? = nil
     /// Columns that have conditions or colors (their ▼ is highlighted).
@@ -202,7 +204,12 @@ struct SheetTableView: NSViewRepresentable {
         deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
 
         func makeTable() -> NSTableView {
-            let table = NSTableView()
+            let table = PeekTableView()
+            table.onDoubleRight = { [weak self] row in
+                guard let p = self?.parent, let f = p.onDoubleRightClickRow, row >= 0, row < p.rows.count else { return }
+                f(p.rows[row])
+            }
+            table.wantsDoubleRight = { [weak self] in self?.parent?.onDoubleRightClickRow != nil }
             table.style = .plain
             table.usesAlternatingRowBackgroundColors = true
             table.columnAutoresizingStyle = .noColumnAutoresizing
@@ -692,4 +699,35 @@ final class ClosureMenuItem: NSMenuItem {
     }
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func run() { handler() }
+}
+
+
+/// Table that tells a double right-click from a single one: the context menu opens after the double-click
+/// interval unless a second right-click on the same row arrives first.
+final class PeekTableView: NSTableView {
+    var onDoubleRight: ((Int) -> Void)?
+    var wantsDoubleRight: (() -> Bool)?
+    private var pending: DispatchWorkItem?
+    private var pendingRow = -1
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard wantsDoubleRight?() ?? false else { super.rightMouseDown(with: event); return }
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        if let p = pending, row == pendingRow {
+            p.cancel(); pending = nil
+            onDoubleRight?(row)
+            return
+        }
+        pending?.cancel()
+        pendingRow = row
+        let w = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pending = nil
+            self.openMenu(event)
+        }
+        pending = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: w)
+    }
+
+    private func openMenu(_ event: NSEvent) { super.rightMouseDown(with: event) }
 }

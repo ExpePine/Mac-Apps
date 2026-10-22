@@ -60,8 +60,18 @@ struct FilterView: View {
                                            vm.settings.filterSortDescending = true
                                        }
                                    },
-                                   onSelectRow: { vm.selectStock(from: $0) },
-                                   onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, openWindow: openWindow) },
+                                   onSelectRow: { row in
+                                       vm.selectStock(from: row)
+                                       if let row { ChartPeek.shared.preload(vm.rowKey(row), vm: vm) }
+                                   },
+                                   onDoubleClickRow: { row in
+                                       if ChartPeek.enabled && !UserDefaults.standard.bool(forKey: "peek.leftOpensViewer") {
+                                           ChartPeek.shared.show(vm.rowKey(row), chart: 1, vm: vm)          // double left-click = Chart 2
+                                       } else {
+                                           vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, openWindow: openWindow)
+                                       }
+                                   },
+                                   onDoubleRightClickRow: ChartPeek.enabled ? { row in ChartPeek.shared.show(vm.rowKey(row), chart: 0, vm: vm) } : nil,
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
@@ -199,6 +209,7 @@ struct FilterView: View {
                 .help("Choose which columns the Filter shows and their order — hidden ones stay in Data Import")
                 StreakButton()
                 T3Button()
+                PeekMenu()
 
                 Button {
                     vm.importNow()
