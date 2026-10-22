@@ -299,12 +299,21 @@ struct NewsStrip: View {
     @AppStorage("viewer.newsAll") private var showAll = false
     @State private var expanded: String?
 
-    /// The news day for the crosshair: that day, or news from the 3 days before it (weekend / holiday news
-    /// belongs to the next trading day).
-    private func atCross(_ list: [NewsDay]) -> NewsDay? {
-        guard let c = crossDay, let cd = DealsCenter.date(c) else { return nil }
-        let from = DealsCenter.ymd(cd.addingTimeInterval(-3 * 86_400))
-        return list.filter { $0.day <= c && $0.day > from }.max { $0.day < $1.day }
+    /// The news shown for the crosshair: the latest news on or before that day — it stays until the crosshair
+    /// reaches the next news day. Also returns the news before it.
+    private func atCross(_ list: [NewsDay]) -> (now: NewsDay, prev: NewsDay?)? {
+        guard let c = crossDay else { return nil }
+        let before = list.filter { $0.day <= c }.sorted { $0.day > $1.day }       // newest first
+        guard let n = before.first else { return nil }
+        return (n, before.dropFirst().first)
+    }
+
+    /// "21 Oct" (and the year when it isn't this year).
+    static func dm(_ day: String) -> String {
+        guard let d = DealsCenter.date(day) else { return day }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_IN"); f.timeZone = TimeZone(identifier: "Asia/Kolkata")
+        f.dateFormat = day.prefix(4) == DealsCenter.ymd(Date()).prefix(4) ? "d MMM" : "d MMM yyyy"
+        return f.string(from: d)
     }
 
     private var company: String? {
@@ -336,11 +345,11 @@ struct NewsStrip: View {
                             ForEach(list.prefix(60)) { nd in chip(nd) }      // newest first
                         }
                     }
-                } else if let nd = atCross(list) {
-                    crossLine(nd)
+                } else if let hit = atCross(list) {
+                    crossLine(hit.now, prev: hit.prev)
                     Spacer(minLength: 0)
                 } else {
-                    Text(crossDay.map { "\($0) — no important news" } ?? "Move the crosshair over the chart: that day's news appears here")
+                    Text(crossDay.map { "No important news up to \(Self.dm($0))" } ?? "Move the crosshair over the chart: the latest news up to that day appears here")
                         .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -376,11 +385,16 @@ struct NewsStrip: View {
     }
 
     /// Crosshair mode: the day's code, label, impact and its top headline — one line.
-    private func crossLine(_ nd: NewsDay) -> some View {
+    private func crossLine(_ nd: NewsDay, prev: NewsDay?) -> some View {
         let code = EventCodes.code(for: nd.category)
         let h = nd.headlines.first
+        let ago: Int? = crossDay.flatMap { c in
+            guard let a = DealsCenter.date(nd.day), let b = DealsCenter.date(c) else { return nil }
+            return Int((b.timeIntervalSince(a) / 86_400).rounded())
+        }
         return HStack(spacing: 6) {
-            Text(nd.day).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Text(Self.dm(nd.day)).font(.caption.bold().monospacedDigit())
+            if let ago, ago > 0 { Text("(\(ago)d before)").font(.caption2).foregroundStyle(.tertiary) }
             Text(code).font(.caption.bold()).foregroundStyle(.white)
                 .padding(.horizontal, 4).background(Color.blue, in: RoundedRectangle(cornerRadius: 3))
             Text(nd.label ?? "").font(.caption.bold())
@@ -388,6 +402,12 @@ struct NewsStrip: View {
             if let h {
                 Text(h.title + (h.source.isEmpty ? "" : " — \(h.source)")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 if nd.headlines.count > 1 { Text("+\(nd.headlines.count - 1)").font(.caption2).foregroundStyle(.tertiary) }
+            }
+            if let p = prev {
+                Divider().frame(height: 12)
+                Text("previous: \(Self.dm(p.day)) · \(EventCodes.code(for: p.category)) \(p.label ?? "")")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    .help(p.headlines.prefix(4).map { "• \($0.title)" }.joined(separator: "\n"))
             }
         }
         .help(nd.headlines.prefix(6).map { "• \($0.title)" + ($0.source.isEmpty ? "" : " — \($0.source)") }.joined(separator: "\n") + "\n\nClick: open the article")
