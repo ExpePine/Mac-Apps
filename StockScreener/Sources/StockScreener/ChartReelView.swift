@@ -70,6 +70,11 @@ struct ChartReelView: View {
             out = rows.filter(pred).map { r in ReelItem(symbol: sym(r), note: ci.map { "\(column) \(r.text($0))" } ?? "", row: r) }
         case .all:
             out = vm.table.rows.map { ReelItem(symbol: sym($0), note: "", row: $0) }
+        case .scan:
+            let rowOf = Dictionary(vm.table.rows.map { (sym($0), $0) }, uniquingKeysWith: { a, _ in a })
+            out = ScanCenter.shared.reel.map { e in
+                ReelItem(symbol: e.symbol, note: e.note, row: rowOf[e.symbol], goTo: e.day, key: "\(e.symbol)|\(e.day)")
+            }
         case .multibaggers:
             var ev = mbc.events
             if !mbMonth.isEmpty { ev = ev.filter { $0.month == mbMonth } }
@@ -218,6 +223,7 @@ struct ChartReelView: View {
         case .filter: return "Your Filter shows no stocks."
         case .column: return column.isEmpty || vm.table.index(of: column) == nil ? "Pick a column." : "No stock has \(column) \(op) \(value)."
         case .all: return "No data yet — import the sheet first."
+        case .scan: return "Run an Event Scan and press Chart Reel there."
         case .multibaggers: return mbc.events.isEmpty ? "No multibaggers yet — open Multibaggers and download Yahoo history." : "No multibaggers for this month / scope."
         }
     }
@@ -245,6 +251,8 @@ struct ChartReelView: View {
                 Button("Edit Filter…") { openWindow(id: "filter") }
             case .all:
                 EmptyView()
+            case .scan:
+                Button("Event Scan…") { openWindow(id: "eventscan") }
             case .multibaggers:
                 Picker("", selection: $mbMonth) {
                     Text("All months").tag("")
@@ -583,7 +591,7 @@ struct ChartReelView: View {
 // MARK: - Model bits
 
 enum ReelSource: String, CaseIterable, Identifiable {
-    case gainers = "Daily gainers", column = "Column filter", filter = "My Filter", all = "All stocks", multibaggers = "Multibaggers"
+    case gainers = "Daily gainers", column = "Column filter", filter = "My Filter", all = "All stocks", multibaggers = "Multibaggers", scan = "Event scan"
     var id: String { rawValue }
 }
 

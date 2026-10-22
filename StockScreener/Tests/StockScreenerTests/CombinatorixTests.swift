@@ -565,3 +565,23 @@ final class TimingLabTests: XCTestCase {
         XCTAssertNil(TLSheet.bars("∅")); XCTAssertEqual(TLSheet.bars("101.00"), 101); XCTAssertNil(TLSheet.bars(""))
     }
 }
+
+final class EventScanTests: XCTestCase {
+    func testBarsSinceCrossBelow() {
+        let x: [Double?] = [nil, 1.3, 1.2, 1.05, 1.0, 1.2, 1.08, 1.09]   // crosses below 1.10 at 3 and again at 6
+        let c = ScanCond(metric: .hiT3, event: .crossBelow, value: 1.10)
+        let h = ScanEngine.barsSince(x, c, last: 7)!
+        XCTAssertEqual(h.0, 1); XCTAssertEqual(h.1, 6)
+        XCTAssertEqual(ScanEngine.barsSince(x, c, last: 5)!.1, 3)
+        XCTAssertNil(ScanEngine.barsSince(x, ScanCond(metric: .hiT3, event: .crossBelow, value: 0.9), last: 7))
+        XCTAssertEqual(ScanEngine.barsSince(x, ScanCond(metric: .hiT3, event: .lastBelow, value: 1.10), last: 7)!.0, 0)
+    }
+    func testQuickParse() {
+        let c = ScanCond.parse("HI/T3 < 1.10")!
+        XCTAssertEqual(c.metric, .hiT3); XCTAssertEqual(c.event, .crossBelow); XCTAssertEqual(c.value, 1.10, accuracy: 1e-9)
+        let d = ScanCond.parse("DELSMA > 99")!
+        XCTAssertEqual(d.metric, .delSma); XCTAssertEqual(d.event, .crossAbove)
+        XCTAssertEqual(ScanCond.parse("close crosses above 500")?.metric, .close)
+        XCTAssertNil(ScanCond.parse("nonsense 5"))
+    }
+}

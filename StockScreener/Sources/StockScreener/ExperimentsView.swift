@@ -155,6 +155,8 @@ struct ExperimentsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack { Button { let e = Experiment(); ec.experiments.append(e); selected = e.id } label: { Label("New experiment", systemImage: "plus") }; Spacer() }
                     Button { openWindow(id: "timinglab") } label: { Label("Timing Lab (shortlist → triggers)", systemImage: "timer") }
+                    Button { openWindow(id: "eventscan") } label: { Label("Event Scan (days since a condition)", systemImage: "scope") }
+                        .help("Trading days since e.g. HI/T3 crossed below 1.10 / 0.90 for every stock — sort, then charts centred on that date (⌥⌘L)")
                         .help("Special experiment: days-ago columns for a shortlist and buy triggers → 5 / 21 / 63-day and to-today results (⌥⌘T)")
                 }
                     .padding(8)

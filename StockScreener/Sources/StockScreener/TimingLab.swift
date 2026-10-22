@@ -344,6 +344,8 @@ struct TimingLabView: View {
             TextField("Google Sheet link (shared: anyone with the link can view)", text: $link).textFieldStyle(.roundedBorder)
             Button("Import") { lab.importLink(link) }.disabled(link.isEmpty || lab.busy)
             Button("CSV file…") { showFileImporter = true }
+            Button { openWindow(id: "eventscan") } label: { Label("Event Scan", systemImage: "scope") }
+                .help("Days since any condition (e.g. HI/T3 < 1.10) for these stocks — choose scope “Timing Lab sheet” there")
             if lab.busy { ProgressView().controlSize(.small); if lab.progress.1 > 0 { Text("\(lab.progress.0)/\(lab.progress.1)").font(.caption.monospacedDigit()) } }
             if let s = lab.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
         }
