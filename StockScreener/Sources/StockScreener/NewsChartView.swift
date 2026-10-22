@@ -285,3 +285,90 @@ struct EventCodesEditor: View {
         .frame(width: 720, height: 560)
     }
 }
+
+/// One-line strip of a stock's important news (impact ≥ the chosen level), newest first — for the top of the
+/// Chart viewer. Hover a chip for the headlines, click to open the article. Fetches news the first time.
+struct NewsStrip: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+    let symbol: String
+    @ObservedObject private var news = NewsTimeline.shared
+    @AppStorage("news.minImpact") private var minImpact = 2
+    @AppStorage("news.months") private var months = 12
+    @State private var expanded: String?
+
+    private var company: String? {
+        guard let label = vm.labelIndex, let n = vm.companyNameIndex else { return nil }
+        let s = symbol.uppercased()
+        return vm.table.rows.first { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() == s }?.text(n)
+    }
+
+    private var items: [NewsDay] {
+        _ = news.revision
+        return news.days(symbol).filter { ($0.impact ?? 0) >= minImpact && $0.label != "Not company news" }.reversed()
+    }
+
+    var body: some View {
+        let list = items
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "newspaper").foregroundStyle(.blue).font(.caption)
+                if news.busy == symbol.uppercased() {
+                    ProgressView().controlSize(.mini)
+                    Text(news.status ?? "Fetching news…").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                } else if list.isEmpty {
+                    Text(news.history(symbol) == nil ? "No news fetched for \(symbol) yet" : "No news with impact ≥ \(NewsImpact.short[minImpact]) for \(symbol)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(list.prefix(40)) { nd in chip(nd) }
+                    }
+                }
+                Picker("", selection: $minImpact) { ForEach(0..<4) { Text("≥ " + NewsImpact.short[$0]).tag($0) } }
+                    .labelsHidden().fixedSize().controlSize(.mini)
+                    .help("Show only news that can change the company's revenue, profit or market position (Groq's 0–3 rating)")
+                Button { news.fetch(symbol: symbol, company: company, months: months, groqModel: vm.settings.groqModel) } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).controlSize(.mini).disabled(news.busy != nil).help("Fetch the latest news")
+                Button { UserDefaults.standard.set(symbol.uppercased(), forKey: "news.symbol"); openWindow(id: "newschart") } label: { Image(systemName: "arrow.up.forward.square") }
+                    .buttonStyle(.borderless).controlSize(.mini).help("Open News & Deals (chart of all news and bulk deals)")
+            }
+            if let d = expanded, let nd = list.first(where: { $0.day == d }) {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(nd.headlines.prefix(4).enumerated()), id: \.offset) { _, h in
+                        Text("\(nd.day) · \(h.title)" + (h.source.isEmpty ? "" : " — \(h.source)")).font(.caption).lineLimit(1).textSelection(.enabled)
+                    }
+                }
+                .padding(.leading, 22).padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .task(id: symbol) {
+            expanded = nil
+            if !symbol.isEmpty, news.history(symbol) == nil, news.busy == nil {
+                news.fetch(symbol: symbol, company: company, months: months, groqModel: vm.settings.groqModel)
+            }
+        }
+    }
+
+    private func chip(_ nd: NewsDay) -> some View {
+        let code = EventCodes.code(for: nd.category)
+        return Button {
+            if expanded == nd.day, let l = nd.headlines.first?.link, let u = URL(string: l) { NSWorkspace.shared.open(u) }
+            else { expanded = nd.day }
+        } label: {
+            HStack(spacing: 4) {
+                Text(String(nd.day.dropFirst(5))).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                Text(code).font(.caption.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 4).background(Color.blue, in: RoundedRectangle(cornerRadius: 3))
+                Text(nd.label ?? "").font(.caption).lineLimit(1)
+                Text(NewsImpact.dots(nd.impact)).font(.system(size: 7)).foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(expanded == nd.day ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.1), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(nd.headlines.prefix(4).map { "• \($0.title)" + ($0.source.isEmpty ? "" : " — \($0.source)") }.joined(separator: "\n")
+              + "\n\nClick: show the headlines · click again: open the article")
+    }
+}

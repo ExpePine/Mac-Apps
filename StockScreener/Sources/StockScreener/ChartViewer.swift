@@ -11,6 +11,7 @@ struct ChartViewer: View {
     @State private var showSettings = false
     @AppStorage("viewer.showDelivery") private var showDelivery = true
     @AppStorage("viewer.syncDelivery") private var syncDelivery = true
+    @AppStorage("viewer.showNews") private var showNews = true
     @StateObject private var mini = LWChartHolder()
     @State private var lastTV: String = ""          // last range read from TradingView
     @State private var pushedToTVAt = Date.distantPast
@@ -37,6 +38,10 @@ struct ChartViewer: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                if showNews && !symbol.isEmpty {
+                    NewsStrip(symbol: symbol)
+                    Divider()
+                }
                 if showDelivery && !symbol.isEmpty {
                     VSplitView {
                         ReelWebView(web: web.view).frame(minHeight: 260)
@@ -118,6 +123,9 @@ struct ChartViewer: View {
                     .frame(width: 0, height: 0).opacity(0)
             }
             Spacer()
+            Toggle(isOn: $showNews) { Label("News", systemImage: "newspaper") }
+                .toggleStyle(.button)
+                .help("A one-line strip of this stock's important news above the chart (Groq-labelled, impact ≥ your level)")
             Toggle(isOn: $showDelivery) { Label("Delivery", systemImage: "shippingbox") }
                 .toggleStyle(.button)
                 .help("Show NSE delivery (with its ta.highest line and signal days) under the chart")
