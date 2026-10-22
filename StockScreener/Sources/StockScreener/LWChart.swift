@@ -205,11 +205,12 @@ struct LWChartData: Encodable {
         let sym = symbol.uppercased()
         if layers.contains(.news) {
             let codes = EventCodes.all
+            let minImpact = NewsImpact.minimum
             for nd in NewsTimeline.shared.days(sym) where nd.day >= from {
-                guard let l = nd.label, l != "Not company news" else { continue }
+                guard let l = nd.label, l != "Not company news", (nd.impact ?? 0) >= minImpact else { continue }
                 let code = EventCodes.code(for: nd.category, in: codes)
                 out.append(Marker(time: nd.day, text: code, position: "aboveBar", color: "#2962FF", shape: "circle",
-                                  info: "\(code) · \(l)" + (nd.category.map { " (\($0))" } ?? ""),
+                                  info: "\(code) · \(l) · \(NewsImpact.dots(nd.impact))" + (nd.impactOn.map { " \($0)" } ?? ""),
                                   full: nd.headlines.prefix(6).map { h in
                                       "\(nd.day) · \(h.title)" + (h.source.isEmpty ? "" : " — \(h.source)")
                                   }))

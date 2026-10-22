@@ -515,3 +515,13 @@ final class EventCodeTests: XCTestCase {
         XCTAssertEqual(EventCodes.guess(d, in: list), "Dividend")
     }
 }
+
+final class NewsImpactTests: XCTestCase {
+    func testGuessAndDots() {
+        XCTAssertEqual(NewsImpact.guess(category: "Results"), 2)
+        XCTAssertEqual(NewsImpact.guess(category: "Other"), 0)
+        XCTAssertEqual(NewsImpact.guess(category: "Rating change"), 1)
+        XCTAssertEqual(NewsImpact.dots(2), "●●○")
+        XCTAssertEqual(NewsImpact.dots(nil), "?")
+    }
+}

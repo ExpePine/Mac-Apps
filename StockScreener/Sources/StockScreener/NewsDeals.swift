@@ -249,6 +249,26 @@ struct NewsDay: Codable, Identifiable {
     var label: String?               // Groq's 3–4 words (nil = not labelled yet)
     var labelIsGuess = false         // true = first words of the top headline (no Groq)
     var category: String?            // an event name from the code dictionary (e.g. "Dividend"), "Other", or nil
+    var impact: Int?                 // 0 = just a mention … 3 = major effect on revenue / profit / market position
+    var impactOn: String?            // "revenue", "profit", "market position" …
+    var impactGuess = false          // true = from keywords, not Groq
+}
+
+/// How much a news day matters to the business (Groq's rating), and the chart's minimum.
+enum NewsImpact {
+    static let names = ["0 · Mention only", "1 · Minor", "2 · Material", "3 · Major"]
+    static let short = ["mention", "minor", "material", "major"]
+    /// Days below this are hidden on the charts and in the list (default: Material).
+    static var minimum: Int { UserDefaults.standard.object(forKey: "news.minImpact") as? Int ?? 2 }
+    static func dots(_ v: Int?) -> String { guard let v else { return "?" }; return String(repeating: "●", count: v) + String(repeating: "○", count: max(0, 3 - v)) }
+    /// Keyword fallback: a known business event = material, anything else = mention.
+    static func guess(category: String?) -> Int {
+        switch category {
+        case nil, "Other"?: return 0
+        case "Rating change"?, "Management change"?, "Product / launch"?: return 1
+        default: return 2
+        }
+    }
 }
 
 // MARK: - Event dictionary: news category → letters on the chart (editable)
@@ -336,7 +356,7 @@ struct NewsHistory: Codable {
     func reclassify(symbol: String, company: String?, groqModel: String) {
         let sym = symbol.uppercased()
         guard busy == nil, var h = history(sym) else { return }
-        for k in h.days.keys { h.days[k]?.category = nil }
+        for k in h.days.keys { h.days[k]?.category = nil; h.days[k]?.impact = nil }
         busy = sym
         Task {
             await label(&h, company: company ?? sym, model: groqModel)
@@ -412,7 +432,7 @@ struct NewsHistory: Codable {
 
     /// 3–4 word label per day: Groq when a key + model are set, otherwise the top headline's first words.
     private func label(_ h: inout NewsHistory, company: String, model: String) async {
-        let todo = h.days.values.filter { $0.label == nil || $0.labelIsGuess || $0.category == nil }.map(\.day).sorted()
+        let todo = h.days.values.filter { $0.label == nil || $0.labelIsGuess || $0.category == nil || $0.impact == nil || $0.impactGuess }.map(\.day).sorted()
         let codes = EventCodes.all
         let names = codes.map(\.name).joined(separator: ", ")
         guard !todo.isEmpty else { return }
@@ -427,10 +447,17 @@ struct NewsHistory: Codable {
                 let system = """
                 You label news days on a stock chart for \(company) (NSE: \(h.symbol)). For each date: \
                 (1) a 3–4 word label that says what the news was about (e.g. "Q2 profit jumps", "Big order win", "Promoter stake sale"); \
-                (2) the ONE best category from this list: \(names). \
-                Use only the headlines given. If they are not about this company itself (e.g. the company rating or reporting on \
-                others), use the label "Not company news" and category "Other". No advice, no hype. \
-                Reply as JSON: {"days": {"yyyy-MM-dd": {"label": "…", "category": "…"}}}.
+                (2) the ONE best category from this list: \(names); \
+                (3) "impact": how much this news can change \(company)'s OWN revenue, profit or market position — \
+                0 = only a mention (market wrap, list of stocks, the company commenting on / rating others, opinion, share-price chatter, \
+                target-price notes), 1 = minor (small order, routine announcement, small management change), \
+                2 = material (results, sizeable orders or contracts, capacity / plant news, fire or shutdown, regulatory action, \
+                acquisition, fund raise, dividend / bonus / buyback, big stake change), 3 = major (very large relative to the company: \
+                transformational deal, plant loss, ban, guidance shock, record results); \
+                (4) "on": which of revenue / profit / market position it affects most (or "none"). \
+                Use only the headlines given; when unsure, rate lower. If they are not about this company itself, use the label \
+                "Not company news", category "Other", impact 0. No advice, no hype. \
+                Reply as JSON: {"days": {"yyyy-MM-dd": {"label": "…", "category": "…", "impact": 0, "on": "…"}}}.
                 """
                 if let text = try? await GroqClient.chat(model: model, system: system, user: lines, json: true),
                    let d = text.data(using: .utf8), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
@@ -441,6 +468,11 @@ struct NewsHistory: Codable {
                         let cat = (v as? [String: Any])?["category"] as? String
                         if let s = lab { nd.label = String(s.split(separator: " ").prefix(5).joined(separator: " ").prefix(40)); nd.labelIsGuess = false }
                         nd.category = cat.map { c in codes.first { $0.name.caseInsensitiveCompare(c) == .orderedSame }?.name ?? c } ?? EventCodes.guess(nd.headlines, in: codes)
+                        let obj = v as? [String: Any]
+                        let imp = (obj?["impact"] as? Int) ?? (obj?["impact"] as? Double).map { Int($0) } ?? (obj?["impact"] as? String).flatMap { Int($0) }
+                        if let imp { nd.impact = max(0, min(3, imp)); nd.impactGuess = false } else { nd.impact = NewsImpact.guess(category: nd.category); nd.impactGuess = true }
+                        if nd.label == "Not company news" { nd.impact = 0 }
+                        if let on = obj?["on"] as? String, on.lowercased() != "none" { nd.impactOn = on.lowercased() } else { nd.impactOn = nil }
                         h.days[day] = nd
                     }
                 }
@@ -455,6 +487,11 @@ struct NewsHistory: Codable {
         for d in todo where h.days[d]?.category == nil {
             guard var nd = h.days[d] else { continue }
             nd.category = EventCodes.guess(nd.headlines, in: codes)
+            h.days[d] = nd
+        }
+        for d in todo where h.days[d]?.impact == nil {
+            guard var nd = h.days[d] else { continue }
+            nd.impact = NewsImpact.guess(category: nd.category); nd.impactGuess = true
             h.days[d] = nd
         }
         if !canGroq { status = "News labels are the first words of each headline — add a Groq key + model (Daily Gainers → … → News & AI settings) for 3–4 word summaries." }

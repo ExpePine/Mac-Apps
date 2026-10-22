@@ -25,6 +25,7 @@ struct NewsChartView: View {
     @State private var chartError: String?
     @State private var selected: String?
     @State private var showCodes = false
+    @AppStorage("news.minImpact") private var minImpact = 2
     @AppStorage(EventCodes.key) private var codesData = Data()
 
     struct Event: Identifiable {
@@ -40,10 +41,10 @@ struct NewsChartView: View {
         _ = news.revision; _ = deals.revision
         var out: [Event] = []
         if showNews {
-            for nd in news.days(symbol) {
+            for nd in news.days(symbol) where (nd.impact ?? 0) >= minImpact && nd.label != "Not company news" || minImpact == 0 {
                 let code = EventCodes.code(for: nd.category)
                 out.append(Event(id: "n" + nd.day, day: nd.day, kind: "News",
-                                 text: "\(code) · \(nd.label ?? "…")" + (nd.category.map { "  (\($0))" } ?? ""),
+                                 text: "\(NewsImpact.dots(nd.impact)) \(code) · \(nd.label ?? "…")" + (nd.impactOn.map { "  → \($0)" } ?? ""),
                                  detail: nd.headlines.prefix(3).map { "\($0.title) (\($0.source))" }.joined(separator: " · "),
                                  link: nd.headlines.first?.link))
             }
@@ -99,6 +100,7 @@ struct NewsChartView: View {
         .onChange(of: colorScheme) { _ in push() }
         .onChange(of: candles.count) { _ in push() }
         .onChange(of: codesData) { _ in push() }
+        .onChange(of: minImpact) { _ in news.touch() }              // redraws this and the delivery charts
         .sheet(isPresented: $showCodes) { EventCodesEditor() }
     }
 
@@ -138,6 +140,13 @@ struct NewsChartView: View {
                     .disabled(symbol.isEmpty || news.busy != nil).fixedSize()
                     .help("Ask Groq again which event each news day is (use after editing the event list)")
                 Toggle("News", isOn: $showNews).toggleStyle(.checkbox).fixedSize()
+                HStack(spacing: 4) {
+                    Text("Impact ≥").font(.caption)
+                    Picker("", selection: $minImpact) { ForEach(0..<4) { Text(NewsImpact.names[$0]).tag($0) } }
+                        .labelsHidden().fixedSize()
+                }
+                .fixedSize()
+                .help("Only news that can change the company's own revenue, profit or market position (Groq's 0–3 rating). 0 shows every mention.")
                 Toggle("Bulk / block deals", isOn: $showDeals).toggleStyle(.checkbox).fixedSize()
                 Toggle("Delivery bars", isOn: $showDeliv).toggleStyle(.checkbox).fixedSize()
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
@@ -177,7 +186,8 @@ struct NewsChartView: View {
     private var eventTable: some View {
         let list = events
         return VStack(alignment: .leading, spacing: 0) {
-            Text("\(list.count) events · click = jump the chart there · double-click news = open the article")
+            let all = news.days(symbol).count, shownNews = list.filter { $0.kind == "News" }.count
+            Text("\(list.count) events · \(all - shownNews) of \(all) news days hidden below impact \(minImpact) (\(NewsImpact.short[minImpact])) · ●●● = impact on revenue / profit / market position · click = jump the chart there · double-click news = open the article")
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 4)
             Table(list, selection: $selected) {
                 TableColumn("Day") { e in Text(e.day).monospacedDigit() }.width(min: 80, ideal: 90)
