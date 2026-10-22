@@ -12,6 +12,8 @@ struct ChartViewer: View {
     @AppStorage("viewer.showDelivery") private var showDelivery = true
     @AppStorage("viewer.syncDelivery") private var syncDelivery = true
     @AppStorage("viewer.showNews") private var showNews = true
+    @State private var crossDay: String?
+    @State private var crossFails = 0
     @StateObject private var mini = LWChartHolder()
     @State private var lastTV: String = ""          // last range read from TradingView
     @State private var pushedToTVAt = Date.distantPast
@@ -39,7 +41,7 @@ struct ChartViewer: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 if showNews && !symbol.isEmpty {
-                    NewsStrip(symbol: symbol)
+                    NewsStrip(symbol: symbol, crossDay: crossDay)
                     Divider()
                 }
                 if showDelivery && !symbol.isEmpty {
@@ -72,7 +74,9 @@ struct ChartViewer: View {
         .onAppear { load(); vm.refreshChartLinksIfStale() }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
         .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0 }
-        .onReceive(syncTimer) { _ in pollTVRange() }
+        .onReceive(syncTimer) { _ in pollTVRange(); pollCross() }
+        .onChange(of: mini.crossDay) { d in if let d { crossDay = d } }
+        .onChange(of: symbol) { _ in crossDay = nil; crossFails = 0 }
         .onAppear {
             mini.onUserRange = { from, to in
                 guard UserDefaults.standard.object(forKey: "viewer.syncDelivery") as? Bool ?? true,
@@ -202,6 +206,16 @@ struct ChartViewer: View {
     }
 
     /// TradingView → delivery chart: follow TradingView's visible dates (and delivery → TradingView via onUserRange).
+    /// TradingView crosshair → the news strip shows that day's news.
+    private func pollCross() {
+        guard showNews, !symbol.isEmpty, !web.view.isLoading, crossFails < 30 else { return }
+        TVRange.run(web.view, TVRange.crossBody) { r in
+            guard let t = Int(r) else { crossFails += 1; return }
+            crossFails = 0
+            if t > 0 { let d = TVRange.day(t); if d != crossDay { crossDay = d } }
+        }
+    }
+
     private func pollTVRange() {
         guard showDelivery, syncDelivery, !symbol.isEmpty, !web.view.isLoading,
               Date().timeIntervalSince(pushedToTVAt) > 0.8 else { return }

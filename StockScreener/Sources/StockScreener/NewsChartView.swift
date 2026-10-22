@@ -292,10 +292,20 @@ struct NewsStrip: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     let symbol: String
+    var crossDay: String? = nil          // day under the chart's crosshair
     @ObservedObject private var news = NewsTimeline.shared
     @AppStorage("news.minImpact") private var minImpact = 2
     @AppStorage("news.months") private var months = 12
+    @AppStorage("viewer.newsAll") private var showAll = false
     @State private var expanded: String?
+
+    /// The news day for the crosshair: that day, or news from the 3 days before it (weekend / holiday news
+    /// belongs to the next trading day).
+    private func atCross(_ list: [NewsDay]) -> NewsDay? {
+        guard let c = crossDay, let cd = DealsCenter.date(c) else { return nil }
+        let from = DealsCenter.ymd(cd.addingTimeInterval(-3 * 86_400))
+        return list.filter { $0.day <= c && $0.day > from }.max { $0.day < $1.day }
+    }
 
     private var company: String? {
         guard let label = vm.labelIndex, let n = vm.companyNameIndex else { return nil }
@@ -320,11 +330,25 @@ struct NewsStrip: View {
                     Text(news.history(symbol) == nil ? "No news fetched for \(symbol) yet" : "No news with impact ≥ \(NewsImpact.short[minImpact]) for \(symbol)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(list.prefix(40)) { nd in chip(nd) }
+                if showAll {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(list.prefix(60)) { nd in chip(nd) }      // newest first
+                        }
                     }
+                } else if let nd = atCross(list) {
+                    crossLine(nd)
+                    Spacer(minLength: 0)
+                } else {
+                    Text(crossDay.map { "\($0) — no important news" } ?? "Move the crosshair over the chart: that day's news appears here")
+                        .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                    Spacer(minLength: 0)
                 }
+                Button { showAll.toggle(); expanded = nil } label: {
+                    Text(showAll ? "Crosshair" : "All news (\(list.count))").font(.caption)
+                }
+                .controlSize(.mini)
+                .help(showAll ? "Back to: news follows the crosshair" : "List every important news item, most recent first")
                 Picker("", selection: $minImpact) { ForEach(0..<4) { Text("≥ " + NewsImpact.short[$0]).tag($0) } }
                     .labelsHidden().fixedSize().controlSize(.mini)
                     .help("Show only news that can change the company's revenue, profit or market position (Groq's 0–3 rating)")
@@ -333,7 +357,7 @@ struct NewsStrip: View {
                 Button { UserDefaults.standard.set(symbol.uppercased(), forKey: "news.symbol"); openWindow(id: "newschart") } label: { Image(systemName: "arrow.up.forward.square") }
                     .buttonStyle(.borderless).controlSize(.mini).help("Open News & Deals (chart of all news and bulk deals)")
             }
-            if let d = expanded, let nd = list.first(where: { $0.day == d }) {
+            if showAll, let d = expanded, let nd = list.first(where: { $0.day == d }) {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(nd.headlines.prefix(4).enumerated()), id: \.offset) { _, h in
                         Text("\(nd.day) · \(h.title)" + (h.source.isEmpty ? "" : " — \(h.source)")).font(.caption).lineLimit(1).textSelection(.enabled)
@@ -349,6 +373,26 @@ struct NewsStrip: View {
                 news.fetch(symbol: symbol, company: company, months: months, groqModel: vm.settings.groqModel)
             }
         }
+    }
+
+    /// Crosshair mode: the day's code, label, impact and its top headline — one line.
+    private func crossLine(_ nd: NewsDay) -> some View {
+        let code = EventCodes.code(for: nd.category)
+        let h = nd.headlines.first
+        return HStack(spacing: 6) {
+            Text(nd.day).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Text(code).font(.caption.bold()).foregroundStyle(.white)
+                .padding(.horizontal, 4).background(Color.blue, in: RoundedRectangle(cornerRadius: 3))
+            Text(nd.label ?? "").font(.caption.bold())
+            Text(NewsImpact.dots(nd.impact)).font(.system(size: 8)).foregroundStyle(.orange)
+            if let h {
+                Text(h.title + (h.source.isEmpty ? "" : " — \(h.source)")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if nd.headlines.count > 1 { Text("+\(nd.headlines.count - 1)").font(.caption2).foregroundStyle(.tertiary) }
+            }
+        }
+        .help(nd.headlines.prefix(6).map { "• \($0.title)" + ($0.source.isEmpty ? "" : " — \($0.source)") }.joined(separator: "\n") + "\n\nClick: open the article")
+        .onTapGesture { if let l = h?.link, let u = URL(string: l) { NSWorkspace.shared.open(u) } }
+        .transition(.opacity)
     }
 
     private func chip(_ nd: NewsDay) -> some View {

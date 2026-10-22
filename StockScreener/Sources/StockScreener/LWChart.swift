@@ -240,6 +240,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     @Published var lastError: String?
     /// Lines for the day under the crosshair (news headlines / deals) — shown under the chart.
     @Published var hoverLines: [String] = []
+    /// Day under the crosshair ("yyyy-MM-dd"), nil when it leaves the chart.
+    @Published var crossDay: String?
     /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
     var onUserRange: ((String, String) -> Void)?
 
@@ -257,6 +259,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         super.init()
         ucc.add(WeakHandler(self), name: "range")
         ucc.add(WeakHandler(self), name: "hover")
+        ucc.add(WeakHandler(self), name: "cross")
         view.navigationDelegate = self
         view.setValue(false, forKey: "drawsBackground")
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
@@ -274,6 +277,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     }
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+        if m.name == "cross" { let d = m.body as? String; let v = (d?.isEmpty ?? true) ? nil : d; if v != crossDay { crossDay = v }; return }
         if m.name == "hover" { let l = (m.body as? [String]) ?? []; if l != hoverLines { hoverLines = l }; return }
         guard let a = m.body as? [String], a.count == 2 else { return }
         onUserRange?(a[0], a[1])
@@ -349,10 +353,11 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       return true;
     }
     // Crosshair over a news / deal day: short text on the chart, full lines to the app (shown under the chart)
-    var lastHover='';
+    var lastHover='', lastCross=null;
     function hover(p){
       var tip=document.getElementById('tip');
       var key=(p&&p.time)?day(p.time):'';
+      if(key!==lastCross){ lastCross=key; if(window.webkit&&window.webkit.messageHandlers.cross) window.webkit.messageHandlers.cross.postMessage(key); }
       var h=key&&window._hover?window._hover[key]:null;
       if(!h || !p.point){ tip.style.display='none'; if(lastHover!==''){ lastHover=''; post([]); } return; }
       tip.innerHTML=h.map(function(x){ return '<div style="color:'+(x.color==='#2962FF'?'#fff':'#fff')+'">'+x.info+'</div>'; }).join('');
@@ -532,6 +537,20 @@ enum TVRange {
     if (r && typeof r.then === 'function') r = await r;
     if (!r || r.from == null) return 'norange';
     return Math.round(r.from) + ',' + Math.round(r.to);
+    """
+
+    /// Subscribes once to the TradingView chart's crosshair and returns its time (unix s, "0" = none),
+    /// or "noapi" when the page doesn't offer it.
+    static let crossBody = finder + """
+    if (!window.__ssCrossOn) {
+      var c = __ssChart();
+      if (!c || typeof c.crossHairMoved !== 'function') return 'noapi';
+      try {
+        c.crossHairMoved().subscribe(null, function(p) { window.__ssCross = (p && p.time) ? p.time : 0; });
+        window.__ssCrossOn = true;
+      } catch (e) { return 'noapi'; }
+    }
+    return String(window.__ssCross || 0);
     """
 
     static func setBody(from: Int, to: Int) -> String {
