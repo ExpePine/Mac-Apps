@@ -3,8 +3,8 @@ import AppKit
 import WebKit
 
 /// Quick look at a stock's chart from the Filter table: a small floating window near the mouse that closes by
-/// itself after a few seconds (paused while the mouse is over it). Double right-click = Chart 1,
-/// double left-click = Chart 2 (settings in the Filter toolbar's eye menu).
+/// itself after a few seconds (paused while the mouse is over it). Rest the pointer on the blue dot next to the
+/// symbol = Chart 1, orange dot = Chart 2 (settings in the Filter toolbar's eye menu).
 @MainActor final class ChartPeek: NSObject, NSWindowDelegate {
     static let shared = ChartPeek()
     private let pool = ReelPool()
@@ -120,11 +120,14 @@ struct PeekMenu: View {
     @AppStorage("peek.seconds") private var seconds = 3.0
     @AppStorage("peek.size") private var size = "Medium"
     @AppStorage("peek.preload") private var preload = true
-    @AppStorage("peek.leftOpensViewer") private var leftOpensViewer = false
+    @AppStorage("peek.hoverDelay") private var hoverDelay = 1.0
 
     var body: some View {
         Menu {
-            Toggle("Quick chart on double-click (right = Chart 1, left = Chart 2)", isOn: $enabled)
+            Toggle("Quick chart dots next to the symbol (blue = Chart 1, orange = Chart 2)", isOn: $enabled)
+            Picker("Rest on a dot for", selection: $hoverDelay) {
+                ForEach([0.5, 0.75, 1.0, 1.5, 2.0], id: \.self) { Text("\(CombiEngine.fmt($0)) s").tag($0) }
+            }
             Picker("Show for", selection: $seconds) {
                 ForEach([2.0, 3, 5, 8, 10, 15, 30], id: \.self) { Text("\(Int($0)) seconds").tag($0) }
                 Text("Until I close it").tag(0.0)
@@ -134,13 +137,12 @@ struct PeekMenu: View {
                 Text("Custom (resize the window once)").tag("Custom")
             }
             Divider()
-            Toggle("Double left-click opens the Chart viewer instead", isOn: $leftOpensViewer)
             Toggle("Preload both charts of the selected row (faster)", isOn: $preload)
             Divider()
             Text("The countdown starts when the chart has loaded and pauses while the mouse is over it.")
         } label: {
             Label("Quick chart", systemImage: "eye")
         }
-        .help("Double right-click a row = Chart 1, double left-click = Chart 2, shown for a few seconds — choose time and size here")
+        .help("Rest the pointer on the blue dot next to a symbol = Chart 1, orange dot = Chart 2 — choose delay, time and size here")
     }
 }

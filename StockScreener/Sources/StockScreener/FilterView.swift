@@ -64,14 +64,11 @@ struct FilterView: View {
                                        vm.selectStock(from: row)
                                        if let row { ChartPeek.shared.preload(vm.rowKey(row), vm: vm) }
                                    },
-                                   onDoubleClickRow: { row in
-                                       if ChartPeek.enabled && !UserDefaults.standard.bool(forKey: "peek.leftOpensViewer") {
-                                           ChartPeek.shared.show(vm.rowKey(row), chart: 1, vm: vm)          // double left-click = Chart 2
-                                       } else {
-                                           vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, openWindow: openWindow)
-                                       }
-                                   },
-                                   onDoubleRightClickRow: ChartPeek.enabled ? { row in ChartPeek.shared.show(vm.rowKey(row), chart: 0, vm: vm) } : nil,
+                                   onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, openWindow: openWindow) },
+                                   onHoverChart: ChartPeek.enabled ? { row, chart in
+                                       ChartPeek.shared.preload(vm.rowKey(row), vm: vm)
+                                       ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm)        // blue dot = Chart 1, orange = Chart 2
+                                   } : nil,
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },

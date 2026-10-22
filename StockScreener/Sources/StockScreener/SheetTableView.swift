@@ -23,6 +23,8 @@ struct SheetTableView: NSViewRepresentable {
     var onDoubleClickRow: ((SheetRow) -> Void)? = nil
     /// Double right-click on a row (the right-click menu waits a moment so a second click can be noticed).
     var onDoubleRightClickRow: ((SheetRow) -> Void)? = nil
+    /// Two small dots next to the first column: rest the pointer on one (or click it) → (row, 0 = Chart 1 / 1 = Chart 2).
+    var onHoverChart: ((SheetRow, Int) -> Void)? = nil
     /// When set, each header shows a small ▼ that opens this panel for the column.
     var columnMenu: ((Int) -> AnyView)? = nil
     /// Columns that have conditions or colors (their ▼ is highlighted).
@@ -113,7 +115,7 @@ struct SheetTableView: NSViewRepresentable {
         let scrolling = Array(visible.dropFirst(frozenCount))
 
         // Rebuild columns only when the column set changes.
-        let signature = "E\(eColor != nil)S\(sColor != nil)P\(pColor != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
+        let signature = "E\(eColor != nil)S\(sColor != nil)P\(pColor != nil)C\(onHoverChart != nil)|\(frozen)|\(scrolling)|" + visible.map { headers[$0] }.joined(separator: "|")
             + "#" + originalHeaders.joined(separator: "|")
         if signature != c.columnSignature, c.expectedOrder == visible {
             c.columnSignature = signature        // the user just dragged a column: the tables already look like this
@@ -138,6 +140,7 @@ struct SheetTableView: NSViewRepresentable {
             if eColor != nil {
                 c.addEColumn(to: frozen.isEmpty ? right : left)
             }
+            if onHoverChart != nil { c.addChartDotsColumn(to: frozen.isEmpty ? right : left) }
             c.updateLeftWidth()
         }
 
@@ -353,6 +356,20 @@ struct SheetTableView: NSViewRepresentable {
         static let eID = NSUserInterfaceItemIdentifier("E")
         static let sID = NSUserInterfaceItemIdentifier("S")
         static let pID = NSUserInterfaceItemIdentifier("P")
+        static let cID = NSUserInterfaceItemIdentifier("C")
+        private let cCellID = NSUserInterfaceItemIdentifier("CCell")
+
+        /// The ①② column, placed right after the first data column (the symbol).
+        func addChartDotsColumn(to table: NSTableView) {
+            let column = NSTableColumn(identifier: Self.cID)
+            column.width = 34; column.minWidth = 34; column.maxWidth = 34
+            column.title = ""
+            column.headerToolTip = "Rest the pointer on the blue dot = Chart 1, orange dot = Chart 2 (or click a dot)"
+            table.addTableColumn(column)
+            let firstData = table.tableColumns.firstIndex { Self.columnIndex($0) != nil } ?? 0
+            table.moveColumn(table.numberOfColumns - 1, toColumn: min(table.numberOfColumns - 1, firstData + 1))
+            updateLeftWidth()
+        }
         private let pCellID = NSUserInterfaceItemIdentifier("PCell")
         private let sCellID = NSUserInterfaceItemIdentifier("SCell")
 
@@ -437,6 +454,17 @@ struct SheetTableView: NSViewRepresentable {
                     return v
                 }()
                 cell.configure(color: parent.pColor?(parent.rows[row]) ?? .clear)
+                return cell
+            }
+            if let tableColumn, tableColumn.identifier == Self.cID, let parent, row < parent.rows.count {
+                let cell = (tableView.makeView(withIdentifier: cCellID, owner: nil) as? ChartDotsCell) ?? {
+                    let v = ChartDotsCell()
+                    v.identifier = cCellID
+                    return v
+                }()
+                let data = parent.rows[row]
+                let fire = parent.onHoverChart
+                cell.onFire = { chart in fire?(data, chart) }
                 return cell
             }
             if let tableColumn, tableColumn.identifier == Self.sID, let parent, row < parent.rows.count {
@@ -730,4 +758,73 @@ final class PeekTableView: NSTableView {
     }
 
     private func openMenu(_ event: NSEvent) { super.rightMouseDown(with: event) }
+}
+
+
+/// Two small dots (blue = Chart 1, orange = Chart 2). Resting the pointer on one for the hover delay — or
+/// clicking it — calls onFire(0 / 1). The dot fills in while the delay runs.
+final class ChartDotsCell: NSTableCellView {
+    var onFire: ((Int) -> Void)?
+    private var hover: Int?
+    private var work: DispatchWorkItem?
+    private var tracking: NSTrackingArea?
+    private static let r: CGFloat = 5
+
+    static var delay: Double {
+        let v = UserDefaults.standard.double(forKey: "peek.hoverDelay")
+        return UserDefaults.standard.object(forKey: "peek.hoverDelay") == nil ? 1.0 : max(0.2, v)
+    }
+
+    override init(frame: NSRect) { super.init(frame: frame); toolTip = "Rest on blue = Chart 1 · orange = Chart 2" }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func centers() -> [CGPoint] {
+        let y = bounds.midY
+        return [CGPoint(x: bounds.midX - 7, y: y), CGPoint(x: bounds.midX + 7, y: y)]
+    }
+    private func dot(at p: CGPoint) -> Int? {
+        for (i, c) in centers().enumerated() where hypot(p.x - c.x, p.y - c.y) <= Self.r + 3 { return i }
+        return nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let colors: [NSColor] = [.systemBlue, .systemOrange]
+        for (i, c) in centers().enumerated() {
+            let rect = NSRect(x: c.x - Self.r, y: c.y - Self.r, width: Self.r * 2, height: Self.r * 2)
+            let path = NSBezierPath(ovalIn: rect)
+            colors[i].withAlphaComponent(hover == i ? 1 : 0.35).setFill()
+            path.fill()
+            colors[i].setStroke(); path.lineWidth = 1; path.stroke()
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(t)
+        tracking = t
+    }
+
+    private func set(_ d: Int?) {
+        guard d != hover else { return }
+        hover = d
+        needsDisplay = true
+        work?.cancel(); work = nil
+        guard let d else { return }
+        let w = DispatchWorkItem { [weak self] in
+            guard let self, self.hover == d else { return }
+            self.onFire?(d)
+        }
+        work = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.delay, execute: w)
+    }
+
+    override func mouseMoved(with event: NSEvent) { set(dot(at: convert(event.locationInWindow, from: nil))) }
+    override func mouseEntered(with event: NSEvent) { set(dot(at: convert(event.locationInWindow, from: nil))) }
+    override func mouseExited(with event: NSEvent) { set(nil) }
+    override func mouseDown(with event: NSEvent) {
+        if let d = dot(at: convert(event.locationInWindow, from: nil)) { work?.cancel(); onFire?(d) } else { super.mouseDown(with: event) }
+    }
+    override func prepareForReuse() { super.prepareForReuse(); work?.cancel(); hover = nil; needsDisplay = true }
 }
