@@ -79,6 +79,8 @@ struct AlertsBrowserView: View {
             }
             .fixedSize()
             Spacer()
+            Button { openWindow(id: "tracker") } label: { Label("Tracker", systemImage: "binoculars") }
+                .help("Every stock a shortlist alert fired on — % change since, chosen Filter columns, watches like count = 5 (⌥⌘J)")
             Button { showShortlist = true } label: { Label("Shortlist alerts…", systemImage: "list.bullet.rectangle") }
                 .help("e.g. D_Trigger is the shortlist → alert when MS > 99 or DS > 99 (becomes true)")
             Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT…", systemImage: "wand.and.stars") }

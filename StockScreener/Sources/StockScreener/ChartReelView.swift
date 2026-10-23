@@ -73,7 +73,7 @@ struct ChartReelView: View {
         case .scan:
             let rowOf = Dictionary(vm.table.rows.map { (sym($0), $0) }, uniquingKeysWith: { a, _ in a })
             out = ScanCenter.shared.reel.map { e in
-                ReelItem(symbol: e.symbol, note: e.note, row: rowOf[e.symbol], goTo: e.day, key: "\(e.symbol)|\(e.day)")
+                ReelItem(symbol: e.symbol, note: e.note, row: rowOf[e.symbol], goTo: e.day.isEmpty ? nil : e.day, key: "\(e.symbol)|\(e.day)")
             }
         case .multibaggers:
             var ev = mbc.events

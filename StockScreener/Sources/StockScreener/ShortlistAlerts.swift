@@ -126,6 +126,7 @@ extension ScreenerViewModel {
             } ?? FilterCondition(column: a.shortlistColumn, op: .hasValue)
             rule.filter = FilterGroup(mode: .all, conditions: [sl], groups: [any])
             recordAlertEvents(rule: rule, rows: rows, kind: .alert)
+            if TrackerCenter.shared.autoAdd { TrackerCenter.shared.add(rows.map { rowKey($0) }, source: a.name, vm: self) }   // → Alert Tracker
             return InAppAlert(triggerID: a.id, name: a.name + (a.becomes ? " (became true today)" : ""), stocks: rows.map { rowKey($0) })
         }
     }

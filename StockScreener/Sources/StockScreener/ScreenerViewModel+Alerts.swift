@@ -113,7 +113,7 @@ extension ScreenerViewModel {
 
     /// In-app alerts: which enabled rules are met right now, and by which stocks.
     func computeInAppAlerts() -> [InAppAlert] {
-        ruleAlerts() + shortlistInAppAlerts()
+        ruleAlerts() + shortlistInAppAlerts() + TrackerCenter.shared.watchAlerts(vm: self)
     }
 
     private func ruleAlerts() -> [InAppAlert] {
