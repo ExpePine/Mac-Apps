@@ -234,6 +234,11 @@ extension ScreenerViewModel {
         AlertEventStore.save(alertEvents)
     }
 
+    func deleteAlertEvents(where match: (AlertEvent) -> Bool) {
+        alertEvents.removeAll(where: match)
+        AlertEventStore.save(alertEvents)
+    }
+
     func clearAlertEvents() {
         alertEvents.removeAll()
         AlertEventStore.save(alertEvents)

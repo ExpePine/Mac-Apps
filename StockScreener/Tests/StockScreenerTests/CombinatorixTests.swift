@@ -642,3 +642,15 @@ final class AlertScheduleTests: XCTestCase {
         d.removeObject(forKey: "alerts.doneDay")
     }
 }
+
+final class ShortlistNameTests: XCTestCase {
+    func testNameAndMode() {
+        var a = ShortlistAlert()
+        a.matchAll = true
+        XCTAssertEqual(a.name, "Shortlist D_Trigger → MS > 99 and DS > 99")
+        a.customName = "Green shortlist"
+        XCTAssertEqual(a.name, "Green shortlist")
+        a.customName = "  "
+        XCTAssertTrue(a.name.hasPrefix("Shortlist"))
+    }
+}

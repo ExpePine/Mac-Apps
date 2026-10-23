@@ -31,13 +31,20 @@ struct ShortlistAlert: Codable, Equatable, Identifiable {
     var shortlistColumn = "D_Trigger"
     var conditions: [ShortlistCond] = [ShortlistCond(column: "MS"), ShortlistCond(column: "DS")]
     var becomes = true           // false = every day it is true
+    var matchAll: Bool? = nil            // true = ALL conditions (and), else ANY (or)
+    var customName: String? = nil        // your own name for the alert
     var shortlistOp: String? = nil       // nil / "has a value", or > ≥ < ≤ =
     var shortlistValue: Double? = nil
     var shortlistText: String {
         guard let op = shortlistOp, op != "has a value", let v = shortlistValue else { return shortlistColumn }
         return "\(shortlistColumn) \(op) \(CombiEngine.fmt(v))"
     }
-    var name: String { "Shortlist \(shortlistText) → " + conditions.map(\.text).joined(separator: " or ") }
+    var all: Bool { matchAll ?? false }
+    var rule: String { "\(shortlistText) → " + conditions.map(\.text).joined(separator: all ? " and " : " or ") }
+    var name: String {
+        if let n = customName?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
+        return "Shortlist " + rule
+    }
     /// Is this row on the shortlist?
     func onShortlist(_ r: SheetRow, column sc: Int) -> Bool {
         let s = r.text(sc).trimmingCharacters(in: .whitespaces)
@@ -116,12 +123,14 @@ extension ScreenerViewModel {
             guard alert.onShortlist(r, column: sc) else { return false }                       // on the shortlist
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
             let old = prev?.rows[sym]
-            return conds.contains { c, i in
-                guard c.passes(r.number(i)) else { return false }
-                guard alert.becomes, prev != nil else { return true }
-                guard let old else { return true }                 // new on the list today
-                return !c.passes(old.number(i))                    // wasn't true the previous day
+            func holds(_ row: SheetRow) -> Bool {
+                alert.all ? conds.allSatisfy { c, i in c.passes(row.number(i)) } : conds.contains { c, i in c.passes(row.number(i)) }
             }
+            guard holds(r) else { return false }
+            guard alert.becomes, prev != nil, let old else { return true }   // new on the list today counts as "became"
+            if alert.all { return !holds(old) }                             // all together became true today
+            // any: at least one condition that is true today wasn't true the previous day
+            return conds.contains { c, i in c.passes(r.number(i)) && !c.passes(old.number(i)) }
         }
     }
 
@@ -132,7 +141,7 @@ extension ScreenerViewModel {
             guard !rows.isEmpty else { return nil }
             var rule = BuyTrigger(isEnabled: true, name: a.name)
             rule.id = a.id
-            var any = FilterGroup(mode: .any)
+            var any = FilterGroup(mode: a.all ? .all : .any)
             any.conditions = a.conditions.map { c in
                 FilterCondition(column: c.column, op: RuleOperator(rawValue: c.op) ?? .greaterThan, value: CombiEngine.fmt(c.value))
             }
@@ -164,6 +173,12 @@ struct ShortlistAlertsEditor: View {
                     ForEach($alerts) { $a in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
+                                Text("Name").font(.callout).frame(width: 80, alignment: .trailing)
+                                TextField("e.g. D_Trigger + Short_Green", text: Binding(get: { a.customName ?? "" }, set: { a.customName = $0.isEmpty ? nil : $0 }))
+                                    .textFieldStyle(.roundedBorder).frame(width: 300)
+                                Text(a.customName == nil ? "(automatic: \(a.rule))" : a.rule).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            HStack {
                                 Toggle("", isOn: $a.isEnabled).labelsHidden()
                                 Text("Shortlist =").font(.callout)
                                 Picker("", selection: $a.shortlistColumn) { ForEach(vm.headers, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 160)
@@ -180,7 +195,15 @@ struct ShortlistAlertsEditor: View {
                             }
                             ForEach($a.conditions) { $c in
                                 HStack {
-                                    Text(a.conditions.first?.id == c.id ? "Alert when" : "or").font(.callout).frame(width: 80, alignment: .trailing)
+                                    if a.conditions.first?.id == c.id {
+                                        Text("Alert when").font(.callout).frame(width: 80, alignment: .trailing)
+                                    } else {
+                                        Picker("", selection: Binding(get: { a.all }, set: { a.matchAll = $0 })) {
+                                            Text("or").tag(false); Text("and").tag(true)
+                                        }
+                                        .labelsHidden().frame(width: 80, alignment: .trailing)
+                                        .help("or = any condition fires the alert · and = all of them must be true")
+                                    }
                                     Picker("", selection: $c.column) { ForEach(vm.headers, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 150)
                                     Picker("", selection: $c.op) { ForEach([">", "≥", "<", "≤", "="], id: \.self) { Text($0).tag($0) } }.labelsHidden().fixedSize()
                                     TextField("", value: $c.value, format: .number).frame(width: 70).textFieldStyle(.roundedBorder)
@@ -189,7 +212,7 @@ struct ShortlistAlertsEditor: View {
                                 }
                             }
                             HStack {
-                                Button { a.conditions.append(ShortlistCond(column: vm.headers.first ?? "", value: 0)) } label: { Label("or …", systemImage: "plus") }
+                                Button { a.conditions.append(ShortlistCond(column: a.conditions.last?.column ?? "MS", op: ">", value: 99)) } label: { Label(a.all ? "and …" : "or …", systemImage: "plus") }
                                 Picker("", selection: $a.becomes) {
                                     Text("fire when it becomes true").tag(true)
                                     Text("fire every day it is true").tag(false)

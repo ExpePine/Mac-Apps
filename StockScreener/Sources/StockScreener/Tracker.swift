@@ -82,8 +82,10 @@ enum TrackerStore {
     }
 
     /// In-app alert + Alerts-window entries when a watch condition becomes true for a tracked stock.
+    static var watchToAlerts: Bool { UserDefaults.standard.object(forKey: "tracker.watchAlerts") as? Bool ?? true }
+
     func watchAlerts(vm: ScreenerViewModel) -> [InAppAlert] {
-        guard let prev = vm.previousDayRows() else { return [] }
+        guard Self.watchToAlerts, let prev = vm.previousDayRows() else { return [] }
         var out: [InAppAlert] = []
         for w in file.watches {
             guard let i = vm.table.index(of: w.column) else { continue }
@@ -123,6 +125,7 @@ struct TrackerView: View {
     @AppStorage("tracker.showArchived") private var showArchived = false
     @AppStorage("tracker.sort") private var sort = "Newest"
     @AppStorage("tracker.onlyHits") private var onlyHits = false
+    @AppStorage("tracker.watchAlerts") private var watchAlerts = true
     @State private var adding = ""
     @State private var showColumns = false
 
@@ -230,8 +233,8 @@ struct TrackerView: View {
                 .background(Capsule().fill(Color.green.opacity(0.12)))
             }
             Button { tc.file.watches.append(TrackerWatch(column: vm.headers.first ?? "", op: ">", value: 0)) } label: { Label("Watch", systemImage: "plus") }
-            Text("A stock that meets a watch is highlighted green, and the day it becomes true it's posted in Alerts.")
-                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            Toggle("Post to Alerts", isOn: $watchAlerts).toggleStyle(.checkbox)
+                .help("On: the day a watch becomes true it's posted in Alerts (“Tracker: count = 5”). Off: only highlighted here. Remove a watch with its ⓧ.")
             Spacer()
         }
         .controlSize(.small)

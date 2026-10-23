@@ -110,13 +110,6 @@ struct AlertsBrowserView: View {
 
     private var table: some View {
         Table(shown, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("When", value: \.date) { e in
-                HStack(spacing: 4) {
-                    if e.date > vm.alertsLastSeen { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
-                    Text(e.date.formatted(date: .abbreviated, time: .shortened))
-                }
-            }
-            .width(min: 120, ideal: 140)
             TableColumn("Stock", value: \.stock) { e in SymbolWithDots(symbol: e.stock, bold: false) }
                 .width(min: 80, ideal: 110)
             TableColumn("Rule", value: \.ruleName)
@@ -129,11 +122,21 @@ struct AlertsBrowserView: View {
             TableColumn("Values") { e in
                 Text(e.values.dropFirst().joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(1)
             }
+            TableColumn("When", value: \.date) { e in
+                HStack(spacing: 4) {
+                    if e.date > vm.alertsLastSeen { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
+                    Text(Self.short(e.date)).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            .width(min: 70, ideal: 90)
         }
         .contextMenu(forSelectionType: AlertEvent.ID.self) { ids in
             if let id = ids.first, let e = vm.alertEvents.first(where: { $0.id == id }) {
                 Button("Open chart") { vm.openChart(e.stock, queue: shown.map(\.stock), openWindow: openWindow) }
                 Button("Open Filter screen") { vm.selectedStock = e.stock; openWindow(id: "filter") }
+                Divider()
+                Button("Delete this alert") { vm.deleteAlertEvents { ids.contains($0.id) } }
+                Button("Delete all “\(e.ruleName)” alerts") { vm.deleteAlertEvents { $0.ruleName == e.ruleName } }
             }
         } primaryAction: { ids in
             if let id = ids.first, let e = vm.alertEvents.first(where: { $0.id == id }) {
@@ -199,6 +202,14 @@ struct AlertsBrowserView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// "17:21" today, "Thu 17:21" this week, else "23 Oct".
+    static func short(_ d: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return d.formatted(date: .omitted, time: .shortened) }
+        if let w = cal.dateComponents([.day], from: d, to: Date()).day, w < 6 { return d.formatted(.dateTime.weekday(.abbreviated).hour().minute()) }
+        return d.formatted(.dateTime.day().month(.abbreviated))
     }
 
     private var ruleNames: [String] {
