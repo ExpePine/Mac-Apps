@@ -222,7 +222,7 @@ struct ChartViewer: View {
         if syncFails >= 25 { return }              // gave up on this page: only delivery → TradingView (Go to date) works
         TVRange.run(web.view, TVRange.getBody) { r in
             let parts = r.split(separator: ",").compactMap { Int($0) }
-            guard parts.count == 2 else {
+            guard parts.count >= 2 else {
                 syncFails += 1
                 lastSyncReport = r
                 if syncFails >= 25 {
@@ -235,7 +235,7 @@ struct ChartViewer: View {
             syncNote = "🔗 synced"
             guard r != lastTV else { return }
             lastTV = r
-            mini.setRange(from: TVRange.day(parts[0]), to: TVRange.day(parts[1]))
+            _ = mini.follow(tvResult: r)
         }
     }
 

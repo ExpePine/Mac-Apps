@@ -284,9 +284,26 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     }
 
     /// Shows the days `from`…`to` (moved by the other chart; doesn't echo back).
-    func setRange(from: String, to: String) {
+    /// plotLeft / plotWidth: where TradingView's price pane sits in its page (px) — the delivery chart then maps
+    /// the same dates to the same screen positions. offset = extra bars to shift (manual fine-tune).
+    func setRange(from: String, to: String, plotLeft: Double? = nil, plotWidth: Double? = nil) {
         guard ready else { return }
-        view.evaluateJavaScript("window.setRange && window.setRange('\(from)','\(to)')", completionHandler: nil)
+        let off = UserDefaults.standard.integer(forKey: "sync.offsetBars")
+        let geo = plotLeft.flatMap { l in plotWidth.map { ",\(l),\($0)" } } ?? ",null,null"
+        view.evaluateJavaScript("window.setRange && window.setRange('\(from)','\(to)'\(geo),\(off))", completionHandler: nil)
+    }
+
+    /// From TVRange.getBody's "from,to[,left,width,page]" text.
+    private var lastFollow: String?
+    func refollow() { if let r = lastFollow { _ = follow(tvResult: r) } }
+
+    func follow(tvResult r: String) -> Bool {
+        lastFollow = r
+        let p = r.split(separator: ",").compactMap { Double($0) }
+        guard p.count >= 2 else { return false }
+        setRange(from: TVRange.day(Int(p[0])), to: TVRange.day(Int(p[1])),
+                 plotLeft: p.count >= 4 ? p[2] : nil, plotWidth: p.count >= 4 ? p[3] : nil)
+        return true
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -340,7 +357,14 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         if(!r || window._quiet) return;
         clearTimeout(window._rt);
         window._rt=setTimeout(function(){
-          if(window.webkit && window.webkit.messageHandlers.range) window.webkit.messageHandlers.range.postMessage([day(r.from), day(r.to)]);
+          if(!(window.webkit && window.webkit.messageHandlers.range)) return;
+          var g=window._tvGeo, lr=chart.timeScale().getVisibleLogicalRange();
+          if(g && lr){
+            // the range TradingView must show so its plot area lines up with this chart
+            var W=chart.timeScale().width()||document.body.clientWidth, bpp=(lr.to-lr.from)/W;
+            var a=lr.from-window._off+g.L*bpp, b=a+g.Wp*bpp;
+            window.webkit.messageHandlers.range.postMessage([dayAt(a), dayAt(b)]);
+          } else window.webkit.messageHandlers.range.postMessage([day(r.from), day(r.to)]);
         },120);
       });
       chart.subscribeCrosshairMove(function(p){
@@ -380,8 +404,26 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(day>=t[t.length-1]) return (t.length-1)+wd(t[t.length-1],day);
       var lo=0,hi=t.length-1; while(lo<hi){ var m=(lo+hi)>>1; if(t[m]<day) lo=m+1; else hi=m; } return lo;
     }
-    window.setRange=function(f,t){ if(!chart) return; window._quiet=true;
-      try{ chart.timeScale().setVisibleLogicalRange({from:pos(f),to:pos(t)}); }catch(e){}
+    // index → day (extrapolating weekdays before / after the data)
+    function dayAt(idx){
+      var t=window._times||[]; if(!t.length) return '';
+      var i=Math.round(idx);
+      function addWd(d,n){ var x=new Date(d+'T00:00:00Z'), s=n>0?1:-1, k=Math.abs(n);
+        while(k>0){ x.setUTCDate(x.getUTCDate()+s); var w=x.getUTCDay(); if(w!==0&&w!==6) k--; } return x.toISOString().slice(0,10); }
+      if(i<0) return addWd(t[0],i); if(i>=t.length) return addWd(t[t.length-1],i-(t.length-1)); return t[i];
+    }
+    window._tvGeo=null; window._off=0;
+    window.setRange=function(f,t,L,Wp,off){ if(!chart) return; window._quiet=true;
+      try{
+        var pf=pos(f), pt=pos(t);
+        window._off=off||0;
+        if(L!=null && Wp>50){
+          window._tvGeo={L:L,Wp:Wp};
+          var bpp=(pt-pf)/Wp, W=chart.timeScale().width()||document.body.clientWidth;
+          pf=pf-L*bpp; pt=pf+W*bpp;
+        }
+        chart.timeScale().setVisibleLogicalRange({from:pf+window._off,to:pt+window._off});
+      }catch(e){}
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350); };
     function lastOf(a){ return a&&a.length?a[a.length-1]:null; }
     function legendLast(){ var d=last; legend(lastOf(d.candles),lastOf(d.deliv),lastOf(d.high),null,lastOf(d.prank),lastOf(d.sma22),lastOf(d.sma66),lastOf(d.per),lastOf(d.t3)); }
@@ -536,7 +578,18 @@ enum TVRange {
     var r = c.getVisibleRange();
     if (r && typeof r.then === 'function') r = await r;
     if (!r || r.from == null) return 'norange';
-    return Math.round(r.from) + ',' + Math.round(r.to);
+    // + the main price pane's position on screen (the largest canvas), so the delivery chart can line its
+    //   dates up with TradingView's plot area, not just its date range
+    var g = '';
+    try {
+      var best = null, cs = document.querySelectorAll('canvas');
+      for (var i = 0; i < cs.length; i++) {
+        var b = cs[i].getBoundingClientRect();
+        if (b.width > 200 && b.height > 80 && (!best || b.width * b.height > best.width * best.height)) best = b;
+      }
+      if (best) g = ',' + Math.round(best.left) + ',' + Math.round(best.width) + ',' + Math.round(window.innerWidth);
+    } catch (e) {}
+    return Math.round(r.from) + ',' + Math.round(r.to) + g;
     """
 
     /// Subscribes once to the TradingView chart's crosshair and returns its time (unix s, "0" = none),

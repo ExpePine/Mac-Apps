@@ -402,7 +402,7 @@ struct DeliveryColumns {
     let safety: Double?      // ta.sma(DELIV_QTY, 100) × 0.05 (shares)
     var pctRank: Double? = nil   // ta.percentrank(DELIV_QTY, 300) on the latest day (0–100)
     var jump: Double? = nil      // JUMP (see DeliverySignal.jump)
-    var delSma: Double? = nil    // DELSMA = ta.percentrank(ta.sma(DELIV_QTY*close, 22), 300) (0–100)
+    var delSma: Double? = nil    // DELSMA = ta.percentrank(ta.sma(DELIV_QTY*close, 22 | 66 — as the Delivery signal), 300) (0–100)
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
@@ -425,7 +425,7 @@ struct DeliveryColumns {
         let safety: Double? = i >= 99 ? s.qty[(i - 99)...i].reduce(0, +) / 100 * 0.05 : nil
         let mode = UserDefaults.standard.integer(forKey: "deliv.jumpMode")
         return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
-                               jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i),
+                               jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i, smaLength: hiSma),
                                streak: StreakDef.current.streak(m, at: i),
                                t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)),
                                hiT3: hiOverT3(m, t3Source: T3Def.current.source(s, upTo: i)), day: latestDay)

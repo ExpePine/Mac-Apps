@@ -542,7 +542,7 @@ struct ChartReelView: View {
               let web = chart1Web(), !web.isLoading else { return }
         TVRange.run(web, TVRange.getBody) { r in
             let parts = r.split(separator: ",").compactMap { Int($0) }
-            guard parts.count == 2 else {
+            guard parts.count >= 2 else {
                 syncFails += 1
                 syncNote = syncFails >= 25 ? "Sync: TradingView doesn't expose its chart here — panning the delivery chart still re-centres Chart 1"
                                            : "Sync: waiting for TradingView…"
@@ -552,7 +552,7 @@ struct ChartReelView: View {
             syncNote = "🔗 synced"
             guard r != lastTV else { return }
             lastTV = r
-            deliveryLW.setRange(from: TVRange.day(parts[0]), to: TVRange.day(parts[1]))
+            _ = deliveryLW.follow(tvResult: r)
         }
     }
 

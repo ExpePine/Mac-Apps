@@ -445,6 +445,7 @@ struct DeliveryMiniChart: View {
     @AppStorage("deliv.full") private var full = true
     @AppStorage("viewer.delivRange") private var range = "1Y"
     @AppStorage("viewer.delivLayers") private var layersRaw = ""
+    @AppStorage("sync.offsetBars") private var syncOffset = 0
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
     @AppStorage("t3.rev") private var t3Rev = 0
@@ -466,7 +467,12 @@ struct DeliveryMiniChart: View {
                 }
                 Spacer()
                 if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
-                if let n = syncNote { Text(n).font(.caption2).foregroundStyle(.secondary) }
+                if let n = syncNote {
+                    Text(n).font(.caption2).foregroundStyle(.secondary)
+                    Stepper(value: $syncOffset, in: -30...30) { Text(syncOffset == 0 ? "align" : String(format: "%+d bars", syncOffset)).font(.caption2.monospacedDigit()) }
+                        .controlSize(.mini).fixedSize()
+                        .help("Fine-tune: shift the delivery chart by a few bars if it still doesn't line up with TradingView")
+                }
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases.filter { $0 != .candles })
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
@@ -484,6 +490,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: colorScheme) { _ in push() }
         .onChange(of: layersRaw) { _ in push() }
         .onChange(of: t3Rev) { _ in push() }
+        .onChange(of: syncOffset) { _ in lw.refollow() }
         .onChange(of: news.revision) { _ in push() }
         .onChange(of: deals.revision) { _ in push() }
     }

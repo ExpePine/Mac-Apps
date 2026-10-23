@@ -14,7 +14,7 @@ enum ScanMetric: String, CaseIterable, Codable, Identifiable {
     var help: String {
         switch self {
         case .hiT3: return "ta.highest(ta.sma(DQ*close, 22|66), 300) / T3"
-        case .delSma: return "ta.percentrank(ta.sma(DQ*close, 22), 300)"
+        case .delSma: return "ta.percentrank(ta.sma(DQ*close, 22|66 as the Delivery signal), 300)"
         case .dqPrank: return "ta.percentrank(DELIV_QTY, 300)"
         case .t3: return "T3 of delivery (your T3 settings)"
         case .t3Color: return "1 = T3 rising, 0 = not"
@@ -82,7 +82,7 @@ enum ScanEngine {
         case .per: return s.per.map { Optional($0) }
         case .sma22: return sma(22)
         case .sma66: return sma(66)
-        case .delSma: return prank(sma(22))
+        case .delSma: return prank(sma(DeliveryColumns.hiSma))
         case .dqPrank: return prank(s.qty.map { Optional($0) })
         case .t3: return T3Def.current.t3(T3Def.current.source(s))
         case .t3Color:

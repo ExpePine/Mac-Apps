@@ -342,7 +342,7 @@ struct GainerChartsView: View {
               let web = currentWeb(), !web.isLoading else { return }
         TVRange.run(web, TVRange.getBody) { r in
             let parts = r.split(separator: ",").compactMap { Int($0) }
-            guard parts.count == 2 else {
+            guard parts.count >= 2 else {
                 syncFails += 1
                 syncNote = syncFails >= 25 ? "Sync: TradingView doesn't expose its chart here" : "Sync: waiting for TradingView…"
                 return
@@ -351,7 +351,7 @@ struct GainerChartsView: View {
             syncNote = "🔗 synced"
             guard r != lastTV else { return }
             lastTV = r
-            lw.setRange(from: TVRange.day(parts[0]), to: TVRange.day(parts[1]))
+            _ = lw.follow(tvResult: r)
         }
     }
 }
