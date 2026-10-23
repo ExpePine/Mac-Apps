@@ -221,7 +221,7 @@ extension ScreenerViewModel {
         for row in rows {
             let stock = rowKey(row)
             let exists = alertEvents.contains {
-                $0.ruleID == rule.id && $0.stock == stock && $0.kind == kind && $0.dataDay == day
+                ($0.ruleID == rule.id || $0.ruleName == rule.name) && $0.stock == stock && $0.kind == kind && $0.dataDay == day
             }
             if exists { continue }
             added.append(AlertEvent(kind: kind, ruleID: rule.id, ruleName: rule.name, stock: stock, dataDay: day,

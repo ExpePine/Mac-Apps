@@ -29,6 +29,18 @@ enum AlertEventStore {
         return events
     }
 
+    /// Loads and drops repeats of the same rule + stock + type on the same data day (keeps the earliest).
+    static func loadDeduplicated() -> [AlertEvent] {
+        let all = load()
+        var seen = Set<String>(), out: [AlertEvent] = []
+        for e in all.sorted(by: { $0.date < $1.date }) where seen.insert("\(e.ruleName)|\(e.stock)|\(e.kind.rawValue)|\(e.dataDay)").inserted {
+            out.append(e)
+        }
+        out.sort { $0.date > $1.date }
+        if out.count != all.count { save(out) }
+        return out
+    }
+
     static func save(_ events: [AlertEvent]) {
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)

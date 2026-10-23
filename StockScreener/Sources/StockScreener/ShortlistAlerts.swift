@@ -51,10 +51,17 @@ enum ShortlistStore {
     /// D_Trigger → DELSMA > 99, i.e. ta.percentrank(ta.sma(DELIV_QTY*close, 22|66), 300) > 99.
     static let delsmaAlert = ShortlistAlert(id: UUID(uuidString: "D5A1E7C3-0B2F-4E6D-8A91-2C3B4D5E6F70")!,
                                             conditions: [ShortlistCond(column: "DELSMA", op: ">", value: 99)])
+    static let msdsAlert = ShortlistAlert(id: UUID(uuidString: "5B0A7C1E-3D2F-4A9B-8C7D-6E5F4A3B2C10")!)
     static var all: [ShortlistAlert] {
         get {
-            var l: [ShortlistAlert] = [ShortlistAlert()]          // D_Trigger → MS > 99 or DS > 99
+            var l: [ShortlistAlert] = [msdsAlert]                  // D_Trigger → MS > 99 or DS > 99
             if let d = UserDefaults.standard.data(forKey: key), let saved = try? JSONDecoder().decode([ShortlistAlert].self, from: d) { l = saved }
+            if UserDefaults.standard.data(forKey: key) == nil {           // save once, so the ids never change
+                UserDefaults.standard.set(true, forKey: "shortlist.delsmaAdded")
+                l.append(delsmaAlert)
+                UserDefaults.standard.set(try? JSONEncoder().encode(l), forKey: key)
+                return l
+            }
             if !UserDefaults.standard.bool(forKey: "shortlist.delsmaAdded") {
                 UserDefaults.standard.set(true, forKey: "shortlist.delsmaAdded")
                 if !l.contains(where: { $0.id == delsmaAlert.id }) { l.append(delsmaAlert); UserDefaults.standard.set(try? JSONEncoder().encode(l), forKey: key) }

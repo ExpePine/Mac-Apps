@@ -154,7 +154,7 @@ final class ScreenerViewModel: ObservableObject {
     @Published private(set) var eStatus: [Int: EState] = [:]
 
     // Alerts browser
-    @Published var alertEvents: [AlertEvent] = AlertEventStore.load()
+    @Published var alertEvents: [AlertEvent] = AlertEventStore.loadDeduplicated()
     @Published var alertsLastSeen: Date = (UserDefaults.standard.object(forKey: "StockScreener.alertsLastSeen") as? Date) ?? .distantPast
     @Published private(set) var historyDays: [String] = HistoryStore.days()
     @Published private(set) var historyBytes: Int = HistoryStore.totalBytes()

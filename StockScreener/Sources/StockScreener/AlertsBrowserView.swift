@@ -65,10 +65,13 @@ struct AlertsBrowserView: View {
     }
 
     private var filters: some View {
-        HStack(spacing: 10) {
+        FlowLayout(spacing: 10, lineSpacing: 8) {
+            Button { showShortlist = true } label: { Label("Shortlist alerts…", systemImage: "list.bullet.rectangle") }
+                .buttonStyle(.borderedProminent).fixedSize()
+                .help("Edit alerts like D_Trigger → MS > 99 or DS > 99 — change > 99 to = 100 etc.")
             TextField("Search stock, rule or value", text: $search)
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 260)
+                .frame(width: 240)
             Picker("", selection: $period) {
                 ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -81,8 +84,7 @@ struct AlertsBrowserView: View {
                 Text("All rules").tag("All rules")
                 ForEach(ruleNames, id: \.self) { Text($0).tag($0) }
             }
-            .fixedSize()
-            Spacer()
+            .frame(width: 260)
             Picker("", selection: $endOfDay) {
                 Text("Alert once a day").tag(true)
                 Text("Alert as data arrives").tag(false)
@@ -98,11 +100,9 @@ struct AlertsBrowserView: View {
                 .fixedSize()
                 .help("IST, Monday–Friday. If the app is closed then, it runs when you next open it that day.")
             }
-            Button { openWindow(id: "tracker") } label: { Label("Tracker", systemImage: "binoculars") }
+            Button { openWindow(id: "tracker") } label: { Label("Tracker", systemImage: "binoculars") }.fixedSize()
                 .help("Every stock a shortlist alert fired on — % change since, chosen Filter columns, watches like count = 5 (⌥⌘J)")
-            Button { showShortlist = true } label: { Label("Shortlist alerts…", systemImage: "list.bullet.rectangle") }
-                .help("e.g. D_Trigger is the shortlist → alert when MS > 99 or DS > 99 (becomes true)")
-            Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT…", systemImage: "wand.and.stars") }
+            Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT…", systemImage: "wand.and.stars") }.fixedSize()
                 .help("Stocks AUTO-PREDICT expects to gain ≥ 30% within a month — turn “Show predictions in Alerts” on there")
         }
         .padding(10)
