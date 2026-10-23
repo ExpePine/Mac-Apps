@@ -600,3 +600,13 @@ final class ShortlistTests: XCTestCase {
         XCTAssertEqual(a.name, "Shortlist D_Trigger ≤ 20 → MS > 99 or DS > 99")
     }
 }
+
+final class YahooTickerTests: XCTestCase {
+    func testTickers() {
+        XCTAssertEqual(YahooClient.yahooSymbol("TCS"), "TCS.NS")
+        XCTAssertEqual(YahooClient.yahooSymbol("BAJAJ-AUTO"), "BAJAJ-AUTO.NS")
+        XCTAssertEqual(YahooClient.yahooSymbol("^GSPC"), "%5EGSPC")
+        XCTAssertEqual(YahooClient.yahooSymbol("BZ=F"), "BZ%3DF")
+        XCTAssertEqual(YahooClient.yahooSymbol("BTC-USD"), "BTC-USD")
+    }
+}

@@ -22,6 +22,8 @@ struct GainersView: View {
         VStack(spacing: 0) {
             indexStrip
             Divider()
+            MarketStrip()
+            Divider()
             controls(day: day, gainers: gainers)
             Divider()
             summary(day: day, gainers: gainers)
