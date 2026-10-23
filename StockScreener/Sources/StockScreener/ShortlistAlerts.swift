@@ -199,7 +199,7 @@ struct ShortlistAlertsEditor: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save & check now") {
                     ShortlistStore.all = alerts
-                    vm.raiseInAppAlerts(asPopup: false)
+                    vm.raiseInAppAlerts(asPopup: false, force: true)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)

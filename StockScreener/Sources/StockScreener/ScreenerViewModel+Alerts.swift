@@ -128,13 +128,34 @@ extension ScreenerViewModel {
     }
 
     /// Shows the "Conditions met" pop-up (on launch) or banner (on new data).
-    func raiseInAppAlerts(asPopup: Bool) {
-        let alerts = computeInAppAlerts()
+    /// force = the "Alert now" button: shows everything that matches, even if already shown today.
+    func raiseInAppAlerts(asPopup: Bool, force: Bool = false) {
+        var alerts = computeInAppAlerts()
+        if !force { alerts = Self.onlyNewToday(alerts, day: HistoryStore.dayKey(dataDay(of: table))) }
         inAppAlerts = alerts
         guard !alerts.isEmpty else { return }
         if asPopup { showAlertsPopup = true } else { showAlertsBanner = true }
         let summary = alerts.map { "\($0.name): \($0.stocks.count)" }.joined(separator: ", ")
         addLog("In-app alert", summary, success: true)
+    }
+
+    /// Keeps, per alert, only the stocks not yet shown on this data day — and remembers them, so each
+    /// rule + stock pops up once a day however often the sheet updates or the app restarts.
+    static func onlyNewToday(_ alerts: [InAppAlert], day: String) -> [InAppAlert] {
+        let d = UserDefaults.standard
+        var shown = d.dictionary(forKey: "alerts.shownDay") as? [String: [String]] ?? [:]
+        shown = shown.filter { $0.key >= day }                     // forget older days
+        var seen = Set(shown[day] ?? [])
+        var out: [InAppAlert] = []
+        for a in alerts {
+            let fresh = a.stocks.filter { !seen.contains("\(a.triggerID)|\($0)") }
+            guard !fresh.isEmpty else { continue }
+            fresh.forEach { seen.insert("\(a.triggerID)|\($0)") }
+            out.append(InAppAlert(triggerID: a.triggerID, name: a.name, stocks: fresh))
+        }
+        shown[day] = Array(seen)
+        d.set(shown, forKey: "alerts.shownDay")
+        return out
     }
 
     // MV2

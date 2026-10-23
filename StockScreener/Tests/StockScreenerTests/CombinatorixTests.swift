@@ -610,3 +610,17 @@ final class YahooTickerTests: XCTestCase {
         XCTAssertEqual(YahooClient.yahooSymbol("BTC-USD"), "BTC-USD")
     }
 }
+
+final class AlertOncePerDayTests: XCTestCase {
+    @MainActor func testSameStockOnlyOnceADay() {
+        UserDefaults.standard.removeObject(forKey: "alerts.shownDay")
+        let id = UUID()
+        let a = [InAppAlert(triggerID: id, name: "D_Trigger → MS > 99", stocks: ["GODREJAGRO", "TCS"])]
+        XCTAssertEqual(ScreenerViewModel.onlyNewToday(a, day: "2026-10-23").first?.stocks, ["GODREJAGRO", "TCS"])
+        XCTAssertTrue(ScreenerViewModel.onlyNewToday(a, day: "2026-10-23").isEmpty)              // second refresh: nothing
+        let more = [InAppAlert(triggerID: id, name: "x", stocks: ["TCS", "INFY"])]
+        XCTAssertEqual(ScreenerViewModel.onlyNewToday(more, day: "2026-10-23").first?.stocks, ["INFY"])   // only the new one
+        XCTAssertEqual(ScreenerViewModel.onlyNewToday(a, day: "2026-10-26").first?.stocks.count, 2)       // next day again
+        UserDefaults.standard.removeObject(forKey: "alerts.shownDay")
+    }
+}

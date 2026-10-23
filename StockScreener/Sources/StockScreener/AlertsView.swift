@@ -184,7 +184,7 @@ struct BuyTriggersTab: View {
                             .foregroundStyle(count > 0 ? .green : .secondary)
                         Spacer()
                         if trigger.alertInApp {
-                            Button("Alert now") { vm.raiseInAppAlerts(asPopup: true) }
+                            Button("Alert now") { vm.raiseInAppAlerts(asPopup: true, force: true) }
                                 .disabled(trigger.filter.activeCount == 0)
                                 .help("Show the in-app alert for all rules that are met right now")
                         }
