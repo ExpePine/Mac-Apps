@@ -624,3 +624,21 @@ final class AlertOncePerDayTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "alerts.shownDay")
     }
 }
+
+final class AlertScheduleTests: XCTestCase {
+    private func ist(_ s: String) -> Date {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.date(from: s)!
+    }
+    func testOnceAfterClose() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: "alerts.doneDay"); d.removeObject(forKey: "alerts.at")
+        XCTAssertFalse(AlertSchedule.isDue(ist("2026-10-23 11:00")))     // market hours
+        XCTAssertTrue(AlertSchedule.isDue(ist("2026-10-23 15:50")))
+        AlertSchedule.markDone(ist("2026-10-23 15:50"))
+        XCTAssertFalse(AlertSchedule.isDue(ist("2026-10-23 17:00")))     // already done today
+        XCTAssertFalse(AlertSchedule.isDue(ist("2026-10-24 16:00")))     // Saturday
+        XCTAssertTrue(AlertSchedule.isDue(ist("2026-10-26 15:46")))      // next Monday
+        d.removeObject(forKey: "alerts.doneDay")
+    }
+}

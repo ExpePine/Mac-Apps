@@ -265,6 +265,7 @@ final class ScreenerViewModel: ObservableObject {
                     await self.refresh()
                 }
                 DeliveryCenter.shared.autoUpdateIfDue()          // NSE delivery data: new days, once an hour
+                if self.hasData { await self.runEndOfDayAlertsIfDue() }   // the day's alerts, once, after the close
                 try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
             }
         }
@@ -373,15 +374,18 @@ final class ScreenerViewModel: ObservableObject {
 
             saveSnapshotIfNeeded(raw: result.raw, table: result.table, changed: contentChanged)
 
-            // Alerts run only after the sheet's data has actually been updated.
+            // Alerts run only after the sheet's data has actually been updated (or once a day after the close).
             if contentChanged {
-                await runAlertChecks()
+                if !AlertSchedule.endOfDay { await runAlertChecks() }
                 Task { [weak self] in await self?.sectorDailyUpdate() }
             } else if sectorReport == nil {
                 Task { [weak self] in await self?.computeSectors(notify: true) }      // from cached prices
             }
             // In-app alert: once when the app opens (first data), then whenever new data arrives.
-            if !launchAlertDone {
+            if AlertSchedule.endOfDay {
+                launchAlertDone = true
+                await runEndOfDayAlertsIfDue()
+            } else if !launchAlertDone {
                 launchAlertDone = true
                 raiseInAppAlerts(asPopup: true)
             } else if contentChanged {

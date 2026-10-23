@@ -32,6 +32,8 @@ struct AlertsBrowserView: View {
     @State private var selection: AlertEvent.ID?
     @State private var sortOrder = [KeyPathComparator(\AlertEvent.date, order: .reverse)]
     @State private var showShortlist = false
+    @AppStorage("alerts.endOfDay") private var endOfDay = true
+    @AppStorage("alerts.at") private var alertAt = 15 * 60 + 45
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,6 +81,21 @@ struct AlertsBrowserView: View {
             }
             .fixedSize()
             Spacer()
+            Picker("", selection: $endOfDay) {
+                Text("Alert once a day").tag(true)
+                Text("Alert as data arrives").tag(false)
+            }
+            .labelsHidden().fixedSize()
+            .help("Once a day: every rule, shortlist alert and tracker watch is checked on the day's final data after the close and shown together. As data arrives: checked on every sheet update.")
+            if endOfDay {
+                Picker("at", selection: $alertAt) {
+                    ForEach([15 * 60 + 35, 15 * 60 + 45, 16 * 60, 16 * 60 + 30, 17 * 60, 18 * 60, 20 * 60], id: \.self) { m in
+                        Text(String(format: "%02d:%02d", m / 60, m % 60)).tag(m)
+                    }
+                }
+                .fixedSize()
+                .help("IST, Monday–Friday. If the app is closed then, it runs when you next open it that day.")
+            }
             Button { openWindow(id: "tracker") } label: { Label("Tracker", systemImage: "binoculars") }
                 .help("Every stock a shortlist alert fired on — % change since, chosen Filter columns, watches like count = 5 (⌥⌘J)")
             Button { showShortlist = true } label: { Label("Shortlist alerts…", systemImage: "list.bullet.rectangle") }
@@ -111,6 +128,16 @@ struct AlertsBrowserView: View {
                 Text(e.values.dropFirst().joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+        .contextMenu(forSelectionType: AlertEvent.ID.self) { ids in
+            if let id = ids.first, let e = vm.alertEvents.first(where: { $0.id == id }) {
+                Button("Open chart") { vm.openChart(e.stock, queue: shown.map(\.stock), openWindow: openWindow) }
+                Button("Open Filter screen") { vm.selectedStock = e.stock; openWindow(id: "filter") }
+            }
+        } primaryAction: { ids in
+            if let id = ids.first, let e = vm.alertEvents.first(where: { $0.id == id }) {
+                vm.openChart(e.stock, queue: shown.map(\.stock), openWindow: openWindow)      // double-click = chart
+            }
+        }
     }
 
     @ViewBuilder
@@ -134,11 +161,19 @@ struct AlertsBrowserView: View {
                         Text(v).font(.callout.monospacedDigit()).textSelection(.enabled)
                     }
                     Divider()
-                    Button {
-                        vm.selectedStock = e.stock
-                        openWindow(id: "filter")
-                    } label: {
-                        Label("Open Filter screen", systemImage: "line.3.horizontal.decrease.circle")
+                    HStack {
+                        Button {
+                            vm.openChart(e.stock, queue: shown.map(\.stock), openWindow: openWindow)
+                        } label: {
+                            Label("Open chart", systemImage: "chart.xyaxis.line")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button {
+                            vm.selectedStock = e.stock
+                            openWindow(id: "filter")
+                        } label: {
+                            Label("Open Filter screen", systemImage: "line.3.horizontal.decrease.circle")
+                        }
                     }
                 }
                 .padding(14)
@@ -153,7 +188,7 @@ struct AlertsBrowserView: View {
 
     private var footer: some View {
         HStack {
-            Text("\(shown.count) of \(vm.alertEvents.count) alerts")
+            Text("\(shown.count) of \(vm.alertEvents.count) alerts · checked \(endOfDay ? String(format: "once a day at %02d:%02d IST", alertAt / 60, alertAt % 60) : "as data arrives") · double-click = chart")
             Spacer()
             Button("Clear all…") { confirmClear() }
                 .disabled(vm.alertEvents.isEmpty)

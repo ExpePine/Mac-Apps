@@ -139,6 +139,15 @@ extension ScreenerViewModel {
         addLog("In-app alert", summary, success: true)
     }
 
+    /// Once a day after the market closes (default 15:45 IST, Mon–Fri): rule emails, in-app alerts, shortlist
+    /// alerts and tracker watches are checked on the day's final data and shown together in one pop-up.
+    func runEndOfDayAlertsIfDue() async {
+        guard AlertSchedule.endOfDay, AlertSchedule.isDue() else { return }
+        AlertSchedule.markDone()
+        await runAlertChecks()
+        raiseInAppAlerts(asPopup: true)
+    }
+
     /// Keeps, per alert, only the stocks not yet shown on this data day — and remembers them, so each
     /// rule + stock pops up once a day however often the sheet updates or the app restarts.
     static func onlyNewToday(_ alerts: [InAppAlert], day: String) -> [InAppAlert] {
@@ -338,4 +347,29 @@ extension ScreenerViewModel {
         alertState.log.insert(AlertLogEntry(title: title, detail: detail, success: success), at: 0)
         if alertState.log.count > 100 { alertState.log.removeLast(alertState.log.count - 100) }
     }
+}
+
+
+/// When alerts are checked: once a day after the close (default) or every time new data arrives.
+enum AlertSchedule {
+    private static let ist = TimeZone(identifier: "Asia/Kolkata")!
+    static var endOfDay: Bool { UserDefaults.standard.object(forKey: "alerts.endOfDay") as? Bool ?? true }
+    /// Minutes after midnight IST (default 15:45).
+    static var at: Int { let v = UserDefaults.standard.integer(forKey: "alerts.at"); return v > 0 ? v : 15 * 60 + 45 }
+
+    static func today(_ now: Date = Date()) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = ist; f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: now)
+    }
+
+    /// A weekday, past the chosen time, and not done yet today.
+    static func isDue(_ now: Date = Date()) -> Bool {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = ist
+        let c = cal.dateComponents([.weekday, .hour, .minute], from: now)
+        guard let wd = c.weekday, (2...6).contains(wd), let h = c.hour, let m = c.minute else { return false }
+        return h * 60 + m >= at && UserDefaults.standard.string(forKey: "alerts.doneDay") != today(now)
+    }
+    static func markDone(_ now: Date = Date()) { UserDefaults.standard.set(today(now), forKey: "alerts.doneDay") }
+
+    static var describe: String { endOfDay ? String(format: "once a day at %02d:%02d IST (Mon–Fri)", at / 60, at % 60) : "whenever new data arrives" }
 }
