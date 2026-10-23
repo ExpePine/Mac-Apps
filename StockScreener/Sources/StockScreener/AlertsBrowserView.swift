@@ -34,6 +34,8 @@ struct AlertsBrowserView: View {
     @State private var showShortlist = false
     @AppStorage("alerts.endOfDay") private var endOfDay = true
     @AppStorage("alerts.at") private var alertAt = 15 * 60 + 45
+    static let alertTimes: [Int] = [935, 945, 960, 990, 1020, 1080, 1200]       // minutes after midnight IST
+    static func hhmm(_ m: Int) -> String { String(format: "%02d:%02d", m / 60, m % 60) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -89,8 +91,8 @@ struct AlertsBrowserView: View {
             .help("Once a day: every rule, shortlist alert and tracker watch is checked on the day's final data after the close and shown together. As data arrives: checked on every sheet update.")
             if endOfDay {
                 Picker("at", selection: $alertAt) {
-                    ForEach([15 * 60 + 35, 15 * 60 + 45, 16 * 60, 16 * 60 + 30, 17 * 60, 18 * 60, 20 * 60], id: \.self) { m in
-                        Text(String(format: "%02d:%02d", m / 60, m % 60)).tag(m)
+                    ForEach(Self.alertTimes, id: \.self) { (m: Int) in
+                        Text(Self.hhmm(m)).tag(m)
                     }
                 }
                 .fixedSize()
@@ -188,7 +190,7 @@ struct AlertsBrowserView: View {
 
     private var footer: some View {
         HStack {
-            Text("\(shown.count) of \(vm.alertEvents.count) alerts · checked \(endOfDay ? String(format: "once a day at %02d:%02d IST", alertAt / 60, alertAt % 60) : "as data arrives") · double-click = chart")
+            Text("\(shown.count) of \(vm.alertEvents.count) alerts · checked \(endOfDay ? "once a day at " + Self.hhmm(alertAt) + " IST" : "as data arrives") · double-click = chart")
             Spacer()
             Button("Clear all…") { confirmClear() }
                 .disabled(vm.alertEvents.isEmpty)
