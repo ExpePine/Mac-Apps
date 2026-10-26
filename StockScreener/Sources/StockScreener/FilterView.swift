@@ -140,12 +140,6 @@ struct FilterView: View {
             }
             ToolbarItemGroup {
                 Button {
-                    vm.showRulesEditor = true
-                } label: {
-                    Label("Rules", systemImage: "envelope.badge")
-                }
-                .help("All Email / Alert rules (per-stock rules are on each row's E button)")
-                Button {
                     vm.toggleTG()
                 } label: {
                     Text("TG").font(.system(size: 12, weight: .heavy, design: .rounded))
@@ -154,15 +148,6 @@ struct FilterView: View {
                         .background(RoundedRectangle(cornerRadius: 5).fill(vm.tgMode ? Color.green : Color.green.opacity(0.12)))
                 }
                 .help("Top Gainers: only stocks up more than \(String(format: "%g", vm.settings.tgThreshold))% that day (same filters and colors). Uses Yahoo prices, else the sheet's change% column.")
-                Button {
-                    openWindow(id: "nn")
-                } label: {
-                    Text("N").font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Color.purple)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.purple.opacity(0.12)))
-                }
-                .help("Neural Net: filter-value combinations shared by monthly top gainers (≥ \(vm.settings.nnGainThreshold)% in a month)")
                 Menu {
                     Button("This Filter's stocks") { openReel(.filter) }
                     Button("\(vm.settings.triggerColumn) = 1") { openReel(.column, value: "1") }
@@ -183,31 +168,12 @@ struct FilterView: View {
                     Label("Chart Reel", systemImage: "film.stack")
                 } primaryAction: { openReel(.filter) }
                 .help("Flick through charts with a slider — click for this Filter's stocks, or pick a list (⌥⌘R)")
-                Button {
-                    openWindow(id: "changes")
-                } label: {
-                    Label("Changes", systemImage: "rectangle.grid.2x2")
+                if vm.unseenRegimeCount > 0 {
+                    Button { openWindow(id: "sectors") } label: {
+                        Label("Sectors (\(vm.unseenRegimeCount))", systemImage: "square.grid.3x3.fill")
+                    }
+                    .help("\(vm.unseenRegimeCount) new sector regime change(s) (⇧⌘0)")
                 }
-                .help("Cards showing what changed since the previous day (⇧⌘8)")
-                Button {
-                    openWindow(id: "gainers")
-                } label: {
-                    Label("Gainers", systemImage: "flame")
-                }
-                .help("Daily gainers with NIFTY / SENSEX charts and news reasons (⇧⌘G)")
-                Button {
-                    openWindow(id: "sectors")
-                } label: {
-                    Label(vm.unseenRegimeCount > 0 ? "Sectors (\(vm.unseenRegimeCount))" : "Sectors",
-                          systemImage: vm.unseenRegimeCount > 0 ? "square.grid.3x3.fill" : "square.grid.3x3")
-                }
-                .help(vm.unseenRegimeCount > 0 ? "\(vm.unseenRegimeCount) new sector regime change(s) (⇧⌘0)" : "Sector momentum & regime changes (⇧⌘0)")
-                Button {
-                    openWindow(id: "perf")
-                } label: {
-                    Label("Performance", systemImage: "chart.line.uptrend.xyaxis")
-                }
-                .help("How stocks did after an event such as D_Trigger (⇧⌘9)")
                 WatchlistMenu()
                 AlertsButton()
                 AnimateButton()
@@ -218,10 +184,6 @@ struct FilterView: View {
                     Label("Columns", systemImage: "rectangle.split.3x1")
                 }
                 .help("Choose which columns the Filter shows and their order — hidden ones stay in Data Import")
-                StreakButton()
-                T3Button()
-                PriceT3Button()
-                PeekMenu()
 
 
                 Button {
@@ -231,11 +193,8 @@ struct FilterView: View {
                 }
                 .disabled(vm.isLoading || vm.settings.sheetLink.isEmpty)
 
-                Button {
-                    openWindow(id: "data")
-                } label: {
-                    Label("Data Import", systemImage: "tablecells")
-                }
+                OpenMenu()
+                SettingsHubButton()
             }
         }
         .sheet(isPresented: $showColumns) {

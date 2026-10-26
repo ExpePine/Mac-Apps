@@ -142,8 +142,7 @@ struct DeliveryView: View {
                     .help("The Filter's JUMP column. 1: ta.percentrank(DELIV_QTY*close, 300) today ÷ the percent rank's previous peak. 2: DELIV_QTY*close today ÷ the previous (different) ta.highest(DELIV_QTY*close, 300).")
                     .onChange(of: jumpMode) { _ in DeliveryCenter.shared.refreshColumns() }
                 }.fixedSize()
-                StreakButton().fixedSize()
-                T3Button().fixedSize()
+                IndicatorSettingsButton().fixedSize()
                 HStack(spacing: 4) {
                     Text("Within last").font(.caption)
                     Stepper("\(within) day\(within == 1 ? "" : "s")", value: $within, in: 1...250)
@@ -650,51 +649,78 @@ struct FlowLayout: Layout {
 /// "STREAK" button + popover: how the Filter's STREAK column is defined — consecutive trading days (ending on
 /// the data day) where ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, 22 or 66), length) passes a condition.
 struct StreakButton: View {
-    @AppStorage("streak.sma") private var sma = 0          // 0 = follow the Delivery Analysis signal
-    @AppStorage("streak.length") private var length = 300
-    @AppStorage("streak.op") private var op = ">"
-    @AppStorage("streak.value") private var value = 99.0
-    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
     @State private var open = false
 
     var body: some View {
         Button { open.toggle() } label: { Label("STREAK", systemImage: "flame") }
             .help("Defines the Filter's STREAK column: \(StreakDef.current.pine) — counted in consecutive trading days")
             .popover(isPresented: $open, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("STREAK column").font(.headline)
-                    Text("Number of consecutive trading days, ending on the Filter's data day, where:").font(.caption).foregroundStyle(.secondary)
-                    HStack(spacing: 4) {
-                        Text("ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE,").font(.caption.monospaced())
-                        Picker("", selection: $sma) {
-                            Text("signal's (\(DeliveryMetric(rawValue: metricRaw) == .sma66 ? 66 : 22))").tag(0)
-                            Text("22").tag(22)
-                            Text("66").tag(66)
-                        }
-                        .labelsHidden().fixedSize()
-                        .help("“signal's” follows the SMA picked in Delivery Analysis' Signal (22 unless ta.sma(…, 66) is selected)")
-                        Text("),").font(.caption.monospaced())
-                        TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
-                        Text(")").font(.caption.monospaced())
-                        Picker("", selection: $op) { ForEach([">", "≥", "<", "≤"], id: \.self) { Text($0).tag($0) } }
-                            .labelsHidden().fixedSize()
-                        TextField("", value: $value, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
-                    }
-                    Text("0 = the condition fails on the data day. Blank = not enough history yet (needs SMA length − 1 + \(length) + 1 trading days of NSE data, like Pine's na). A day with no NSE row for the stock is skipped, not counted as a break.")
-                        .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Text(StreakDef.current.pine).font(.caption.monospaced()).foregroundStyle(.orange)
-                        Spacer()
-                        Button("Reset") { sma = 0; length = 300; op = ">"; value = 99 }
-                    }
+                StreakSettings().padding(14)
+            }
+    }
+}
+
+struct StreakSettings: View {
+    @AppStorage("streak.sma") private var sma = 0          // 0 = follow the Delivery Analysis signal
+    @AppStorage("streak.length") private var length = 300
+    @AppStorage("streak.op") private var op = ">"
+    @AppStorage("streak.value") private var value = 99.0
+    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("STREAK column").font(.headline)
+            Text("Number of consecutive trading days, ending on the Filter's data day, where:").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Text("ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE,").font(.caption.monospaced())
+                Picker("", selection: $sma) {
+                    Text("signal's (\(DeliveryMetric(rawValue: metricRaw) == .sma66 ? 66 : 22))").tag(0)
+                    Text("22").tag(22)
+                    Text("66").tag(66)
                 }
-                .padding(14)
-                .onChange(of: sma) { _ in DeliveryCenter.shared.refreshColumns() }
-                .onChange(of: length) { _ in DeliveryCenter.shared.refreshColumns() }
-                .onChange(of: op) { _ in DeliveryCenter.shared.refreshColumns() }
-                .onChange(of: value) { _ in DeliveryCenter.shared.refreshColumns() }
-                .onChange(of: metricRaw) { _ in DeliveryCenter.shared.refreshColumns() }
+                .labelsHidden().fixedSize()
+                .help("“signal's” follows the SMA picked in Delivery Analysis' Signal (22 unless ta.sma(…, 66) is selected)")
+                Text("),").font(.caption.monospaced())
+                TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                Text(")").font(.caption.monospaced())
+                Picker("", selection: $op) { ForEach([">", "≥", "<", "≤"], id: \.self) { Text($0).tag($0) } }
+                    .labelsHidden().fixedSize()
+                TextField("", value: $value, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+            }
+            Text("0 = the condition fails on the data day. Blank = not enough history yet (needs SMA length − 1 + \(length) + 1 trading days of NSE data, like Pine's na). A day with no NSE row for the stock is skipped, not counted as a break.")
+                .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text(StreakDef.current.pine).font(.caption.monospaced()).foregroundStyle(.orange)
+                Spacer()
+                Button("Reset") { sma = 0; length = 300; op = ">"; value = 99 }
+            }
+        }
+        .onChange(of: sma) { _ in DeliveryCenter.shared.refreshColumns() }
+        .onChange(of: length) { _ in DeliveryCenter.shared.refreshColumns() }
+        .onChange(of: op) { _ in DeliveryCenter.shared.refreshColumns() }
+        .onChange(of: value) { _ in DeliveryCenter.shared.refreshColumns() }
+        .onChange(of: metricRaw) { _ in DeliveryCenter.shared.refreshColumns() }
+    }
+}
+
+
+/// One button for the STREAK and delivery-T3 settings, each in a collapsible section.
+struct IndicatorSettingsButton: View {
+    @State private var open = false
+    @AppStorage("hub.streak") private var streak = false
+    @AppStorage("hub.t3") private var t3 = false
+
+    var body: some View {
+        Button { open.toggle() } label: { Label("STREAK · T3", systemImage: "slider.horizontal.3") }
+            .help("Settings of the STREAK column and the T3 line on delivery (also in Settings, ⌥⌘,)")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    DisclosureGroup("STREAK", isExpanded: $streak) { StreakSettings().padding(.vertical, 6) }
+                    Divider()
+                    DisclosureGroup("T3 on delivery", isExpanded: $t3) { T3Settings().padding(.vertical, 6) }
+                }
+                .padding(14).frame(width: 520)
             }
     }
 }
@@ -702,51 +728,57 @@ struct StreakButton: View {
 
 /// "T3" button + popover: settings of the Tilson T3 line on the delivery charts and the Filter's t3Color column.
 struct T3Button: View {
-    @AppStorage("t3.length") private var length = 22
-    @AppStorage("t3.factor") private var factor = 1.0
-    @AppStorage("t3.useQty") private var useQty = false
-    @AppStorage("t3.rev") private var rev = 0
     @State private var open = false
 
     var body: some View {
         Button { open.toggle() } label: { Label("T3", systemImage: "waveform.path.ecg") }
             .help("Tilson T3 of delivery: the line on the delivery charts and the Filter's t3Color column (1 = rising / green, 0 = red)")
             .popover(isPresented: $open, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("T3 (Tilson) on delivery").font(.headline)
-                    HStack(spacing: 6) {
-                        Text("src =").font(.caption.monospaced())
-                        Picker("", selection: $useQty) {
-                            Text("DELIV_QTY*CLOSE_PRICE").tag(false)
-                            Text("DELIV_QTY").tag(true)
-                        }
-                        .labelsHidden().fixedSize()
-                    }
-                    HStack(spacing: 6) {
-                        Text("length =").font(.caption.monospaced())
-                        TextField("", value: $length, format: .number).frame(width: 50).multilineTextAlignment(.trailing)
-                        Text("factor =").font(.caption.monospaced())
-                        TextField("", value: $factor, format: .number).frame(width: 50).multilineTextAlignment(.trailing)
-                    }
-                    Text("""
-                    gd(src, length) => ta.ema(src, length) * (1 + factor) - ta.ema(ta.ema(src, length), length) * factor
-                    t3 = gd(gd(gd(src, length), length), length)
-                    t3Color = t3 > t3[1] ? green : red      → Filter t3Color: 1 = green, 0 = red
-                    """)
-                    .font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                    Text("ta.ema follows Pine: na for the first `length` bars, then seeded with their average. Six EMAs are chained, so T3 needs about 6 × length trading days (≈ \(6 * max(1, length) - 5) for length \(length)) before it has a value; t3Color is blank until then.")
-                        .font(.caption2).foregroundStyle(.secondary).frame(width: 460, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Text("Show / hide the line: Layers button on the chart").font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Reset") { length = 22; factor = 1; useQty = false }
-                    }
-                }
-                .padding(14)
-                .onChange(of: length) { _ in changed() }
-                .onChange(of: factor) { _ in changed() }
-                .onChange(of: useQty) { _ in changed() }
+                T3Settings().padding(14)
             }
+    }
+}
+
+struct T3Settings: View {
+    @AppStorage("t3.length") private var length = 22
+    @AppStorage("t3.factor") private var factor = 1.0
+    @AppStorage("t3.useQty") private var useQty = false
+    @AppStorage("t3.rev") private var rev = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("T3 (Tilson) on delivery").font(.headline)
+            HStack(spacing: 6) {
+                Text("src =").font(.caption.monospaced())
+                Picker("", selection: $useQty) {
+                    Text("DELIV_QTY*CLOSE_PRICE").tag(false)
+                    Text("DELIV_QTY").tag(true)
+                }
+                .labelsHidden().fixedSize()
+            }
+            HStack(spacing: 6) {
+                Text("length =").font(.caption.monospaced())
+                TextField("", value: $length, format: .number).frame(width: 50).multilineTextAlignment(.trailing)
+                Text("factor =").font(.caption.monospaced())
+                TextField("", value: $factor, format: .number).frame(width: 50).multilineTextAlignment(.trailing)
+            }
+            Text("""
+            gd(src, length) => ta.ema(src, length) * (1 + factor) - ta.ema(ta.ema(src, length), length) * factor
+            t3 = gd(gd(gd(src, length), length), length)
+            t3Color = t3 > t3[1] ? green : red      → Filter t3Color: 1 = green, 0 = red
+            """)
+            .font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("ta.ema follows Pine: na for the first `length` bars, then seeded with their average. Six EMAs are chained, so T3 needs about 6 × length trading days (≈ \(6 * max(1, length) - 5) for length \(length)) before it has a value; t3Color is blank until then.")
+                .font(.caption2).foregroundStyle(.secondary).frame(width: 460, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("Show / hide the line: Layers button on the chart").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") { length = 22; factor = 1; useQty = false }
+            }
+        }
+        .onChange(of: length) { _ in changed() }
+        .onChange(of: factor) { _ in changed() }
+        .onChange(of: useQty) { _ in changed() }
     }
 
     private func changed() {
@@ -759,30 +791,38 @@ struct T3Button: View {
 
 /// "T3 Fast / Slow" button: length, factor and price source of the two price T3 columns (Data and Filter).
 struct PriceT3Button: View {
-    @EnvironmentObject var vm: ScreenerViewModel
     @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: { Label("T3 Fast / Slow", systemImage: "chart.line.flattrend.xyaxis") }
+            .help("T3_FAST and T3_SLOW columns on daily prices: \(PriceT3.fast.pine) · \(PriceT3.slow.pine)")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                PriceT3Settings(onApply: { open = false }).padding(14)
+            }
+    }
+}
+
+struct PriceT3Settings: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    var onApply: () -> Void = {}
     @State private var fast = PriceT3.fast
     @State private var slow = PriceT3.slow
 
     var body: some View {
-        Button { fast = PriceT3.fast; slow = PriceT3.slow; open.toggle() } label: { Label("T3 Fast / Slow", systemImage: "chart.line.flattrend.xyaxis") }
-            .help("T3_FAST and T3_SLOW columns on daily prices: \(PriceT3.fast.pine) · \(PriceT3.slow.pine)")
-            .popover(isPresented: $open, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("T3 on daily prices (Yahoo)").font(.headline)
-                    row("T3_FAST", $fast)
-                    row("T3_SLOW", $slow)
-                    Text("gd(src, length) = ta.ema(src, length) × (1 + factor) − ta.ema(ta.ema(src, length), length) × factor;  T3 = gd(gd(gd(src))). Tilson's classic factor is 0.7. Needs about 6 × length days of prices. Open / high / low come with the next Yahoo price update (until then the close is used).")
-                        .font(.caption2).foregroundStyle(.secondary).frame(width: 460, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Defaults") { fast = PriceT3(length: 8, factor: 0.7, source: "close"); slow = PriceT3(length: 21, factor: 0.7, source: "close") }
-                        Spacer()
-                        Button("Apply") { fast.save("t3fast"); slow.save("t3slow"); vm.setTableKeepingRaw(); open = false }
-                            .keyboardShortcut(.defaultAction)
-                    }
-                }
-                .padding(14)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("T3 on daily prices (Yahoo)").font(.headline)
+            row("T3_FAST", $fast)
+            row("T3_SLOW", $slow)
+            Text("gd(src, length) = ta.ema(src, length) × (1 + factor) − ta.ema(ta.ema(src, length), length) × factor;  T3 = gd(gd(gd(src))). Tilson's classic factor is 0.7. Needs about 6 × length days of prices. T3F / T3S = 1 when the line rose since the previous day, else 0.")
+                .font(.caption2).foregroundStyle(.secondary).frame(width: 460, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Defaults") { fast = PriceT3(length: 8, factor: 0.7, source: "close"); slow = PriceT3(length: 21, factor: 0.7, source: "close") }
+                Spacer()
+                Button("Apply") { fast.save("t3fast"); slow.save("t3slow"); vm.setTableKeepingRaw(); onApply() }
+                    .keyboardShortcut(.defaultAction)
             }
+        }
+        .onAppear { fast = PriceT3.fast; slow = PriceT3.slow }
     }
 
     private func row(_ name: String, _ v: Binding<PriceT3>) -> some View {

@@ -61,7 +61,6 @@ struct ImportView: View {
         .searchable(text: $vm.importSearch, placement: .toolbar, prompt: "Search all columns…")
         .toolbar {
             ToolbarItemGroup {
-                PriceT3Button()
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()
@@ -81,52 +80,8 @@ struct ImportView: View {
                 }
                 .help("Open the Filter screen (⇧⌘1)")
 
-                Button {
-                    openWindow(id: "changes")
-                } label: {
-                    Label("Changes", systemImage: "rectangle.grid.2x2")
-                }
-                .help("Cards showing what changed since the previous day (⇧⌘8)")
-                Button {
-                    openWindow(id: "symbols")
-                } label: {
-                    Label("Symbols", systemImage: "plus.rectangle.on.rectangle")
-                }
-                .help("Add NSE symbols by hand, or hide sheet symbols (⌥⌘Y)")
-
-                Button {
-                    openWindow(id: "gainers")
-                } label: {
-                    Label("Gainers", systemImage: "flame")
-                }
-                .help("Daily gainers with NIFTY / SENSEX charts and news reasons (⇧⌘G)")
-                Button {
-                    openWindow(id: "sectors")
-                } label: {
-                    Label("Sectors", systemImage: "square.grid.3x3")
-                }
-                .help("Sector momentum & regime changes (⇧⌘0)")
-
-                Button {
-                    openWindow(id: "perf")
-                } label: {
-                    Label("Performance", systemImage: "chart.line.uptrend.xyaxis")
-                }
-                .help("How stocks did after an event such as D_Trigger (⇧⌘9)")
-
-                Button {
-                    openWindow(id: "notes")
-                } label: {
-                    Label("MV2 Requirements & Pine", systemImage: "doc.text")
-                }
-                .help("MV2 Build Requirements and Pine Script editor (⇧⌘7)")
-
-                Button {
-                    openWindow(id: "alerts")
-                } label: {
-                    Label("Alerts & Email", systemImage: "bell.badge")
-                }
-                .help("MV2 check, buy triggers and email (⇧⌘2)")
+                OpenMenu()
+                SettingsHubButton()
 
                 Button {
                     showColumnNames = true

@@ -115,12 +115,12 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
-        Window("Count & Probability", id: "probability") {
-            ProbabilityView()
+        Window("Settings", id: "hub") {
+            SettingsHubView()
                 .environmentObject(vm)
-                .frame(minWidth: 1000, minHeight: 600)
+                .frame(minWidth: 640, minHeight: 520)
         }
-        .keyboardShortcut("b", modifiers: [.command, .option])
+        .keyboardShortcut(",", modifiers: [.command, .option])
 
         Window("Alert Tracker", id: "tracker") {
             TrackerView()
@@ -202,37 +202,16 @@ struct ToolsCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Tools") {
-            Text("Shortcuts ⇧⌘1 … ⇧⌘0 are in the Window menu")
-            Divider()
-            Button("Data Import") { openWindow(id: "data") }
-            Button("Filter") { openWindow(id: "filter") }
-            Button("Changes (cards)") { openWindow(id: "changes") }
-            Button("Performance") { openWindow(id: "perf") }
-            Button("Sectors & regime alerts") { openWindow(id: "sectors") }
-            Button("Daily Gainers (⇧⌘G)") { openWindow(id: "gainers") }
-            Button("Chart viewer (⇧⌘K)") { openWindow(id: "chart") }
-            Button("My Picks (⌥⌘P)") { openWindow(id: "picks") }
-            Button("Experiments — compare your triggers (⌥⌘E)") { openWindow(id: "experiments") }
-            Button("Multibaggers — ≥30% in a month, 2023 → now (⌥⌘M)") { openWindow(id: "multibaggers") }
-            Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
+            Button("Settings…") { openWindow(id: "hub") }
             Button("Update 5-minute data now (Yahoo, for MOR / DAY)") { Intraday5mCenter.shared.update(Intraday5mCenter.allSheetSymbols, force: true) }
-            Button("Count & Probability — chance of a top gainer for count = 5, Long_Green = 1 … (⌥⌘B)") { openWindow(id: "probability") }
-            Button("Alert Tracker — stocks from shortlist alerts, % change and watched columns (⌥⌘J)") { openWindow(id: "tracker") }
-            Button("Event Scan — days since HI/T3 < 1.10 or any condition, charts at that date (⌥⌘L)") { openWindow(id: "eventscan") }
-            Button("Timing Lab — how buy triggers after a shortlist performed (⌥⌘T)") { openWindow(id: "timinglab") }
-            Button("News & Deals — news labels (Groq) + bulk / block deals on a chart (⌥⌘N)") { openWindow(id: "newschart") }
-            Button("AUTO-PREDICT — learns what comes before ≥30% monthly moves (⌥⌘A)") { openWindow(id: "autopredict") }
-            Button("Gainer Charts — Chart 1 → Chart 2 of each top gainer (⌥⌘G)") { openWindow(id: "gainerCharts") }
-            Button("Chart Reel — flick through charts (⌥⌘R)") { openWindow(id: "reel") }
-            Button("Combinatorix — combinations behind gainers (⌥⌘X)") { openWindow(id: "combi") }
-            Button("Symbols — add / hide (⌥⌘Y)") { openWindow(id: "symbols") }
-            Button("Email & Rules") { openWindow(id: "alerts") }
-            Button("Alerts") { openWindow(id: "alertlog") }
-            Button("Neural Net") { openWindow(id: "nn") }
-            Divider()
-            Button("Watchlists") { openWindow(id: "watch") }
-            Button("Screenshots") { openWindow(id: "shots") }
-            Button("MV2 Requirements & Pine Scripts") { openWindow(id: "notes") }
+            ForEach(AppWindows.groups) { g in
+                Divider()
+                Section(g.name) {
+                    ForEach(g.windows) { w in
+                        Button(w.note.isEmpty ? w.title : "\(w.title) — \(w.note)") { openWindow(id: w.id) }
+                    }
+                }
+            }
         }
     }
 }

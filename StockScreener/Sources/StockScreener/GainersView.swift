@@ -175,20 +175,7 @@ struct GainersView: View {
                 .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { UserDefaults.standard.set(ReelSource.gainers.rawValue, forKey: "reel.source"); openWindow(id: "reel") } label: { Label("Chart Reel", systemImage: "film.stack") }
                 .help("Flick through these gainers' charts with a slider (⌥⌘R)")
-            Button { openWindow(id: "probability") } label: { Label("Probability", systemImage: "percent") }
-                .help("Count & Probability: chance of a daily / monthly top gainer for each value and combination of your Filter columns (⌥⌘B)")
-            Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT", systemImage: "wand.and.stars") }
-                .help("Combinations that came before ≥ 30% monthly moves, and today's stocks matching the proven ones (⌥⌘A)")
-            Button { openWindow(id: "gainerCharts") } label: { Label("Gainer Charts", systemImage: "rectangle.stack") }
-                .help("Chart 1 then Chart 2 of every top gainer (daily ≥ 5% or monthly ≥ 30%), with the delivery chart (⌥⌘G)")
-            Button { openWindow(id: "multibaggers") } label: { Label("Multibaggers", systemImage: "chart.line.uptrend.xyaxis.circle") }
-                .help("Every stock that gained ≥ 30% in a month since 2023 — and a Chart Reel jumped to each move (⌥⌘M)")
-            Button { openWindow(id: "newschart") } label: { Label("News & Deals", systemImage: "newspaper") }
-                .help("A stock's chart with news labelled by Groq and NSE bulk / block deals (⌥⌘N)")
-            Button { openWindow(id: "delivery") } label: { Label("Delivery", systemImage: "shippingbox") }
-                .help("NSE delivery history: stocks whose delivery quantity just made a 300-day high (⌥⌘D)")
-            Button { openWindow(id: "combi") } label: { Label("Combinatorix", systemImage: "square.stack.3d.up") }
-                .help("Which combinations of your filters came before daily, weekly and monthly gainers (⌥⌘X)")
+            OpenMenu()
             Button { vm.explainIndices(day: day); vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
                 .disabled(vm.isExplaining)
                 .help("Fetch recent headlines for each gainer and ask Groq for a 5–10 word reason (cached per day)")
