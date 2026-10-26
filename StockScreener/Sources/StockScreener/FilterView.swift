@@ -220,6 +220,7 @@ struct FilterView: View {
                 .help("Choose which columns the Filter shows and their order — hidden ones stay in Data Import")
                 StreakButton()
                 T3Button()
+                PriceT3Button()
                 PeekMenu()
 
 

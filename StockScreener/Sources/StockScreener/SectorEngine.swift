@@ -18,7 +18,20 @@ extension PriceSeries {
         var map = Dictionary(zip(days, closes).map { ($0, $1) }, uniquingKeysWith: { a, _ in a })
         for (d, c) in zip(newer.days, newer.closes) { map[d] = c }
         let keys = map.keys.sorted()
-        return PriceSeries(days: keys, closes: keys.map { map[$0]! })
+        var out = PriceSeries(days: keys, closes: keys.map { map[$0]! })
+        // open / high / low when either side has them (missing days fall back to the close)
+        if opens != nil || newer.opens != nil {
+            func part(_ a: PriceSeries, _ k: KeyPath<PriceSeries, [Double]?>) -> [String: Double] {
+                guard let v = a[keyPath: k], v.count == a.days.count else { return [:] }
+                return Dictionary(zip(a.days, v).map { ($0, $1) }, uniquingKeysWith: { a, _ in a })
+            }
+            for (k, w) in [(\PriceSeries.opens, 0), (\PriceSeries.highs, 1), (\PriceSeries.lows, 2)] {
+                var m = part(self, k); for (d, v) in part(newer, k) { m[d] = v }
+                let arr = keys.map { m[$0] ?? map[$0]! }
+                if w == 0 { out.opens = arr } else if w == 1 { out.highs = arr } else { out.lows = arr }
+            }
+        }
+        return out
     }
 }
 

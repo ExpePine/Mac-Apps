@@ -139,7 +139,8 @@ enum MorDay {
     /// MOR and DAY on `asOf` (or the last day with bars on or before it). `liveBucket` = 10-min bucket still forming.
     static func compute(_ b: Bars5m, asOf: String, p: Params = Params(), liveBucket: Int? = nil) -> (mor: Double?, day: Double?) {
         let ds = days(b, p: p).filter { $0.day <= asOf }
-        guard let last = ds.last, last.day == asOf else { return (nil, nil) }
+        guard let last = ds.last else { return (nil, nil) }          // the last 5-minute day on / before the sheet's day
+        let asOf = last.day
         // MOR: first 30-min bucket ranked among the last `len` valid values (today included)
         var srcs: [Double] = []
         for d in ds { if let v = buckets(b, d, bucketMin: p.bucketMin, p: p).first ?? nil { srcs.append(v) } }

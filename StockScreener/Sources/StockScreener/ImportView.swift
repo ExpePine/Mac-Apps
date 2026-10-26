@@ -61,6 +61,7 @@ struct ImportView: View {
         .searchable(text: $vm.importSearch, placement: .toolbar, prompt: "Search all columns…")
         .toolbar {
             ToolbarItemGroup {
+                PriceT3Button()
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()

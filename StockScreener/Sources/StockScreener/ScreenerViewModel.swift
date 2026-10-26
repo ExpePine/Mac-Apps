@@ -252,6 +252,11 @@ final class ScreenerViewModel: ObservableObject {
             }
             self.setTableKeepingRaw()
         }
+        // New columns appear in the Filter once (MOR / DAY from 5-min data, T3 fast / slow on prices)
+        if !settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "cols.added9") {
+            UserDefaults.standard.set(true, forKey: "cols.added9")
+            for n in ["MOR", "DAY", "T3_FAST", "T3_SLOW"] where !settings.filterColumns.contains(n) { settings.filterColumns.append(n) }
+        }
         // 5-minute data → MOR / DAY columns
         Intraday5mCenter.shared.onReload = { [weak self] in
             guard let self else { return }
@@ -452,10 +457,27 @@ final class ScreenerViewModel: ObservableObject {
         return (c.hour ?? 0) * 60 + (c.minute ?? 0) >= 15 * 60 + 40
     }
 
+    /// T3_FAST / T3_SLOW on Yahoo daily prices (length, factor and source set with the "T3 Fast / Slow" button).
+    private func withPriceT3Columns(_ t: SheetTable) -> SheetTable {
+        guard let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let day = HistoryStore.dayKey(dataDay(of: t))
+        let f = PriceT3.fast, s = PriceT3.slow
+        let fName = t.index(of: "T3_FAST") == nil ? "T3_FAST" : "T3_FAST (Yahoo)"
+        let sName = t.index(of: "T3_SLOW") == nil ? "T3_SLOW" : "T3_SLOW (Yahoo)"
+        let rows = t.rows.map { row -> SheetRow in
+            let ser = priceBook.series(for: row.text(label))
+            let a = ser.flatMap { f.value($0, on: day) }, b = ser.flatMap { s.value($0, on: day) }
+            return SheetRow(id: row.id, cells: row.cells + [a.map { String(format: "%.2f", $0) } ?? "", b.map { String(format: "%.2f", $0) } ?? ""],
+                            numbers: row.numbers + [a, b])
+        }
+        return SheetTable(headers: t.headers + [fName, sName], rows: rows, originalHeaders: t.originalHeaders + [fName, sName])
+    }
+
     /// MOR / DAY from the stored Yahoo 5-minute bars (see Intraday5m.swift), on the sheet's data day.
+    /// The columns are always there (blank until the 5-minute data is downloaded and calculated).
     private func withIntradayColumns(_ t: SheetTable) -> SheetTable {
         let cols = Intraday5mCenter.shared.columns(asOf: HistoryStore.dayKey(dataDay(of: t)))
-        guard !cols.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        guard let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
         let mName = t.index(of: "MOR") == nil ? "MOR" : "MOR (5m)"
         let dName = t.index(of: "DAY") == nil ? "DAY" : "DAY (5m)"
         let rows = t.rows.map { row -> SheetRow in
@@ -497,7 +519,7 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = withScores(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))))
+        let newTable = withScores(withPriceT3Columns(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases))))))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = makePainter(newTable)

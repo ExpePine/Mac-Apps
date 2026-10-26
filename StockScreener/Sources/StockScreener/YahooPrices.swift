@@ -7,6 +7,9 @@ import Foundation
 struct PriceSeries: Codable {
     var days: [String]          // yyyy-MM-dd (exchange dates), oldest first
     var closes: [Double]
+    var opens: [Double]? = nil  // daily open / high / low (Yahoo), same length as closes when present
+    var highs: [Double]? = nil
+    var lows: [Double]? = nil
 
     /// Close on or before `day`, and its index.
     func index(onOrBefore day: String) -> Int? {
@@ -134,15 +137,21 @@ enum YahooClient {
         f.timeZone = TimeZone(secondsFromGMT: Int(gmtOffset))
         f.dateFormat = "yyyy-MM-dd"
 
-        var days: [String] = [], values: [Double] = []
+        func arr(_ k: String) -> [Any] { quote[k] as? [Any] ?? [] }
+        let oa = arr("open"), ha = arr("high"), la = arr("low")
+        func x(_ a: [Any], _ i: Int, _ c: Double) -> Double { (i < a.count ? a[i] as? Double : nil) ?? c }
+        var days: [String] = [], values: [Double] = [], o: [Double] = [], h: [Double] = [], l: [Double] = []
         for (i, t) in stamps.enumerated() where i < closes.count {
             guard let c = closes[i] as? Double, c > 0 else { continue }
             let d = f.string(from: Date(timeIntervalSince1970: t))
-            if let last = days.last, last == d { values[values.count - 1] = c; continue }   // intraday duplicate
-            days.append(d); values.append(c)
+            if let last = days.last, last == d {                                         // intraday duplicate
+                values[values.count - 1] = c; h[h.count - 1] = max(h[h.count - 1], x(ha, i, c)); l[l.count - 1] = min(l[l.count - 1], x(la, i, c))
+                continue
+            }
+            days.append(d); values.append(c); o.append(x(oa, i, c)); h.append(x(ha, i, c)); l.append(x(la, i, c))
         }
         guard !days.isEmpty else { throw Failure(message: "no closes") }
-        return PriceSeries(days: days, closes: values)
+        return PriceSeries(days: days, closes: values, opens: o, highs: h, lows: l)
     }
 
     struct Candle: Identifiable { var id: String { day }; let day: String; let date: Date; let open, high, low, close, volume: Double }

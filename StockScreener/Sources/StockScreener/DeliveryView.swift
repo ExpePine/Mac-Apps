@@ -755,3 +755,45 @@ struct T3Button: View {
         DeliveryCenter.shared.refreshColumns()
     }
 }
+
+
+/// "T3 Fast / Slow" button: length, factor and price source of the two price T3 columns (Data and Filter).
+struct PriceT3Button: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @State private var open = false
+    @State private var fast = PriceT3.fast
+    @State private var slow = PriceT3.slow
+
+    var body: some View {
+        Button { fast = PriceT3.fast; slow = PriceT3.slow; open.toggle() } label: { Label("T3 Fast / Slow", systemImage: "chart.line.flattrend.xyaxis") }
+            .help("T3_FAST and T3_SLOW columns on daily prices: \(PriceT3.fast.pine) · \(PriceT3.slow.pine)")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("T3 on daily prices (Yahoo)").font(.headline)
+                    row("T3_FAST", $fast)
+                    row("T3_SLOW", $slow)
+                    Text("gd(src, length) = ta.ema(src, length) × (1 + factor) − ta.ema(ta.ema(src, length), length) × factor;  T3 = gd(gd(gd(src))). Tilson's classic factor is 0.7. Needs about 6 × length days of prices. Open / high / low come with the next Yahoo price update (until then the close is used).")
+                        .font(.caption2).foregroundStyle(.secondary).frame(width: 460, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Defaults") { fast = PriceT3(length: 8, factor: 0.7, source: "close"); slow = PriceT3(length: 21, factor: 0.7, source: "close") }
+                        Spacer()
+                        Button("Apply") { fast.save("t3fast"); slow.save("t3slow"); vm.setTableKeepingRaw(); open = false }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
+                .padding(14)
+            }
+    }
+
+    private func row(_ name: String, _ v: Binding<PriceT3>) -> some View {
+        HStack(spacing: 8) {
+            Text(name).font(.callout.bold()).frame(width: 80, alignment: .leading)
+            Text("source").font(.caption)
+            Picker("", selection: v.source) { ForEach(PriceT3.sources, id: \.self) { Text($0).tag($0) } }.labelsHidden().fixedSize()
+            Text("length").font(.caption)
+            TextField("", value: v.length, format: .number).frame(width: 46).textFieldStyle(.roundedBorder)
+            Text("factor").font(.caption)
+            TextField("", value: v.factor, format: .number).frame(width: 52).textFieldStyle(.roundedBorder)
+        }
+    }
+}

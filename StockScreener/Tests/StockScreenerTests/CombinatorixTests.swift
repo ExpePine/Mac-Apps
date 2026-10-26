@@ -726,3 +726,15 @@ final class MorDayTests: XCTestCase {
         XCTAssertEqual(c.t, b.t); XCTAssertEqual(c.c, b.c)
     }
 }
+
+final class PriceT3Tests: XCTestCase {
+    func testSourcesAndMerge() {
+        let s = PriceSeries(days: ["2026-01-01", "2026-01-02"], closes: [10, 20], opens: [9, 19], highs: [12, 22], lows: [8, 18])
+        XCTAssertEqual(PriceT3(length: 3, factor: 0.7, source: "hl2").series(s), [10, 20])
+        XCTAssertEqual(PriceT3(length: 3, factor: 0.7, source: "ohlc4").series(s), [9.75, 19.75])
+        let m = s.merged(with: PriceSeries(days: ["2026-01-02", "2026-01-03"], closes: [21, 30]))
+        XCTAssertEqual(m.closes, [10, 21, 30]); XCTAssertEqual(m.highs!, [12, 22, 30])     // new day without H → close
+        let flat = PriceSeries(days: (0..<80).map { String(format: "2026-%02d-%02d", 1 + $0 / 28, 1 + $0 % 28) }, closes: Array(repeating: 50, count: 80))
+        XCTAssertEqual(PriceT3(length: 8, factor: 0.7, source: "close").value(flat, on: flat.days.last!)!, 50, accuracy: 1e-9)
+    }
+}

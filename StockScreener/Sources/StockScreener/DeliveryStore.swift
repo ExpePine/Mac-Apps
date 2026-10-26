@@ -342,6 +342,47 @@ struct T3Def: Equatable {
     }
 }
 
+// MARK: - T3 FAST / SLOW on daily prices (Yahoo OHLC)
+
+struct PriceT3: Codable, Equatable {
+    var length: Int
+    var factor: Double
+    var source: String          // close open high low hl2 hlc3 ohlc4
+
+    static let sources = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"]
+    static var fast: PriceT3 { load("t3fast", PriceT3(length: 8, factor: 0.7, source: "close")) }
+    static var slow: PriceT3 { load("t3slow", PriceT3(length: 21, factor: 0.7, source: "close")) }
+    private static func load(_ k: String, _ d: PriceT3) -> PriceT3 {
+        UserDefaults.standard.data(forKey: k).flatMap { try? JSONDecoder().decode(PriceT3.self, from: $0) } ?? d
+    }
+    func save(_ k: String) { UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: k) }
+
+    /// The chosen source; without Yahoo open / high / low it falls back to the close.
+    func series(_ s: PriceSeries) -> [Double] {
+        let c = s.closes
+        let o = s.opens ?? c, h = s.highs ?? c, l = s.lows ?? c
+        guard o.count == c.count, h.count == c.count, l.count == c.count else { return c }
+        switch source {
+        case "open": return o
+        case "high": return h
+        case "low": return l
+        case "hl2": return c.indices.map { (h[$0] + l[$0]) / 2 }
+        case "hlc3": return c.indices.map { (h[$0] + l[$0] + c[$0]) / 3 }
+        case "ohlc4": return c.indices.map { (o[$0] + h[$0] + l[$0] + c[$0]) / 4 }
+        default: return c
+        }
+    }
+
+    /// T3 on the day `day` (or the last bar before it).
+    func value(_ s: PriceSeries, on day: String) -> Double? {
+        guard let i = s.index(onOrBefore: day) else { return nil }
+        let x = Array(series(s)[...i])
+        return T3Def(length: max(1, length), factor: factor, useQty: false).t3(x).last ?? nil
+    }
+
+    var pine: String { "T3(\(source), \(length), \(CombiEngine.fmt(factor)))" }
+}
+
 // MARK: - STREAK: consecutive days a condition on ta.percentrank(ta.sma(DELIV_QTY*close, n), length) holds
 
 struct StreakDef: Equatable {
