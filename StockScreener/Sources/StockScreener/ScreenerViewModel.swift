@@ -257,6 +257,10 @@ final class ScreenerViewModel: ObservableObject {
             UserDefaults.standard.set(true, forKey: "cols.added9")
             for n in ["MOR", "DAY", "T3_FAST", "T3_SLOW"] where !settings.filterColumns.contains(n) { settings.filterColumns.append(n) }
         }
+        if !settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "cols.added10") {
+            UserDefaults.standard.set(true, forKey: "cols.added10")
+            for n in ["T3F", "T3S"] where !settings.filterColumns.contains(n) { settings.filterColumns.append(n) }
+        }
         // 5-minute data → MOR / DAY columns
         Intraday5mCenter.shared.onReload = { [weak self] in
             guard let self else { return }
@@ -464,13 +468,19 @@ final class ScreenerViewModel: ObservableObject {
         let f = PriceT3.fast, s = PriceT3.slow
         let fName = t.index(of: "T3_FAST") == nil ? "T3_FAST" : "T3_FAST (Yahoo)"
         let sName = t.index(of: "T3_SLOW") == nil ? "T3_SLOW" : "T3_SLOW (Yahoo)"
+        let fr = t.index(of: "T3F") == nil ? "T3F" : "T3F (Yahoo)"
+        let sr = t.index(of: "T3S") == nil ? "T3S" : "T3S (Yahoo)"
         let rows = t.rows.map { row -> SheetRow in
             let ser = priceBook.series(for: row.text(label))
-            let a = ser.flatMap { f.value($0, on: day) }, b = ser.flatMap { s.value($0, on: day) }
-            return SheetRow(id: row.id, cells: row.cells + [a.map { String(format: "%.2f", $0) } ?? "", b.map { String(format: "%.2f", $0) } ?? ""],
-                            numbers: row.numbers + [a, b])
+            let a = ser.map { f.valueAndRising($0, on: day) }, b = ser.map { s.valueAndRising($0, on: day) }
+            let av = a?.value, bv = b?.value
+            let ar = a?.rising.map(Double.init), br = b?.rising.map(Double.init)       // 1 = T3 > T3[1], else 0
+            func n(_ v: Double?, _ f: String) -> String { v.map { String(format: f, $0) } ?? "" }
+            return SheetRow(id: row.id, cells: row.cells + [n(av, "%.2f"), n(bv, "%.2f"), n(ar, "%.0f"), n(br, "%.0f")],
+                            numbers: row.numbers + [av, bv, ar, br])
         }
-        return SheetTable(headers: t.headers + [fName, sName], rows: rows, originalHeaders: t.originalHeaders + [fName, sName])
+        let extra = [fName, sName, fr, sr]
+        return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
     /// MOR / DAY from the stored Yahoo 5-minute bars (see Intraday5m.swift), on the sheet's data day.

@@ -738,3 +738,14 @@ final class PriceT3Tests: XCTestCase {
         XCTAssertEqual(PriceT3(length: 8, factor: 0.7, source: "close").value(flat, on: flat.days.last!)!, 50, accuracy: 1e-9)
     }
 }
+
+final class PriceT3RisingTests: XCTestCase {
+    func testRising() {
+        let days = (0..<90).map { String(format: "2026-%02d-%02d", 1 + $0 / 28, 1 + $0 % 28) }
+        let up = PriceSeries(days: days, closes: (0..<90).map { 100 + Double($0) })
+        let down = PriceSeries(days: days, closes: (0..<90).map { 200 - Double($0) })
+        let t = PriceT3(length: 8, factor: 0.7, source: "close")
+        XCTAssertEqual(t.valueAndRising(up, on: days.last!).rising, 1)
+        XCTAssertEqual(t.valueAndRising(down, on: days.last!).rising, 0)
+    }
+}

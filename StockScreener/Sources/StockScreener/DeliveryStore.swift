@@ -374,10 +374,15 @@ struct PriceT3: Codable, Equatable {
     }
 
     /// T3 on the day `day` (or the last bar before it).
-    func value(_ s: PriceSeries, on day: String) -> Double? {
-        guard let i = s.index(onOrBefore: day) else { return nil }
-        let x = Array(series(s)[...i])
-        return T3Def(length: max(1, length), factor: factor, useQty: false).t3(x).last ?? nil
+    func value(_ s: PriceSeries, on day: String) -> Double? { valueAndRising(s, on: day).value }
+
+    /// T3 and whether it rose: 1 when T3 > T3[1], else 0 (nil while T3 or T3[1] is na).
+    func valueAndRising(_ s: PriceSeries, on day: String) -> (value: Double?, rising: Int?) {
+        guard let i = s.index(onOrBefore: day) else { return (nil, nil) }
+        let t = T3Def(length: max(1, length), factor: factor, useQty: false).t3(Array(series(s)[...i]))
+        guard let now = t.last ?? nil else { return (nil, nil) }
+        guard t.count >= 2, let prev = t[t.count - 2] else { return (now, nil) }
+        return (now, now > prev ? 1 : 0)
     }
 
     var pine: String { "T3(\(source), \(length), \(CombiEngine.fmt(factor)))" }
