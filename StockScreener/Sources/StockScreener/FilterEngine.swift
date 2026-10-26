@@ -156,10 +156,14 @@ enum FilterCompiler {
 /// Pre-compiled cell color rules: column index -> ordered (test, color) pairs.
 final class CellPainter {
     private var rules: [Int: [(RowPredicate, NSColor)]] = [:]
+    private var onlyNew: [Int: [Bool]] = [:]
+    /// The same stock's row on the previous stored day (for "only when it just became true").
+    var previous: ((SheetRow) -> SheetRow?)?
 
     init() {}
 
-    init(_ cellRules: [CellRule], table: SheetTable) {
+    init(_ cellRules: [CellRule], table: SheetTable, previous: ((SheetRow) -> SheetRow?)? = nil) {
+        self.previous = previous
         var ignored: [String] = []
         for rule in cellRules where rule.condition.isEnabled {
             guard let col = table.index(of: rule.condition.column), let color = rule.shade.nsColor else {
@@ -169,6 +173,7 @@ final class CellPainter {
                     if let p = FilterCompiler.compile(FilterCondition(column: c.column, op: c.op, value: c.value, value2: c.value2),
                                                       table: table, issues: &ignored) {
                         rules[col, default: []].append((p, .clear))
+                        onlyNew[col, default: []].append(false)
                     }
                 }
                 continue
@@ -177,6 +182,7 @@ final class CellPainter {
             if let p = FilterCompiler.compile(FilterCondition(column: c.column, op: c.op, value: c.value, value2: c.value2),
                                               table: table, issues: &ignored) {
                 rules[col, default: []].append((p, color))
+                onlyNew[col, default: []].append(rule.onlyNew ?? false)
             }
         }
     }
@@ -185,7 +191,13 @@ final class CellPainter {
 
     func color(for row: SheetRow, column: Int) -> NSColor? {
         guard let list = rules[column] else { return nil }
-        for (test, color) in list where test(row) {
+        let fresh = onlyNew[column] ?? []
+        for (k, (test, color)) in list.enumerated() where test(row) {
+            if k < fresh.count, fresh[k] {
+                // ✓ only when it just became true: skip if it was already true the previous day
+                guard let previous, let old = previous(row) else { continue }
+                if test(old) { continue }
+            }
             return color == .clear ? nil : color
         }
         return nil

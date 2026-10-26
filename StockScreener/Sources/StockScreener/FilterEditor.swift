@@ -272,6 +272,9 @@ struct CellRuleRow: View {
             HStack {
                 Toggle("", isOn: $rule.condition.isEnabled).labelsHidden()
                 NamePicker(selection: $rule.condition.column, columns: columns)
+                Toggle("✓ only when it just became true", isOn: Binding(get: { rule.onlyNew ?? false }, set: { rule.onlyNew = $0 ? true : nil }))
+                    .toggleStyle(.checkbox).font(.caption)
+                    .help("Colour the cell only if this is true today but was NOT true on the previous stored day — e.g. count = 5 today and count < 5 yesterday")
                 Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                     .buttonStyle(.borderless)
                     .help("Delete rule")

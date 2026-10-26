@@ -192,6 +192,7 @@ struct PerformanceView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     summary(r, study)
+                    AdvancedPerfPanel(rows: r.rows, path: r.avgPath)
                     if !r.horizonStats.isEmpty || !r.avgPath.isEmpty {
                         HStack(alignment: .top, spacing: 16) {
                             horizonTable(r).frame(width: 330)

@@ -8,6 +8,9 @@ struct SectorsView: View {
     @State private var detail: SectorStat?
     @State private var showSettings = false
     @State private var sortOrder = [KeyPathComparator(\SectorRow.rank)]
+    @State private var deliveryReport: SectorReport?
+    @State private var computingDelivery = false
+    @ObservedObject private var dc = DeliveryCenter.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +25,7 @@ struct SectorsView: View {
                     RotationMapView(report: r).tabItem { Text("Rotation map") }.tag(1)
                     heatmap(r).tabItem { Text("Change heatmap") }.tag(2)
                     regimeLog.tabItem { Text("Regime changes\(vm.unseenRegimeCount > 0 ? " (\(vm.unseenRegimeCount))" : "")") }.tag(3)
+                    deliveryRotation.tabItem { Text("Delivery rotation") }.tag(4)
                 }
                 .padding(10)
             } else if vm.isComputingSectors {
@@ -32,9 +36,45 @@ struct SectorsView: View {
         }
         .navigationTitle("Sectors")
         .onAppear { if vm.sectorReport == nil { Task { await vm.computeSectors(notify: true) } } }
-        .onChange(of: tab) { t in if t == 3 { vm.markRegimeSeen() } }
+        .onChange(of: tab) { t in
+            if t == 3 { vm.markRegimeSeen() }
+            if t == 4 && deliveryReport == nil { loadDeliveryRotation() }
+        }
+        .onChange(of: dc.revision) { _ in if tab == 4 { loadDeliveryRotation() } }
         .sheet(item: $detail) { s in SectorDetail(stat: s).environmentObject(vm) }
         .sheet(isPresented: $showSettings) { SectorSettings().environmentObject(vm) }
+    }
+
+    // MARK: Delivery rotation
+
+    private var deliveryRotation: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Rotation map on NSE delivery: each sector's delivered value (DELIV_QTY × close, 10-day average) vs the whole market's. Leading = taking a growing share of delivery, with rising momentum.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if computingDelivery { ProgressView().controlSize(.small) }
+                Button("Recalculate") { loadDeliveryRotation() }.controlSize(.small)
+            }
+            if let r = deliveryReport, !r.sectors.isEmpty {
+                RotationMapView(report: r)
+            } else if dc.book.series.isEmpty {
+                empty("No NSE delivery data", "Open Delivery Analysis (⌥⌘D) and download the delivery history first.")
+            } else if !computingDelivery {
+                empty("Not enough delivery history", "Needs about 90+ trading days of NSE delivery data per sector.")
+            } else {
+                ProgressView("Calculating…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func loadDeliveryRotation() {
+        dc.loadIfNeeded()
+        computingDelivery = true
+        Task {
+            deliveryReport = await vm.computeDeliveryRotation()
+            computingDelivery = false
+        }
     }
 
     // MARK: Header

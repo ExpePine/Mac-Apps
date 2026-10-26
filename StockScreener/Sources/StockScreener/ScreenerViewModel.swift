@@ -451,12 +451,20 @@ final class ScreenerViewModel: ObservableObject {
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
+    /// Cell colours, with the previous stored day for rules ticked "only when it just became true".
+    func makePainter(_ t: SheetTable) -> CellPainter {
+        CellPainter(settings.cellRules, table: t, previous: { [weak self] row in
+            guard let self, self.timelineIndex == nil, let label = self.labelIndex, let prev = self.previousDayRows() else { return nil }
+            return prev.rows[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
+        })
+    }
+
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
         let newTable = withScores(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases))))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
-        painter = CellPainter(settings.cellRules, table: newTable)
+        painter = makePainter(newTable)
         clearTimelineCache()
         if let i = timelineIndex { setTimelinePosition(i) }   // re-align the past day to the new columns
         scheduleImportRecompute(delayMs: 0)
@@ -502,7 +510,7 @@ final class ScreenerViewModel: ObservableObject {
             scheduleFilterRecompute(delayMs: 200)
         }
         if old.cellRules != settings.cellRules {
-            painter = CellPainter(settings.cellRules, table: table)
+            painter = makePainter(table)
             filterVersion += 1                           // repaint
         }
         if old.buyTriggers != settings.buyTriggers {

@@ -427,6 +427,8 @@ struct CellRule: Identifiable, Codable, Equatable {
     var id = UUID()
     var condition = Rule()
     var shade: Shade = .green
+    /// ✓ Only colour when it just became true: true today, not true on the previous stored day.
+    var onlyNew: Bool? = nil
 }
 
 // MARK: - Alert settings

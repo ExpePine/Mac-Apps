@@ -15,6 +15,9 @@ struct MultibaggerView: View {
     @AppStorage("mb.scope") private var scope = "Sheet stocks"
 
     @State private var month: String?          // nil = all months
+    @State private var showF = false
+    @AppStorage("mb.fOn") private var fOn = false
+    @ObservedObject private var mbf = MBFilterCenter.shared
     @State private var selection: MBEvent.ID?
     @State private var search = ""
 
@@ -23,6 +26,7 @@ struct MultibaggerView: View {
         var e = scoped
         if let m = month { e = e.filter { $0.month == m } }
         if !q.isEmpty { e = e.filter { $0.symbol.contains(q) } }
+        if fOn, mbf.ready { e = e.filter { mbf.matched.contains($0.id) } }
         return e
     }
 
@@ -95,6 +99,16 @@ struct MultibaggerView: View {
                     .labelsHidden().fixedSize()
                     .help("The date the Chart Reel jumps both TradingView charts to (TradingView's Go to date)")
                 SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 120)
+                Button { showF.toggle() } label: {
+                    Text("F").font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundStyle(fOn ? Color.white : Color.accentColor)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(fOn ? Color.accentColor : Color.accentColor.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .help("Filter combinations (like the Filter screen) checked on each stock's data just BEFORE its multibagger month")
+                .popover(isPresented: $showF, arrowEdge: .bottom) { MBFilterPanel(on: $fOn, events: scoped).environmentObject(vm) }
+                if fOn, mbf.ready { Text("F: \(mbf.matched.count) matched").font(.caption.bold()).foregroundStyle(Color.accentColor) }
                 Spacer()
                 if let s = mb.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 Menu {
@@ -180,5 +194,97 @@ struct MultibaggerView: View {
         if let layout { d.set(layout.rawValue, forKey: "reel.layout") }
         else if l == .chart1 || l == .chart2 { d.set(ReelLayout.side.rawValue, forKey: "reel.layout") }
         openWindow(id: "reel")
+    }
+}
+
+
+// MARK: - F: which Filter combinations came before a multibagger?
+
+/// Checks a Filter-style combination on each multibagger's stored snapshot from just before its month
+/// (the last stored day on or before the base day) and, for the same days, on every other stock — giving
+/// how many multibaggers it caught and how often a match turned into one (hit rate).
+@MainActor final class MBFilterCenter: ObservableObject {
+    static let shared = MBFilterCenter()
+    @Published var group: FilterGroup = (UserDefaults.standard.data(forKey: "mb.fGroup").flatMap { try? JSONDecoder().decode(FilterGroup.self, from: $0) }) ?? FilterGroup(mode: .all) {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(group), forKey: "mb.fGroup") }
+    }
+    @Published private(set) var matched: Set<String> = []        // event ids
+    @Published private(set) var ready = false
+    @Published private(set) var running = false
+    @Published private(set) var summary = ""
+    @Published private(set) var issues: [String] = []
+
+    func run(events: [MBEvent], vm: ScreenerViewModel) {
+        guard !running else { return }
+        guard let label = vm.labelIndex else { summary = "Import data first."; return }
+        let g = group, current = vm.table
+        let days = HistoryStore.days()
+        running = true; summary = "Checking stored days…"
+        Task {
+            let out = await Task.detached(priority: .userInitiated) { () -> (Set<String>, String, [String]) in
+                guard !days.isEmpty else { return ([], "No stored daily snapshots yet — they build up as the app imports the sheet each day.", []) }
+                // the snapshot each event is judged on
+                var byDay: [String: [MBEvent]] = [:]
+                var noData = 0
+                for e in events {
+                    if let d = days.last(where: { $0 <= e.baseDay }) { byDay[d, default: []].append(e) } else { noData += 1 }
+                }
+                var hit = Set<String>(), issues: [String] = []
+                var matchesAll = 0, judged = 0
+                for (d, evs) in byDay {
+                    guard let data = HistoryStore.load(d), let t = ScreenerViewModel.align(data, to: current) else { continue }
+                    var iss: [String] = []
+                    guard let pred = FilterCompiler.compile(g, table: t, issues: &iss) else { issues = iss; continue }
+                    if issues.isEmpty { issues = iss }
+                    var bySym: [String: SheetRow] = [:]
+                    for r in t.rows { bySym[r.text(label).trimmingCharacters(in: .whitespaces).uppercased()] = r }
+                    matchesAll += t.rows.filter(pred).count
+                    for e in evs { judged += 1; if let r = bySym[e.symbol], pred(r) { hit.insert(e.id) } }
+                }
+                let caught = judged > 0 ? Double(hit.count) / Double(judged) * 100 : 0
+                let precision = matchesAll > 0 ? Double(hit.count) / Double(matchesAll) * 100 : 0
+                var s = "Caught \(hit.count) of \(judged) multibaggers (\(String(format: "%.0f", caught))%) on their pre-move snapshot."
+                if matchesAll > 0 { s += " On those \(byDay.count) day\(byDay.count == 1 ? "" : "s") \(matchesAll) stocks matched → \(String(format: "%.1f", precision))% of matches became multibaggers." }
+                if noData > 0 { s += " \(noData) older moves have no stored snapshot before them." }
+                return (hit, s, issues)
+            }.value
+            matched = out.0; summary = out.1; issues = out.2
+            ready = true; running = false
+        }
+    }
+}
+
+struct MBFilterPanel: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Binding var on: Bool
+    let events: [MBEvent]
+    @ObservedObject private var c = MBFilterCenter.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("F — combinations before a multibagger").font(.headline)
+                Spacer()
+                Toggle("Show only matches", isOn: $on).toggleStyle(.switch).controlSize(.small)
+            }
+            Text("Pick Filter-column conditions (AND / OR / groups, like the Filter screen). Each multibagger is checked on the stock's stored data from just before its month.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                FilterGroupEditor(group: $c.group, columns: vm.headers, isRoot: true, onDelete: {})
+                    .environmentObject(vm)
+            }
+            .frame(minHeight: 200, maxHeight: 340)
+            HStack {
+                Button("Use my Filter's conditions") { c.group = vm.settings.filterGroup }
+                Spacer()
+                if c.running { ProgressView().controlSize(.small) }
+                Button { c.run(events: events, vm: vm); on = true } label: { Label("Check \(events.count) multibaggers", systemImage: "play.fill") }
+                    .buttonStyle(.borderedProminent).disabled(c.running || c.group.activeCount == 0)
+            }
+            if !c.summary.isEmpty { Text(c.summary).font(.callout).fixedSize(horizontal: false, vertical: true) }
+            if !c.issues.isEmpty { Text(c.issues.prefix(3).joined(separator: " · ")).font(.caption).foregroundStyle(.orange) }
+        }
+        .padding(14)
+        .frame(width: 560)
     }
 }

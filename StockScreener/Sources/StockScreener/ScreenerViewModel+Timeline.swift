@@ -234,6 +234,13 @@ extension ScreenerViewModel {
         AlertEventStore.save(alertEvents)
     }
 
+    /// % change of the stock from the close on the alert's data day to the latest close (Yahoo).
+    func alertChange(_ e: AlertEvent) -> Double? {
+        guard let s = priceBook.series(for: e.stock), let i = s.index(onOrBefore: e.dataDay), s.closes[i] > 0,
+              let last = s.closes.last else { return nil }
+        return (last / s.closes[i] - 1) * 100
+    }
+
     func deleteAlertEvents(where match: (AlertEvent) -> Bool) {
         alertEvents.removeAll(where: match)
         AlertEventStore.save(alertEvents)

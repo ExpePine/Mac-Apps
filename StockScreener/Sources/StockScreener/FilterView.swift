@@ -5,7 +5,6 @@ struct FilterView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var showColumns = false
-    @AppStorage("filter.markChanges") private var markChanges = true
     @AppStorage("filterConditionsVisible") private var conditionsVisible = true
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var flashedDay: String?
@@ -73,8 +72,6 @@ struct FilterView: View {
                                        ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm)        // blue dot = Chart 1, orange = Chart 2
                                    } : nil,
                                    chartDotsAfter: vm.labelIndex,
-                                   changedCell: markChanges && vm.timelineIndex == nil ? { row, c in vm.previousValue(row, column: c) } : nil,
-                                   changedVersion: markChanges ? 1 : 0,
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
@@ -224,9 +221,7 @@ struct FilterView: View {
                 StreakButton()
                 T3Button()
                 PeekMenu()
-                Toggle(isOn: $markChanges) { Label("Changed", systemImage: "square.dashed") }
-                    .toggleStyle(.button)
-                    .help("Shade the border of every cell whose value changed since the previous stored day\(vm.previousStoredDay.map { " (\($0))" } ?? "") — hover a cell to see the old value")
+
 
                 Button {
                     vm.importNow()

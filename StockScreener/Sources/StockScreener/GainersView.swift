@@ -175,6 +175,8 @@ struct GainersView: View {
                 .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { UserDefaults.standard.set(ReelSource.gainers.rawValue, forKey: "reel.source"); openWindow(id: "reel") } label: { Label("Chart Reel", systemImage: "film.stack") }
                 .help("Flick through these gainers' charts with a slider (⌥⌘R)")
+            Button { openWindow(id: "probability") } label: { Label("Probability", systemImage: "percent") }
+                .help("Count & Probability: chance of a daily / monthly top gainer for each value and combination of your Filter columns (⌥⌘B)")
             Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT", systemImage: "wand.and.stars") }
                 .help("Combinations that came before ≥ 30% monthly moves, and today's stocks matching the proven ones (⌥⌘A)")
             Button { openWindow(id: "gainerCharts") } label: { Label("Gainer Charts", systemImage: "rectangle.stack") }

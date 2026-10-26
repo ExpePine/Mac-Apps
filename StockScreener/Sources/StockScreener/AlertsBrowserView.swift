@@ -122,6 +122,12 @@ struct AlertsBrowserView: View {
             TableColumn("Values") { e in
                 Text(e.values.dropFirst().joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(1)
             }
+            TableColumn("Since alert") { e in
+                if let c = vm.alertChange(e) {
+                    Text(String(format: "%+.1f%%", c)).monospacedDigit().bold().foregroundStyle(c >= 0 ? Color.green : Color.red)
+                } else { Text("—").foregroundStyle(.tertiary) }
+            }
+            .width(min: 60, ideal: 75)
             TableColumn("When", value: \.date) { e in
                 HStack(spacing: 4) {
                     if e.date > vm.alertsLastSeen { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
@@ -191,7 +197,32 @@ struct AlertsBrowserView: View {
         }
     }
 
+    /// Per rule: how the stocks did after their alerts (close on the alert's data day → latest close).
+    private var ruleStats: [(rule: String, n: Int, avg: Double, up: Double)] {
+        let groups = Dictionary(grouping: shown.filter { $0.kind == .alert }, by: \.ruleName)
+        return groups.compactMap { name, ev in
+            let ch = ev.compactMap { vm.alertChange($0) }
+            guard !ch.isEmpty else { return nil }
+            return (name, ch.count, ch.reduce(0, +) / Double(ch.count), Double(ch.filter { $0 > 0 }.count) / Double(ch.count) * 100)
+        }.sorted { $0.n > $1.n }
+    }
+
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 3) {
+        if !ruleStats.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    Text("Track record:").font(.caption.bold())
+                    ForEach(ruleStats, id: \.rule) { r in
+                        Text("\(r.rule): \(r.n) alerts · avg \(String(format: "%+.1f%%", r.avg)) · \(Int(r.up))% up")
+                            .font(.caption.monospacedDigit())
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill((r.avg >= 0 ? Color.green : Color.red).opacity(0.12)))
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+        }
         HStack {
             Text("\(shown.count) of \(vm.alertEvents.count) alerts · checked \(endOfDay ? "once a day at " + Self.hhmm(alertAt) + " IST" : "as data arrives") · double-click = chart")
             Spacer()
@@ -202,6 +233,7 @@ struct AlertsBrowserView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        }
     }
 
     /// "17:21" today, "Thu 17:21" this week, else "23 Oct".

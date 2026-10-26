@@ -654,3 +654,38 @@ final class ShortlistNameTests: XCTestCase {
         XCTAssertTrue(a.name.hasPrefix("Shortlist"))
     }
 }
+
+final class ProbabilityTests: XCTestCase {
+    func testCountFiveProbability() {
+        // 2 stocks, 40 days; stock A has count = 5 every day and jumps 6% the next day; B has count = 1 and is flat
+        var days: [String] = []
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
+        var d = f.date(from: "2026-01-01")!
+        for _ in 0..<60 { days.append(f.string(from: d)); d = d.addingTimeInterval(86_400) }
+        var a: [Double] = [100], b: [Double] = []
+        for i in 1..<60 { a.append(a[i - 1] * 1.06) }
+        for _ in 0..<60 { b.append(100) }
+        var book = PriceBook()
+        book.series["AAA"] = PriceSeries(days: days, closes: a)
+        book.series["BBB"] = PriceSeries(days: days, closes: b)
+        let headers = ["Symbol", "count"]
+        let snaps = days.prefix(30).map { day in
+            ProbEngine.Day(day: day, table: SheetTable(headers: headers, rows: [SheetRow(id: 0, cells: ["AAA", "5"], numbers: [nil, 5]),
+                                                                                SheetRow(id: 1, cells: ["BBB", "1"], numbers: [nil, 1])]))
+        }
+        let r = ProbEngine.run(days: Array(snaps), label: 0, columns: [1], names: headers, book: book, current: snaps[0].table,
+                               dailyMin: 5, monthlyMin: 30, maxSize: 1, minN: 5)
+        let five = r.rows.first { $0.name == "count = 5" }!
+        XCTAssertEqual(five.pDaily!, 1, accuracy: 1e-9)
+        XCTAssertEqual(r.rows.first { $0.name == "count = 1" }!.pDaily!, 0, accuracy: 1e-9)
+        XCTAssertEqual(r.baseDaily, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(five.today, 1)
+    }
+}
+
+final class PerfAdvancedTests: XCTestCase {
+    func testQuantileAndP() {
+        XCTAssertEqual(PerfAdvanced.quantile([1, 2, 3, 4, 5], 0.5), 3, accuracy: 1e-9)
+        XCTAssertEqual(PerfAdvanced.pNormal(1.96), 0.05, accuracy: 0.001)
+    }
+}

@@ -17,7 +17,7 @@ struct AlertEvent: Identifiable, Codable, Equatable {
 
 /// Alert history, kept as JSON in Application Support (newest first, up to 5,000 events).
 enum AlertEventStore {
-    static let maxEvents = 5_000
+    static let maxEvents = 50_000          // keep the history: old alerts are tracked (% since the alert)
 
     private static var fileURL: URL {
         HistoryStore.folder.deletingLastPathComponent().appendingPathComponent("alerts.json")

@@ -160,3 +160,42 @@ extension ScreenerViewModel {
         }
     }
 }
+
+
+// MARK: - Rotation map on delivery data
+
+extension ScreenerViewModel {
+    /// The rotation map computed on NSE delivery instead of price: each stock's "price" is its delivered value
+    /// (DELIV_QTY × close, 10-day average) and the benchmark is the whole market's delivered value — so a sector in
+    /// "Leading" is taking a rising share of the market's delivery, with rising momentum.
+    nonisolated static func deliveryBook(_ book: DeliveryBook, smooth: Int = 10) -> PriceBook {
+        var pb = PriceBook()
+        var total: [String: Double] = [:]
+        for (sym, s) in book.series {
+            let v = s.metric(value: true)
+            let sm = DeliverySignal.sma(v, smooth)
+            var days: [String] = [], closes: [Double] = []
+            for i in s.days.indices where i >= smooth - 1 && sm[i] > 0 {
+                days.append(s.days[i]); closes.append(sm[i])
+            }
+            if days.count > 80 { pb.series[sym] = PriceSeries(days: days, closes: closes) }
+            for i in s.days.indices { total[s.days[i], default: 0] += v[i] }
+        }
+        let days = total.keys.sorted()
+        let raw = days.map { total[$0]! }
+        let sm = DeliverySignal.sma(raw, smooth)
+        let idx = days.indices.filter { $0 >= smooth - 1 && sm[$0] > 0 }
+        pb.series[ScreenerViewModel.benchmarkSymbol] = PriceSeries(days: idx.map { days[$0] }, closes: idx.map { sm[$0] })
+        pb.fetchedAt = Date()
+        return pb
+    }
+
+    func computeDeliveryRotation() async -> SectorReport? {
+        let book = DeliveryCenter.shared.book
+        let members = sectorMembers
+        guard !book.series.isEmpty, !members.isEmpty else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            SectorEngine.compute(members: members, book: ScreenerViewModel.deliveryBook(book))
+        }.value
+    }
+}
