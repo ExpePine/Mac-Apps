@@ -43,6 +43,8 @@ struct ContentView: View {
             case .jobs: JobsView()
             case .actions: ActionsView()
             case .connections: ConnectionsView()
+            case .saved: SavedJDsView()
+            case .lines: LinesView()
             case .stories: StoriesView()
             case .interview: InterviewView()
             case .master: MasterResumeView()

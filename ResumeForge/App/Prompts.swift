@@ -122,7 +122,7 @@ enum Prompts {
     // MARK: Your resume from your stories
 
     static func tailored(job: JobPosting?, benchmark: ResumeDoc?, profile: Profile,
-                         stories: [Story], allowPlaceholders: Bool, budget: Int) -> String {
+                         stories: [Story], allowPlaceholders: Bool, budget: Int, approvedLines: String = "") -> String {
         let target: String
         let prof = profileBlock(profile, maxChars: 1500)
         if let job {
@@ -172,8 +172,10 @@ enum Prompts {
         }
         let storyList = storiesBlock(stories, relevantTo: context, maxChars: max(1500, budget - prof.count - target.count))
 
+        let approved = approvedLines.isEmpty ? "" : "LINES THE CANDIDATE HAS APPROVED (reuse their wording where they fit this target; they're true):\n" + approvedLines + "\n"
         return """
         TASK: Write the candidate's resume.
+        \(approved)
 
         \(target)
 

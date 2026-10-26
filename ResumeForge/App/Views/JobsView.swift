@@ -155,6 +155,16 @@ struct JobDetailView: View {
                     .buttonStyle(.borderedProminent).tint(.green)
                     .help("Opens the posting to apply and tracks it, with a follow-up action in 5 days")
             }
+            Button { store.toggleLike(jobID: jobID) } label: {
+                Image(systemName: job.liked == true ? "heart.fill" : "heart").foregroundStyle(job.liked == true ? .pink : .secondary)
+            }
+            .help("Save this JD (Saved JDs)")
+            Button {
+                store.run("Writing lines for \(job.title)…") {
+                    _ = try await store.linesFor(title: job.title, company: job.company, jd: job.description, jobID: jobID, feedID: job.feedKey)
+                    store.section = .lines
+                }
+            } label: { Label("Lines", systemImage: "text.quote") }
             Button {
                 store.run("Finding people at \(job.company)…") { try await store.findPeople(jobID: jobID) }
                 store.section = .connections

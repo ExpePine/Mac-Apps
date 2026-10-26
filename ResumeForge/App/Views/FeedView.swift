@@ -44,6 +44,12 @@ struct FeedView: View {
     private var sources: [String] { Array(Set(store.feed.map(\.source))).sorted() }
     private var categories: [String] { Array(Set(store.feed.compactMap(\.category))).sorted() }
 
+    private func sourceName(_ s: String) -> String {
+        if s == NaukriSheet.source { return "My Naukri sheet" }
+        if let src = SheetSettings.sources.first(where: { $0.sourceKey == s }) { return "Sheet: \(src.label)" }
+        return s
+    }
+
     var body: some View {
         HSplitView {
             VStack(spacing: 0) {
@@ -70,7 +76,7 @@ struct FeedView: View {
                     Spacer()
                     Picker("", selection: $sourceFilter) {
                         Text("All sources").tag("all")
-                        ForEach(sources, id: \.self) { Text($0 == NaukriSheet.source ? "My Naukri sheet" : $0).tag($0) }
+                        ForEach(sources, id: \.self) { Text(sourceName($0)).tag($0) }
                         if !categories.isEmpty {
                             Divider()
                             ForEach(categories, id: \.self) { Text("Category: \($0)").tag("cat:" + $0) }
@@ -138,6 +144,9 @@ struct FeedView: View {
             if let s = store.naukriSheetStatus {
                 Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+            if let s = store.sheetsStatus {
+                Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(s)
+            }
             BackgroundCheckStatus()
             if let e = store.feedError, store.feed.isEmpty || !e.hasPrefix("No job feed yet") {
                 Text(e).font(.caption).foregroundStyle(.orange).lineLimit(3)
@@ -181,9 +190,14 @@ struct FeedRow: View {
         HStack(alignment: .top, spacing: 10) {
             ScoreBadge(match: job.match)
             VStack(alignment: .leading, spacing: 2) {
-                Text(job.title).font(.headline).lineLimit(2)
+                HStack(alignment: .top) {
+                    Text(job.title).font(.headline).lineLimit(2)
+                    Spacer(minLength: 4)
+                    if job.liked == true { Image(systemName: "heart.fill").foregroundStyle(.pink).font(.caption) }
+                }
                 Text([job.company, job.location].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(job.classTags.prefix(3).joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 HStack(spacing: 6) {
                     Pill(text: job.publisher.isEmpty ? job.source : job.publisher, color: job.source == NaukriSheet.source ? .blue : .gray)
                     if let c = job.category { Pill(text: c, color: .purple) }
@@ -272,10 +286,22 @@ struct FeedDetail: View {
                     if let url = URL(string: job.url), !job.url.isEmpty, job.appliedAt != nil {
                         Button { NSWorkspace.shared.open(url) } label: { Label("Open posting", systemImage: "safari") }
                     }
+                    Button { store.toggleLike(feedID: job.id) } label: {
+                        Label(job.liked == true ? "Liked" : "Like", systemImage: job.liked == true ? "heart.fill" : "heart")
+                    }
+                    .help("Keep this JD in Saved JDs (auto-classified)")
+                    Button {
+                        let j = job
+                        store.run("Writing lines for \(j.title)…") {
+                            _ = try await store.linesFor(title: j.title, company: j.company, jd: j.description, jobID: j.jobID, feedID: j.id)
+                            store.section = .lines
+                        }
+                    } label: { Label("Lines", systemImage: "text.quote") }
+                    .help("Write reusable resume bullets, a summary line and openers for this JD, from your stories")
                     Button { store.findPeopleForFeed(job.id) } label: { Label("Find people", systemImage: "person.2.wave.2") }
                         .help("Find the hiring manager, recruiters and leaders at \(job.company) on LinkedIn")
                     Button { store.queueFeedMatch(job.id) } label: { Label(job.match?.local == false ? "Re-check" : "Check fit", systemImage: "sparkles") }
-                        .disabled(store.feedMatchQueue.contains(job.id))
+                        .disabled(store.feedMatchQueue.contains(job.id) || store.feedInFlight.contains(job.id))
                         .help("Runs in the background — keep browsing")
                     Spacer()
                     Button(job.status == "dismissed" ? "Restore" : "Dismiss") {
@@ -284,7 +310,8 @@ struct FeedDetail: View {
                         }
                     }
                 }
-                if store.feedMatchQueue.first == job.id {
+                Text(job.classTags.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                if store.feedInFlight.contains(job.id) {
                     HStack { ProgressView().controlSize(.small); Text("Checking fit with AI…").font(.callout) }
                 } else if store.feedMatchQueue.contains(job.id) {
                     Label("Queued for a background fit check", systemImage: "clock").font(.callout).foregroundStyle(.secondary)
@@ -344,6 +371,7 @@ struct FeedSettingsView: View {
     @AppStorage("feedAIMatch") private var aiMatch = true
     @AppStorage("feedAIPerDay") private var aiPerDay = 200
     @AppStorage("feedRecheck") private var recheck = true
+    @AppStorage("feedTimeBudget") private var timeBudget = 60
     @AppStorage("feedMinLocal") private var minLocal = 45
     @AppStorage("feedAutoAdd") private var autoAdd = false
     @AppStorage("feedAutoAddScore") private var autoAddScore = 80
@@ -385,6 +413,8 @@ struct FeedSettingsView: View {
                 Text("\(repo) is public, so your search terms and the collected listings are visible to anyone. Your API keys stay secret: GitHub never shows secrets, even in public repos.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            SheetSourcesSection()
 
             Section {
                 Toggle("Include my Naukri sheet (rajakrishna.in/naukri)", isOn: $sheetEnabled)
@@ -443,7 +473,8 @@ struct FeedSettingsView: View {
                         value: $years, in: 0...45)
                 Toggle("Check the best matches with AI", isOn: $aiMatch)
                 Stepper("Up to \(aiPerDay) AI fit checks a day", value: $aiPerDay, in: 0...500, step: 10).disabled(!aiMatch)
-                Toggle("Re-check in the background when my stories or profile change", isOn: $recheck).disabled(!aiMatch)
+                Toggle("Re-check good matches (55+) when I add or remove stories", isOn: $recheck).disabled(!aiMatch)
+                Stepper("Finish each round of checks within \(timeBudget) minutes", value: $timeBudget, in: 10...240, step: 10).disabled(!aiMatch)
                 Stepper("Only if the quick score is at least \(minLocal)", value: $minLocal, in: 0...90, step: 5).disabled(!aiMatch)
                 Toggle("Add strong matches to Jobs automatically", isOn: $autoAdd)
                 Stepper("…when the AI scores \(autoAddScore)+ with no conflicts", value: $autoAddScore, in: 50...95, step: 5).disabled(!autoAdd)
@@ -518,7 +549,7 @@ struct BackgroundCheckStatus: View {
     var body: some View {
         if FeedSettings.aiMatch && ProviderSettings.anyKeyConfigured {
             HStack(spacing: 6) {
-                if !store.feedMatchQueue.isEmpty { ProgressView().controlSize(.mini) }
+                if !store.feedMatchQueue.isEmpty || !store.feedInFlight.isEmpty { ProgressView().controlSize(.mini) }
                 Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .help("Fit checks run in the background, best quick scores first, then re-checks of jobs judged on older stories. Daily limit in Settings ▸ Job Feed.")
@@ -527,10 +558,62 @@ struct BackgroundCheckStatus: View {
     private var text: String {
         var parts: [String] = []
         if store.feedChecksDone > 0 { parts.append("\(store.feedChecksDone) checked") }
-        if !store.feedMatchQueue.isEmpty { parts.append("\(store.feedMatchQueue.count) queued") }
+        let pending = store.feedMatchQueue.count + store.feedInFlight.count
+        if pending > 0 { parts.append("\(pending) queued") }
+        if let eta = store.feedETA { parts.append("≈\(eta) min left") }
+        if store.feedRate > 0 { parts.append("\(Int(store.feedRate.rounded()))/min") }
+        if store.feedQueueSkipped > 0 { parts.append("\(store.feedQueueSkipped) held for the next round") }
         let stale = store.feedStaleCount
         if stale > 0 { parts.append("\(stale) to re-check") }
         parts.append("\(store.feedChecksLeftToday) left today")
         return "AI checks: " + parts.joined(separator: " · ")
+    }
+}
+
+/// Settings ▸ Job Feed ▸ Google Sheets — tabs of a shared spreadsheet that list jobs.
+struct SheetSourcesSection: View {
+    @EnvironmentObject var store: AppStore
+    @State private var sources = SheetSettings.sources
+    @State private var newLink = ""
+    @State private var newTab = ""
+    @State private var newLabel = ""
+
+    var body: some View {
+        Section {
+            ForEach($sources) { $src in
+                HStack {
+                    Toggle("", isOn: $src.enabled).labelsHidden()
+                    TextField("Label", text: $src.label).frame(width: 110)
+                    TextField("Tab name or gid", text: $src.tab).frame(width: 130)
+                    Text(String(src.spreadsheetID.prefix(10)) + "…").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Spacer()
+                    Button { sources.removeAll { $0.id == src.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                }
+            }
+            HStack {
+                TextField("Sheet link (open the tab, copy the URL)", text: $newLink)
+                TextField("Tab name (optional)", text: $newTab).frame(width: 130)
+                TextField("Label", text: $newLabel).frame(width: 100)
+                Button("Add") {
+                    if let s = SheetSource.from(link: newLink, label: newLabel.isEmpty ? (newTab.isEmpty ? "Sheet" : newTab) : newLabel, tabName: newTab) {
+                        sources.append(s); newLink = ""; newTab = ""; newLabel = ""
+                    }
+                }
+                .disabled(!newLink.contains("/spreadsheets/d/"))
+            }
+            HStack {
+                Button("Save & fetch now") {
+                    SheetSettings.sources = sources
+                    Task { await store.refreshGoogleSheets(manual: true) }
+                }
+                if let s = store.sheetsStatus { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
+            }
+        } header: {
+            Text("Google Sheets")
+        } footer: {
+            Text("Each row is a job. The app works out the columns (title, description, link, category, location, date) from the headers or the data, reads the sheets from your Mac every 2 hours, and merges them into the Job Feed. The sheet must be shared as \"anyone with the link can view\". Use a tab's exact name (e.g. Sheet3), or paste the link while that tab is open to use its gid.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onChange(of: sources) { SheetSettings.sources = $0 }
     }
 }

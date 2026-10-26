@@ -112,6 +112,24 @@ In the app, **Job Feed** lists every job with a fit score:
 
 **Add to my Jobs** sends a job through the background steps to your resume. You can also have strong matches (AI score ≥ 80, no conflicts) added automatically. Set roles, locations, the GitHub token, the number of daily AI checks and the auto-add rules under **Settings ▸ Job Feed**.
 
+## Google Sheets, Saved JDs and Lines
+
+- **Google Sheets:** Sheet 3 and Sheet 4 of your job sheet are read straight into the Job Feed every 2 hours, or when you press Refresh. Columns are worked out from the headers, or from the data when there are no headers. To add or fix a tab, go to Job Feed → Settings → Google Sheets and paste the tab's link (the one with `gid=`). The sheet must be shared as "anyone with the link can view".
+- **Saved JDs:** press ♥ on any job. Saved jobs are grouped by Role, Domain, Seniority or Work mode (auto-classified), and they are fit-checked first.
+- **Lines:** a bank of reusable sentences.
+  - **Compress my stories** turns each story into bullets, a one-liner and an opener.
+  - **Lines** on any job writes bullets, a summary line and openers for that JD.
+  - Starred lines are passed to the resume writer as your preferred wording.
+
+## Faster AI fit checks
+
+- Every provider that has a key runs its own worker at the same time.
+- Each JD is cut down to a short digest of its requirements, and up to 25 JDs go in one request.
+- You can set an optional *fast model* per provider in Settings for bulk checks.
+- Duplicate postings (same title and company) are checked only once.
+- Re-checks only run for jobs that scored 55 or more, and only when you add or remove stories.
+- A time budget (60 minutes by default) caps the queue; the rest waits for the next run. Job Feed shows an estimated finish time and the measured speed.
+
 ## Build
 
 GitHub Actions runs `.github/workflows/resumeforge-dmg.yml` on every push that touches `ResumeForge/`. It runs XcodeGen and `xcodebuild`, ad-hoc signs the app, creates the DMG with `hdiutil`, and publishes it as a Release.

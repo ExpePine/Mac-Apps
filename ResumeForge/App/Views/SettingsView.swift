@@ -125,6 +125,10 @@ struct ProviderEditor: View {
                         if !models.contains(config.model) { Text(config.model).tag(config.model) }
                     }
                 }
+                TextField("Fast model for bulk fit checks (optional)", text: Binding(
+                    get: { config.fastModel ?? "" },
+                    set: { config.fastModel = $0.isEmpty ? nil : $0 }),
+                          prompt: Text(config.kind == .groq ? "e.g. openai/gpt-oss-20b" : config.kind == .gemini ? "e.g. a Flash-Lite model" : "a smaller model from the list"))
                 TextField("Base URL", text: $config.baseURL)
                     .font(.callout.monospaced())
                 Toggle("Can read images (needed for template screenshots)", isOn: $config.vision)

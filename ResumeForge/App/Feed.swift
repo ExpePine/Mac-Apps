@@ -32,6 +32,8 @@ struct FeedJob: Codable, Identifiable, Hashable {
     var snippet = true
     var firstSeen = ""
     var category: String?               // e.g. "Product-Manager" / "Edge-AI" from your Naukri sheet
+    var tags: [String]?                 // auto-classification: role family, domain, seniority, work mode
+    var liked: Bool?
     var appliedAt: Date?
     var status = "new"                  // new | added | dismissed
     var match: MatchResult?
@@ -78,6 +80,13 @@ enum FeedSettings {
     static var autoAdd: Bool { UserDefaults.standard.bool(forKey: "feedAutoAdd") }
     static var autoAddScore: Int { UserDefaults.standard.integer(forKey: "feedAutoAddScore") }
     static var recheck: Bool { UserDefaults.standard.bool(forKey: "feedRecheck") }
+    static var timeBudgetMinutesSetting: Int { UserDefaults.standard.integer(forKey: "feedTimeBudget") }
+    static var timeBudgetMinutes: Int {
+        let v = UserDefaults.standard.integer(forKey: "feedTimeBudget")
+        return v > 0 ? v : 60
+    }
+    /// Only re-check jobs that scored at least this well — low scorers won't change much.
+    static var recheckMinScore: Int { 55 }
 
     /// Roles/locations last saved for the collector (used for local scoring).
     static var roles: [String] { UserDefaults.standard.stringArray(forKey: "feedRoles") ?? [] }
@@ -182,8 +191,13 @@ extension Prompts {
 
         Return: {"results": [{"i": 0, "score": 0-100, "verdict": "Strong fit | Good fit | Stretch | Poor fit",
                               "hardConflicts": ["likely deal-breakers"], "softGaps": ["gaps a story or note could cover"],
-                              "strengths": ["best matching evidence"], "why": "max 25 words"}]}
-        One result per job, using its [i]. Each list: at most 3 items, each at most 12 words.
+                              "strengths": ["best matching evidence"], "why": "max 25 words",
+                              "company": "hiring company if the line shows '(company in text)', else ''",
+                              "tags": ["role family", "domain", "seniority", "work mode"]}]}
+        One result per job, using its [i]. Each list: at most 3 items, each at most 12 words. Keep it brief.
+        tags: exactly 4 short tags — role family (e.g. Product Management, Program Management, Engineering, Hardware/Embedded, \
+        AI/ML, Operations, Sales), domain (e.g. Fintech, IoT, Healthcare, SaaS, Consumer, Automotive, Biometrics), seniority \
+        (Junior, Mid, Senior, Lead, Head/Director, VP+), work mode (Onsite, Hybrid, Remote, Unknown).
 
         CALIBRATION: 85+ = would shortlist, no hard conflicts. 70–84 good, minor gaps. 50–69 stretch. Any hard conflict caps \
         the score at 55. Hard conflict = a must-have the candidate clearly lacks or contradicts (mandatory degree/certification, \
@@ -308,11 +322,13 @@ extension AppStore {
             Task { @MainActor in
                 await self?.refreshFeed()
                 await self?.refreshNaukriSheet()
+                await self?.refreshGoogleSheets()
             }
         }
         Task {
             await refreshFeed()
             await refreshNaukriSheet()
+            await refreshGoogleSheets()
         }
     }
 
@@ -378,12 +394,11 @@ extension AppStore {
         UserDefaults.standard.set(UserDefaults.standard.integer(forKey: key) + 1, forKey: key)
     }
 
-    /// Fingerprint of what the AI judges you on. When your profile or stories change, older AI checks are re-done in the background.
+    /// Fingerprint of what the AI judges you on: which stories you have and your headline/roles.
+    /// (Editing a story's wording doesn't trigger re-checks — adding or removing stories does.)
     var matchBasis: String {
-        var s = data.profile.headline + "|" + data.profile.technicalSkills + "|" + data.profile.roles.map { $0.company + $0.title }.joined()
-        for st in data.stories {
-            s += "|" + String(st.id.uuidString.prefix(8)) + String(Int(st.updatedAt.timeIntervalSince1970))
-        }
+        var s = data.profile.headline + "|" + data.profile.roles.map { $0.company + $0.title }.joined()
+        for id in data.stories.map(\.id.uuidString).sorted() { s += "|" + String(id.prefix(8)) }
         var h: UInt64 = 0xcbf29ce484222325
         for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
         return String(h, radix: 16)
@@ -392,91 +407,149 @@ extension AppStore {
     var feedChecksLeftToday: Int { max(0, FeedSettings.aiPerDay - aiMatchesToday) }
     var feedStaleCount: Int {
         let basis = matchBasis
-        return feed.filter { $0.status != "dismissed" && $0.match?.local == false && $0.match?.basis != basis }.count
+        return feed.filter { $0.status != "dismissed" && $0.match?.local == false && $0.match?.basis != basis
+                             && ($0.match?.score ?? 0) >= FeedSettings.recheckMinScore }.count
     }
 
-    /// Queues AI fit checks in the background: unchecked jobs (best quick score first), then re-checks of jobs
-    /// judged against an older version of your profile/stories. Stops at the daily cap.
+    /// Jobs per minute the checker has actually achieved (moving average), or an estimate before the first batch.
+    var feedThroughput: Double {
+        if feedRate > 0 { return feedRate }
+        let providers = ProviderSettings.usable.map(\.forBulk)
+        return max(4, providers.reduce(0.0) { $0 + Double(Self.batchSize(for: $1)) * 1.5 })   // ~1.5 batches/min each
+    }
+
+    /// Minutes until the current queue is done at the measured speed.
+    var feedETA: Int? {
+        guard !feedMatchQueue.isEmpty else { return nil }
+        return Int((Double(feedMatchQueue.count + feedInFlight.count) / feedThroughput).rounded(.up))
+    }
+
+    /// Queues AI fit checks: unchecked jobs (best quick score first), then re-checks of good matches judged on an older
+    /// story set. The queue is capped so it finishes within your time budget (default 60 min) and the daily cap.
     func scheduleFeedMatching() {
         guard FeedSettings.aiMatch, ProviderSettings.anyKeyConfigured else { return }
-        let room = max(0, FeedSettings.aiPerDay - aiMatchesToday - feedMatchQueue.count)
-        guard room > 0 else { return }
+        let budgetJobs = Int(feedThroughput * Double(FeedSettings.timeBudgetMinutes))
+        let pending = feedMatchQueue.count + feedInFlight.count
+        let room = max(0, min(FeedSettings.aiPerDay - aiMatchesToday, budgetJobs) - pending)
+        guard room > 0 else { startFeedWorkers(); return }
         let basis = matchBasis
-        let live = feed.filter { $0.status != "dismissed" && $0.appliedAt == nil && !feedMatchQueue.contains($0.id) }
+        let busy = Set(feedMatchQueue).union(feedInFlight)
+        let live = feed.filter { $0.status != "dismissed" && $0.appliedAt == nil && !busy.contains($0.id) }
+        // Same title + company listed twice (e.g. two sources) → check once.
+        var seenKeys = Set<String>()
         let unchecked = live
             .filter { ($0.match?.local ?? true) && $0.score >= FeedSettings.minLocal && $0.conflicts == 0 }
-            .sorted { $0.score > $1.score }
+            .sorted { ($0.liked == true ? 1 : 0, $0.score) > ($1.liked == true ? 1 : 0, $1.score) }
+            .filter { seenKeys.insert(Self.norm($0.title) + "|" + Self.norm($0.company)).inserted }
         let stale = FeedSettings.recheck
-            ? live.filter { $0.match?.local == false && $0.match?.basis != basis }.sorted { $0.score > $1.score }
+            ? live.filter { $0.match?.local == false && $0.match?.basis != basis && ($0.match?.score ?? 0) >= FeedSettings.recheckMinScore }
+                  .sorted { $0.score > $1.score }
             : []
-        for f in (unchecked + stale).prefix(room) { feedMatchQueue.append(f.id) }
-        startFeedWorker()
+        feedMatchQueue += (unchecked + stale).prefix(room).map(\.id)
+        feedQueueSkipped = max(0, unchecked.count + stale.count - room)
+        startFeedWorkers()
     }
 
     func queueFeedMatch(_ id: String) {
-        if !feedMatchQueue.contains(id) { feedMatchQueue.insert(id, at: 0) }
-        startFeedWorker()
+        if !feedMatchQueue.contains(id) && !feedInFlight.contains(id) { feedMatchQueue.insert(id, at: 0) }
+        startFeedWorkers()
     }
 
-    /// How many jobs fit in one AI request for your primary provider (small free tiers → smaller batches).
-    var feedBatchSize: Int { min(12, max(3, (primaryLimit - 2500) / 750)) }
+    /// Jobs per request for a provider. JDs are sent as short digests (~700 chars), so batches can be large.
+    static func batchSize(for p: ProviderConfig) -> Int {
+        min(25, max(3, (AIClient.tpmLimit(for: p) - 2500) / 450))
+    }
 
-    private func startFeedWorker() {
-        guard feedWorker == nil, !feedMatchQueue.isEmpty else { return }
-        feedWorker = Task { @MainActor [weak self] in
-            guard let self else { return }
-            var paused = false
-            while !self.feedMatchQueue.isEmpty {
-                let ids = Array(self.feedMatchQueue.prefix(self.feedBatchSize))
-                let jobs = ids.compactMap { id in self.feedIndex(id).map { self.feed[$0] } }
-                if jobs.isEmpty { self.feedMatchQueue.removeAll { ids.contains($0) }; continue }
-                self.feedStatus = "Checking fit: \(jobs.count) jobs (\(jobs.first?.company ?? "")…)"
-                do {
-                    let results = try await self.aiMatchBatch(jobs)
-                    for (id, m) in results {
-                        if let k = self.feedIndex(id) { self.data.feed?[k].match = m }
-                        self.feedChecksDone += 1
-                        self.countAIMatch()
-                        self.autoAddIfStrong(id)
-                    }
-                    self.feedMatchQueue.removeAll { ids.contains($0) }
-                } catch is AIClient.RateLimited {
-                    // Per-minute limit: keep the batch queued and carry on shortly.
-                    self.feedStatus = "Per-minute AI limit — continuing in a minute"
-                    try? await Task.sleep(nanoseconds: 60_000_000_000)
-                } catch {
-                    if error.localizedDescription.contains(AppStore.quotaMarker) {
-                        self.feedStatus = "Daily AI quota used up — fit checks resume tomorrow (or add another provider)"
-                        paused = true
-                        break
-                    }
-                    self.feedMatchQueue.removeAll { ids.contains($0) }   // skip this batch, don't loop on it
-                }
+    /// One worker per AI provider, all pulling from the same queue — providers run in parallel.
+    func startFeedWorkers() {
+        guard !feedMatchQueue.isEmpty else { return }
+        for p in ProviderSettings.usable.map(\.forBulk) where feedWorkers[p.kind] == nil {
+            feedWorkers[p.kind] = Task { @MainActor [weak self] in
+                await self?.runFeedWorker(p)
+                self?.feedWorkers[p.kind] = nil
+                if self?.feedWorkers.isEmpty == true { self?.feedWorkerFinished() }
             }
-            if self.feedStatus?.hasPrefix("Checking fit") == true || self.feedStatus?.hasPrefix("Per-minute") == true {
-                self.feedStatus = nil
-            }
-            self.feedWorker = nil
-            if !paused { self.scheduleFeedMatching() }      // pull the next batch straight away, up to the daily cap
         }
     }
 
-    /// One AI request judges several jobs: compact JDs, your profile and most relevant stories sent once.
-    func aiMatchBatch(_ jobs: [FeedJob]) async throws -> [(String, MatchResult)] {
+    private func feedWorkerFinished() {
+        if feedStatus?.hasPrefix("Checking fit") == true || feedStatus?.hasPrefix("Per-minute") == true { feedStatus = nil }
+        if !feedDailyStop { scheduleFeedMatching() }
+    }
+
+    private func runFeedWorker(_ p: ProviderConfig) async {
+        while !feedMatchQueue.isEmpty && !feedDailyStop {
+            let n = Self.batchSize(for: p)
+            let ids = Array(feedMatchQueue.prefix(n))
+            feedMatchQueue.removeFirst(ids.count)
+            feedInFlight.formUnion(ids)
+            let jobs = ids.compactMap { id in feedIndex(id).map { feed[$0] } }
+            feedStatus = "Checking fit: \(feedInFlight.count) jobs in progress"
+            let started = Date()
+            do {
+                let results = try await aiMatchBatch(jobs, provider: p)
+                for (id, m, company, tags) in results {
+                    if let k = feedIndex(id) {
+                        data.feed?[k].match = m
+                        if data.feed?[k].company.isEmpty == true, !company.isEmpty { data.feed?[k].company = company }
+                        if !tags.isEmpty { data.feed?[k].tags = tags }
+                    }
+                    feedChecksDone += 1
+                    countAIMatch()
+                    autoAddIfStrong(id)
+                }
+                let perMin = Double(results.count) / max(0.2, Date().timeIntervalSince(started) / 60)
+                feedRate = feedRate == 0 ? perMin * Double(max(1, feedWorkers.count)) : feedRate * 0.7 + perMin * Double(max(1, feedWorkers.count)) * 0.3
+                feedInFlight.subtract(ids)
+            } catch is AIClient.RateLimited {
+                feedInFlight.subtract(ids)
+                feedMatchQueue.insert(contentsOf: ids, at: 0)
+                feedStatus = "\(p.kind.title): per-minute limit — continuing in a minute"
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                feedInFlight.subtract(ids)
+                if error.localizedDescription.contains(AppStore.quotaMarker) {
+                    // This provider is out for the day; others keep going.
+                    feedMatchQueue.insert(contentsOf: ids, at: 0)
+                    if feedWorkers.count <= 1 {
+                        feedStatus = "Daily AI quota used up — fit checks resume tomorrow (or add another provider)"
+                        feedDailyStop = true
+                    }
+                    return
+                }
+                // Skip this batch rather than loop on it.
+            }
+        }
+    }
+
+    /// Short version of a JD for bulk checks: the lines that carry requirements, ~700 characters.
+    static func digest(_ jd: String, limit: Int = 700) -> String {
+        let lines = jd.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.count > 3 }
+        let key = #"(?i)\b(\d+\s*\+?\s*(yrs|years)|experience|require|must|mandatory|qualification|degree|b\.?tech|b\.?e\b|m\.?tech|mba|skills?|responsib|lead|own|manage|hardware|firmware|embedded|iot|ai|ml|product|program|roadmap|stakeholder|domain|industry|location|relocat|remote|hybrid)"#
+        var out = lines.prefix(2).joined(separator: " · ")
+        for l in lines.dropFirst(2) where out.count < limit {
+            if l.range(of: key, options: .regularExpression) != nil { out += " · " + l }
+        }
+        return Prompts.clip(out, limit)
+    }
+
+    /// One AI request judges several jobs (short JD digests; your profile and most relevant stories sent once).
+    /// Also returns the company (when missing) and classification tags for each job.
+    func aiMatchBatch(_ jobs: [FeedJob], provider: ProviderConfig? = nil) async throws -> [(String, MatchResult, String, [String])] {
         let profile = data.profile, stories = data.stories
         let n = jobs.count
-        let o = try await ask(output: 220 * n + 300, temperature: 0.2) { budget in
-            let prof = Prompts.profileBlock(profile, maxChars: 1200)
-            let context = jobs.map { $0.title + " " + $0.description.prefix(800) }.joined(separator: " ")
-            let storyList = Prompts.storiesBlock(stories, relevantTo: context, maxChars: min(5000, max(1500, budget / 5)))
-            let per = max(500, min(2500, (budget - prof.count - storyList.count - 2500) / max(1, n) - 150))
+        let o = try await ask(output: 170 * n + 300, temperature: 0.2, only: provider.map { [$0] }) { budget in
+            let prof = Prompts.profileBlock(profile, maxChars: 1000)
+            let context = jobs.map { $0.title + " " + Self.digest($0.description, limit: 400) }.joined(separator: " ")
+            let storyList = Prompts.storiesBlock(stories, relevantTo: context, maxChars: min(3500, max(1200, budget / 6)))
+            let per = max(350, min(900, (budget - prof.count - storyList.count - 2800) / max(1, n) - 120))
             let list = jobs.enumerated().map { i, f in
-                "[\(i)] \(f.title) — \(f.company) — \(f.location)\(f.experience.isEmpty ? "" : " — " + f.experience)\n\(Prompts.clip(f.description, per))"
+                "[\(i)] \(f.title) — \(f.company.isEmpty ? "(company in text)" : f.company) — \(f.location)\(f.experience.isEmpty ? "" : " — " + f.experience)\n\(Self.digest(f.description, limit: per))"
             }.joined(separator: "\n\n")
             return Prompts.matchBatch(jobs: list, count: n, profile: prof, stories: storyList)
         }
         let basis = matchBasis
-        var out: [(String, MatchResult)] = []
+        var out: [(String, MatchResult, String, [String])] = []
         for r in J.dicts(o, "results") {
             guard let i = Int(J.str(r, "i")), jobs.indices.contains(i) else { continue }
             var m = MatchResult()
@@ -489,7 +562,7 @@ extension AppStore {
             if !m.hardConflicts.isEmpty { m.score = min(m.score, 55) }
             m.local = false
             m.basis = basis
-            out.append((jobs[i].id, m))
+            out.append((jobs[i].id, m, J.str(r, "company"), J.strings(r, "tags")))
         }
         return out
     }

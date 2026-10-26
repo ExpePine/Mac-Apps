@@ -24,8 +24,9 @@ extension AppStore {
     /// Builds the prompt to fit each provider's request size (shrinking the variable parts until it fits),
     /// then tries providers in your order. Out-of-quota → next provider. "Too large" → learn the limit and rebuild.
     func ask(system: String = Prompts.system, output: Int, temperature: Double, images: [Data] = [],
+             only: [ProviderConfig]? = nil,
              build: (Int) -> String) async throws -> [String: Any] {
-        let providers = ProviderSettings.usable.filter { images.isEmpty || $0.vision }
+        let providers = (only ?? ProviderSettings.usable).filter { images.isEmpty || $0.vision }
         guard !providers.isEmpty else { throw noProviderError(vision: !images.isEmpty) }
         var lastError: Error?
         var quotaHit = false
@@ -176,10 +177,10 @@ extension AppStore {
         try requireMaterial()
         guard let i = jobIndex(id) else { return }
         let job = data.jobs[i]
-        let profile = data.profile, stories = data.stories
+        let profile = data.profile, stories = data.stories, approved = approvedLinesBlock
         let o = try await ask(output: 3000, temperature: 0.35) { budget in
             Prompts.tailored(job: job, benchmark: job.benchmark, profile: profile, stories: stories,
-                             allowPlaceholders: allowPlaceholders, budget: max(2500, budget - 5200))
+                             allowPlaceholders: allowPlaceholders, budget: max(2500, budget - 5200), approvedLines: approved)
         }
         guard let k = jobIndex(id) else { return }
         data.jobs[k].tailored = finalize(ResumeDoc(json: J.dict(o, "resume") ?? o,
@@ -189,10 +190,10 @@ extension AppStore {
 
     func buildMaster(allowPlaceholders: Bool) async throws {
         try requireMaterial()
-        let profile = data.profile, stories = data.stories
+        let profile = data.profile, stories = data.stories, approved = approvedLinesBlock
         let o = try await ask(output: 3000, temperature: 0.35) { budget in
             Prompts.tailored(job: nil, benchmark: nil, profile: profile, stories: stories,
-                             allowPlaceholders: allowPlaceholders, budget: max(2500, budget - 5200))
+                             allowPlaceholders: allowPlaceholders, budget: max(2500, budget - 5200), approvedLines: approved)
         }
         data.masterResume = finalize(ResumeDoc(json: J.dict(o, "resume") ?? o,
                                                mode: allowPlaceholders ? "placeholders" : "strict"))

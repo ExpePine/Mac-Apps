@@ -29,6 +29,8 @@ struct JobPosting: Codable, Identifiable, Hashable {
     var autoError: String?
     var match: MatchResult?         // fit score + conflicts against your profile and stories
     var appliedAt: Date?
+    var liked: Bool?
+    var tags: [String]?
     var feedKey: String?            // set when the job came from the GitHub job feed
 }
 
@@ -192,4 +194,5 @@ struct AppData: Codable {
     var actions: [ActionItem]?
     var commentary: Commentary?
     var contacts: [Contact]?
+    var lines: [LineItem]?
 }

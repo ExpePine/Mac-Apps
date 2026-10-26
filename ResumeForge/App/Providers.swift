@@ -85,8 +85,17 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
     var model: String
     var baseURL: String
     var vision: Bool
+    var fastModel: String?          // optional smaller/faster model for bulk work (fit checks)
 
     var id: ProviderKind { kind }
+
+    /// The same provider, using its fast model if you set one.
+    var forBulk: ProviderConfig {
+        guard let f = fastModel?.trimmingCharacters(in: .whitespaces), !f.isEmpty else { return self }
+        var c = self
+        c.model = f
+        return c
+    }
 
     init(kind: ProviderKind) {
         self.kind = kind

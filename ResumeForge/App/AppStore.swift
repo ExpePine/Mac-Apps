@@ -7,6 +7,8 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case jobs = "Jobs"
     case actions = "Actions"
     case connections = "Connections"
+    case saved = "Saved JDs"
+    case lines = "Lines"
     case stories = "Stories"
     case interview = "Interview"
     case master = "Master Resume"
@@ -20,6 +22,8 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         case .jobs: return "briefcase"
         case .actions: return "checklist"
         case .connections: return "person.2.wave.2"
+        case .saved: return "heart"
+        case .lines: return "text.quote"
         case .stories: return "book"
         case .interview: return "bubble.left.and.bubble.right"
         case .master: return "doc.richtext"
@@ -50,10 +54,17 @@ final class AppStore: ObservableObject {
     @Published var feedErrors: [String] = []
     @Published var feedLastRefresh: Date?
     @Published var feedMatchQueue: [String] = []
-    var feedWorker: Task<Void, Never>?
+    var feedWorkers: [ProviderKind: Task<Void, Never>] = [:]
+    @Published var feedInFlight = Set<String>()
+    @Published var feedRate: Double = 0          // jobs/min achieved by the fit checker
+    @Published var feedQueueSkipped = 0          // jobs left out to stay inside the time budget
+    var feedDailyStop = false
     var feedTimer: Timer?
     @Published var feedChecksDone = 0
     @Published var peopleSearchStatus: String?
+    @Published var linesStatus: String?
+    @Published var sheetsStatus: String?
+    var sheetsLast: Date?
     var feedCheckTimer: Timer?
     @Published var naukriSheetStatus: String?
     @Published var naukriSheetCount = 0

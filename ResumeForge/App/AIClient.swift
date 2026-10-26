@@ -69,20 +69,27 @@ struct AIClient {
         var errorDescription: String? { "Your AI providers are at their per-minute limit — continuing in a minute." }
     }
 
-    /// One request at a time: with per-minute token limits, parallel calls only collide.
-    static let gate = AsyncGate()
+    /// One request at a time PER PROVIDER (per-minute limits are per provider), so different providers work in parallel.
+    @MainActor private static var gates: [ProviderKind: AsyncGate] = [:]
+    @MainActor static func gate(for kind: ProviderKind) -> AsyncGate {
+        if let g = gates[kind] { return g }
+        let g = AsyncGate()
+        gates[kind] = g
+        return g
+    }
 
     func complete(messages: [Message],
                   jsonMode: Bool,
                   temperature: Double = 0.4,
                   maxTokens: Int = 3000) async throws -> String {
-        await Self.gate.acquire()
+        let gate = await Self.gate(for: provider.kind)
+        await gate.acquire()
         do {
             let r = try await send(messages: messages, jsonMode: jsonMode, temperature: temperature, maxTokens: maxTokens)
-            await Self.gate.release()
+            await gate.release()
             return r
         } catch {
-            await Self.gate.release()
+            await gate.release()
             throw error
         }
     }
