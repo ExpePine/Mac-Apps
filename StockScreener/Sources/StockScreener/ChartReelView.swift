@@ -37,6 +37,9 @@ struct ChartReelView: View {
     @AppStorage("reel.mbScope") private var mbScope = "Sheet stocks"
     @AppStorage("mb.center") private var mbCenter = MBCenter.start.rawValue
     @ObservedObject private var mbc = MultibaggerCenter.shared
+    @ObservedObject private var mbf = MBFilterCenter.shared
+    @AppStorage("mb.fOn") private var fOn = false
+    @State private var showF = false
     @State private var phase = 0                  // "1 → 2": 0 = showing Chart 1, 1 = Chart 2
     @State private var zoomTick = 0               // redraws the zoom labels
 
@@ -80,6 +83,7 @@ struct ChartReelView: View {
             if !mbMonth.isEmpty { ev = ev.filter { $0.month == mbMonth } }
             if mbScope == "Sheet stocks" { let s = Set(vm.allSymbols.map { $0.uppercased() }); ev = ev.filter { s.contains($0.symbol) } }
             if mbScope == "My Filter" { let s = Set(vm.filterRows.map(sym)); ev = ev.filter { s.contains($0.symbol) } }
+            if fOn, mbf.ready { ev = ev.filter { mbf.matched.contains($0.id) } }
             let center = MBCenter(rawValue: mbCenter) ?? .start
             let rowOf = Dictionary(vm.table.rows.map { (sym($0), $0) }, uniquingKeysWith: { a, _ in a })
             out = ev.map { e in
@@ -98,6 +102,13 @@ struct ChartReelView: View {
         default: break
         }
         return out
+    }
+
+    /// The multibagger move now on screen (multibaggers source).
+    private var currentEvent: MBEvent? {
+        let l = items
+        guard l.indices.contains(shown), let k = l[shown].key else { return nil }
+        return mbc.events.first { $0.id == k }
     }
 
     private var columnPredicate: RowPredicate? {
@@ -159,6 +170,8 @@ struct ChartReelView: View {
         .onChange(of: alsoFilter) { _ in restart() }
         .onChange(of: sortMode) { _ in restart() }
         .onChange(of: mbMonth) { _ in restart() }
+        .onChange(of: fOn) { _ in restart() }
+        .onChange(of: mbf.matched) { _ in if fOn { restart() } }
         .onChange(of: mbCenter) { _ in restart() }
         .onChange(of: mbc.events.count) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
@@ -262,6 +275,11 @@ struct ChartReelView: View {
                 .labelsHidden().frame(width: 120)
                 Picker("", selection: $mbCenter) { ForEach(MBCenter.allCases) { Text($0.rawValue).tag($0.rawValue) } }
                     .labelsHidden().fixedSize().help("Date both charts jump to (TradingView Go to date)")
+                Button { showF.toggle() } label: { FBadge(on: fOn) }
+                    .buttonStyle(.plain)
+                    .help("F: pick combinations from the stock on screen (its values just before the move), check them on all multibaggers, save and edit them")
+                    .popover(isPresented: $showF, arrowEdge: .bottom) { MBFPanel(event: currentEvent, on: $fOn).environmentObject(vm) }
+                if fOn, mbf.ready { Text("F\(mbf.activeName.map { " " + $0 } ?? ""): \(mbf.matched.count)").font(.caption.bold()).foregroundStyle(Color.accentColor).lineLimit(1) }
                 Button("Multibaggers…") { openWindow(id: "multibaggers") }
             }
             Spacer()

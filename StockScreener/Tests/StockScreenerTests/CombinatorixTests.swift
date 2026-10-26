@@ -721,3 +721,22 @@ final class PriceT3RisingTests: XCTestCase {
         XCTAssertEqual(t.valueAndRising(down, on: days.last!).rising, 0)
     }
 }
+
+final class MBComboTests: XCTestCase {
+    func testDescribe() {
+        var g = FilterGroup(mode: .all, conditions: [FilterCondition(column: "STREAK", op: .greaterOrEqual, value: "5"),
+                                                    FilterCondition(column: "t3Color", op: .equals, value: "1")])
+        g.groups = [FilterGroup(mode: .any, conditions: [FilterCondition(column: "MOR", op: .greaterThan, value: "90"),
+                                                         FilterCondition(column: "DAY", op: .greaterThan, value: "90")])]
+        XCTAssertEqual(g.describe, "STREAK ≥ 5 AND t3Color = 1 AND (MOR > 90 OR DAY > 90)")
+    }
+
+    func testComboRoundTrip() throws {
+        let c = MBCombo(name: "A", group: FilterGroup(mode: .all, conditions: [FilterCondition(column: "X", op: .equals, value: "1")]),
+                        result: MBComboResult(caught: 3, judged: 10, matches: 60, ranAt: Date(timeIntervalSince1970: 0)))
+        let back = try JSONDecoder().decode([MBCombo].self, from: JSONEncoder().encode([c]))
+        XCTAssertEqual(back, [c])
+        XCTAssertEqual(back[0].result!.caughtPct, 30, accuracy: 1e-9)
+        XCTAssertEqual(back[0].result!.hitRate, 5, accuracy: 1e-9)
+    }
+}

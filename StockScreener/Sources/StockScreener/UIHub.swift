@@ -29,6 +29,7 @@ enum AppWindows {
         AppWindowGroup(name: "Market & gainers", icon: "flame", windows: [
             AppWindow(title: "Daily Gainers", id: "gainers", icon: "flame", shortcut: "⇧⌘G", note: "live, with indices and news"),
             AppWindow(title: "Multibaggers", id: "multibaggers", icon: "chart.line.uptrend.xyaxis.circle", shortcut: "⌥⌘M", note: "≥ 30% in a month"),
+            AppWindow(title: "F Combinations", id: "mbcombos", icon: "list.bullet.rectangle", shortcut: "⌥⌘F", note: "saved multibagger combinations"),
             AppWindow(title: "Sectors", id: "sectors", icon: "square.grid.3x3", shortcut: "⇧⌘0", note: "rotation and regimes"),
             AppWindow(title: "My Picks", id: "picks", icon: "star.square.on.square", shortcut: "⌥⌘P", note: "returns since picked"),
         ]),

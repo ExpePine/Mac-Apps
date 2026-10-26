@@ -99,16 +99,11 @@ struct MultibaggerView: View {
                     .labelsHidden().fixedSize()
                     .help("The date the Chart Reel jumps both TradingView charts to (TradingView's Go to date)")
                 SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 120)
-                Button { showF.toggle() } label: {
-                    Text("F").font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .foregroundStyle(fOn ? Color.white : Color.accentColor)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(fOn ? Color.accentColor : Color.accentColor.opacity(0.12)))
-                }
+                Button { showF.toggle() } label: { FBadge(on: fOn) }
                 .buttonStyle(.plain)
-                .help("Filter combinations (like the Filter screen) checked on each stock's data just BEFORE its multibagger month")
-                .popover(isPresented: $showF, arrowEdge: .bottom) { MBFilterPanel(on: $fOn, events: scoped).environmentObject(vm) }
-                if fOn, mbf.ready { Text("F: \(mbf.matched.count) matched").font(.caption.bold()).foregroundStyle(Color.accentColor) }
+                .help("F: pick Filter combinations checked on each stock's data just BEFORE its multibagger month — saved combinations are kept (⌥⌘F)")
+                .popover(isPresented: $showF, arrowEdge: .bottom) { MBFPanel(event: scoped.first { $0.id == selection }, on: $fOn).environmentObject(vm) }
+                if fOn, mbf.ready { Text("F\(mbf.activeName.map { " " + $0 } ?? ""): \(mbf.matched.count) matched").font(.caption.bold()).foregroundStyle(Color.accentColor) }
                 Spacer()
                 if let s = mb.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 Menu {
@@ -213,6 +208,11 @@ struct MultibaggerView: View {
     @Published private(set) var running = false
     @Published private(set) var summary = ""
     @Published private(set) var issues: [String] = []
+    /// Saved combinations — view, rename, edit, run and delete them in the F panel, the reel or ⌥⌘F.
+    @Published var combos: [MBCombo] = MBCombo.loadAll() { didSet { MBCombo.saveAll(combos) } }
+    /// The saved combination the editor is working on (nil = unsaved / new).
+    @Published var activeCombo: UUID?
+    @Published private(set) var lastResult: MBComboResult?
 
     func run(events: [MBEvent], vm: ScreenerViewModel) {
         guard !running else { return }
@@ -221,8 +221,8 @@ struct MultibaggerView: View {
         let days = HistoryStore.days()
         running = true; summary = "Checking stored days…"
         Task {
-            let out = await Task.detached(priority: .userInitiated) { () -> (Set<String>, String, [String]) in
-                guard !days.isEmpty else { return ([], "No stored daily snapshots yet — they build up as the app imports the sheet each day.", []) }
+            let out = await Task.detached(priority: .userInitiated) { () -> (Set<String>, String, [String], MBComboResult?) in
+                guard !days.isEmpty else { return ([], "No stored daily snapshots yet — they build up as the app imports the sheet each day.", [], nil) }
                 // the snapshot each event is judged on
                 var byDay: [String: [MBEvent]] = [:]
                 var noData = 0
@@ -246,45 +246,13 @@ struct MultibaggerView: View {
                 var s = "Caught \(hit.count) of \(judged) multibaggers (\(String(format: "%.0f", caught))%) on their pre-move snapshot."
                 if matchesAll > 0 { s += " On those \(byDay.count) day\(byDay.count == 1 ? "" : "s") \(matchesAll) stocks matched → \(String(format: "%.1f", precision))% of matches became multibaggers." }
                 if noData > 0 { s += " \(noData) older moves have no stored snapshot before them." }
-                return (hit, s, issues)
+                return (hit, s, issues, MBComboResult(caught: hit.count, judged: judged, matches: matchesAll, ranAt: Date()))
             }.value
-            matched = out.0; summary = out.1; issues = out.2
+            matched = out.0; summary = out.1; issues = out.2; lastResult = out.3
+            if let r = out.3, let id = activeCombo, let i = combos.firstIndex(where: { $0.id == id }), combos[i].group == g {
+                combos[i].result = r
+            }
             ready = true; running = false
         }
-    }
-}
-
-struct MBFilterPanel: View {
-    @EnvironmentObject var vm: ScreenerViewModel
-    @Binding var on: Bool
-    let events: [MBEvent]
-    @ObservedObject private var c = MBFilterCenter.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("F — combinations before a multibagger").font(.headline)
-                Spacer()
-                Toggle("Show only matches", isOn: $on).toggleStyle(.switch).controlSize(.small)
-            }
-            Text("Pick Filter-column conditions (AND / OR / groups, like the Filter screen). Each multibagger is checked on the stock's stored data from just before its month.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            ScrollView {
-                FilterGroupEditor(group: $c.group, columns: vm.headers, isRoot: true, onDelete: {})
-                    .environmentObject(vm)
-            }
-            .frame(minHeight: 200, maxHeight: 340)
-            HStack {
-                Button("Use my Filter's conditions") { c.group = vm.settings.filterGroup }
-                Spacer()
-                if c.running { ProgressView().controlSize(.small) }
-                Button { c.run(events: events, vm: vm); on = true } label: { Label("Check \(events.count) multibaggers", systemImage: "play.fill") }
-                    .buttonStyle(.borderedProminent).disabled(c.running || c.group.activeCount == 0)
-            }
-            if !c.summary.isEmpty { Text(c.summary).font(.callout).fixedSize(horizontal: false, vertical: true) }
-            if !c.issues.isEmpty { Text(c.issues.prefix(3).joined(separator: " · ")).font(.caption).foregroundStyle(.orange) }
-        }
-        .padding(14)
-        .frame(width: 560)
     }
 }
