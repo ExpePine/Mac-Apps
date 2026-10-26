@@ -215,6 +215,7 @@ struct ToolsCommands: Commands {
             Button("Experiments — compare your triggers (⌥⌘E)") { openWindow(id: "experiments") }
             Button("Multibaggers — ≥30% in a month, 2023 → now (⌥⌘M)") { openWindow(id: "multibaggers") }
             Button("Delivery Analysis — NSE delivery highs (⌥⌘D)") { openWindow(id: "delivery") }
+            Button("Update 5-minute data now (Yahoo, for MOR / DAY)") { Intraday5mCenter.shared.update(Intraday5mCenter.allSheetSymbols, force: true) }
             Button("Count & Probability — chance of a top gainer for count = 5, Long_Green = 1 … (⌥⌘B)") { openWindow(id: "probability") }
             Button("Alert Tracker — stocks from shortlist alerts, % change and watched columns (⌥⌘J)") { openWindow(id: "tracker") }
             Button("Event Scan — days since HI/T3 < 1.10 or any condition, charts at that date (⌥⌘L)") { openWindow(id: "eventscan") }

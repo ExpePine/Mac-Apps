@@ -32,6 +32,7 @@ struct DeliveryView: View {
     @StateObject private var lw = LWChartHolder()
     @AppStorage("deliv.layers") private var layersRaw = ""
     @ObservedObject private var newsTL = NewsTimeline.shared
+    @ObservedObject private var i5m = Intraday5mCenter.shared
     @ObservedObject private var dealsC = DealsCenter.shared
     @AppStorage("t3.rev") private var t3Rev = 0
     @Environment(\.colorScheme) private var colorScheme
@@ -101,6 +102,12 @@ struct DeliveryView: View {
                         .help("Compares the stored days with NSE's trading calendar (NIFTY 50 trading days from Yahoo) and downloads any missing day")
                 }
                 Text(storedText).font(.caption).foregroundStyle(.secondary).fixedSize()
+                HStack(spacing: 4) {
+                    if i5m.busy { ProgressView(value: Double(i5m.progress.0), total: Double(max(1, i5m.progress.1))).frame(width: 80) }
+                    Text(i5m.status ?? i5m.summary).font(.caption).foregroundStyle(.secondary)
+                    Button("Update 5-min") { i5m.update(vm.allSymbols, force: true) }.disabled(i5m.busy)
+                        .help("Yahoo 5-minute bars for the Filter's MOR / DAY columns (60 days the first time, then new days; runs by itself daily after 15:40)")
+                }.fixedSize()
             }
             if let st = dc.status {
                 Text(st).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).help(st)

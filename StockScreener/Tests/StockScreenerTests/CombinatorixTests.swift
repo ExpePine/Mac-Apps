@@ -689,3 +689,40 @@ final class PerfAdvancedTests: XCTestCase {
         XCTAssertEqual(PerfAdvanced.pNormal(1.96), 0.05, accuracy: 0.001)
     }
 }
+
+final class MorDayTests: XCTestCase {
+    /// n days of 75 five-minute bars each (09:15 IST onwards); day d's first-30-min move is `first(d)` per bar.
+    private func bars(days n: Int, first: (Int) -> Float) -> Bars5m {
+        var b = Bars5m()
+        let base = 1_767_225_600 + 3 * 3600 + 45 * 60      // 2026-01-01 09:15 IST in unix seconds
+        var price: Float = 100
+        for d in 0..<n {
+            for k in 0..<75 {
+                let t = base + d * 86_400 + k * 300
+                price += k < 6 ? first(d) : 0.01
+                b.t.append(Int32(t)); b.c.append(price)
+            }
+        }
+        return b
+    }
+    func testMorRanksFirstBucket() {
+        let b = bars(days: 30) { d in d == 29 ? 2 : 0.1 }          // last day's first half hour is the strongest
+        let day = MorDay.dayKey(b.t.last!)
+        let r = MorDay.compute(b, asOf: day)
+        XCTAssertEqual(r.mor!, 100, accuracy: 1e-9)
+        let weak = bars(days: 30) { d in d == 29 ? -1 : 0.1 }
+        XCTAssertLessThan(MorDay.compute(weak, asOf: day).mor!, 10)
+    }
+    func testDayNeedsHistoryAndRanks() {
+        let few = bars(days: 10) { _ in 0.1 }
+        XCTAssertNil(MorDay.compute(few, asOf: MorDay.dayKey(few.t.last!)).day)    // < 20 days → na
+        let b = bars(days: 60) { d in d == 59 ? 3 : 0.1 }
+        let r = MorDay.compute(b, asOf: MorDay.dayKey(b.t.last!))
+        XCTAssertNotNil(r.day)
+    }
+    func testStoreRoundTrip() {
+        let b = bars(days: 2) { _ in 0.5 }
+        let c = Bars5m(b.data)!
+        XCTAssertEqual(c.t, b.t); XCTAssertEqual(c.c, b.c)
+    }
+}

@@ -252,6 +252,15 @@ final class ScreenerViewModel: ObservableObject {
             }
             self.setTableKeepingRaw()
         }
+        // 5-minute data → MOR / DAY columns
+        Intraday5mCenter.shared.onReload = { [weak self] in
+            guard let self else { return }
+            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAdded8") {
+                UserDefaults.standard.set(true, forKey: "deliv.colsAdded8")
+                for n in ["MOR", "DAY"] where !self.settings.filterColumns.contains(n) { self.settings.filterColumns.append(n) }
+            }
+            self.setTableKeepingRaw()
+        }
         DeliveryCenter.shared.loadIfNeeded()
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             if let self { AutoPredictCenter.shared.runIfDue(self) }
@@ -266,6 +275,8 @@ final class ScreenerViewModel: ObservableObject {
                 }
                 DeliveryCenter.shared.autoUpdateIfDue()          // NSE delivery data: new days, once an hour
                 if self.hasData { await self.runEndOfDayAlertsIfDue() }   // the day's alerts, once, after the close
+                Intraday5mCenter.allSheetSymbols = self.allSymbols
+                if self.hasData, Self.fiveMinuteDue() { Intraday5mCenter.shared.update(self.allSymbols) }   // 5-min bars, once a day
                 try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
             }
         }
@@ -431,6 +442,31 @@ final class ScreenerViewModel: ObservableObject {
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
+    /// 5-minute bars: right away the first time (60-day backfill), then once a day after 15:40 IST.
+    static func fiveMinuteDue() -> Bool {
+        let last = Intraday5mCenter.lastUpdateDay
+        if last.isEmpty { return true }
+        guard last != AlertSchedule.today() else { return false }
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Kolkata")!
+        let c = cal.dateComponents([.hour, .minute], from: Date())
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0) >= 15 * 60 + 40
+    }
+
+    /// MOR / DAY from the stored Yahoo 5-minute bars (see Intraday5m.swift), on the sheet's data day.
+    private func withIntradayColumns(_ t: SheetTable) -> SheetTable {
+        let cols = Intraday5mCenter.shared.columns(asOf: HistoryStore.dayKey(dataDay(of: t)))
+        guard !cols.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let mName = t.index(of: "MOR") == nil ? "MOR" : "MOR (5m)"
+        let dName = t.index(of: "DAY") == nil ? "DAY" : "DAY (5m)"
+        let rows = t.rows.map { row -> SheetRow in
+            let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
+            let m = c?.mor ?? nil, d = c?.day ?? nil
+            return SheetRow(id: row.id, cells: row.cells + [m.map { String(format: "%.1f", $0) } ?? "", d.map { String(format: "%.1f", $0) } ?? ""],
+                            numbers: row.numbers + [m, d])
+        }
+        return SheetTable(headers: t.headers + [mName, dName], rows: rows, originalHeaders: t.originalHeaders + [mName, dName])
+    }
+
     /// Adds the neural net's NN_score column (0–100) when a model has been trained.
     private func withScores(_ t: SheetTable) -> SheetTable {
         guard !nnScores.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
@@ -461,7 +497,7 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = withScores(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases))))
+        let newTable = withScores(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = makePainter(newTable)
