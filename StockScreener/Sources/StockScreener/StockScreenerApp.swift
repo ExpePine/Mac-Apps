@@ -115,6 +115,13 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
+        Window("F Notes", id: "mbnotes") {
+            MBNotesWindow()
+                .environmentObject(vm)
+                .frame(minWidth: 920, minHeight: 560)
+        }
+        .keyboardShortcut("n", modifiers: [.command, .option, .shift])
+
         Window("F Combinations", id: "mbcombos") {
             MBCombosWindow()
                 .environmentObject(vm)

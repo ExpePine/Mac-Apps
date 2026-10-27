@@ -789,3 +789,43 @@ final class QuickFTests: XCTestCase {
         XCTAssertEqual(t.rows.filter(f.predicate).map(\.id), [0])
     }
 }
+
+final class NoteCompleterTests: XCTestCase {
+    let cols = ["count", "compact", "D_TRIGGER", "DEL %", "MOR"]
+
+    func testPieces() {
+        let p = NoteChecker.pieces("count>5 + Compact + d_trigger wait, del % >= 40 then go", columns: cols,
+                                   values: ["count": "6", "compact": "1", "D_TRIGGER": "", "DEL %": "38"])
+        XCTAssertEqual(p.map(\.canonical), ["count>5", "compact", "D_TRIGGER", "DEL %>=40"])
+        XCTAssertEqual(p.map(\.ok), [true, true, false, false])
+    }
+
+    func testColumnAndValueCompletion() {
+        let ctx = NoteContext(columns: cols, values: ["count": "6", "compact": "1"], rank: [:])
+        let m = NoteModel(notes: [])
+        let a = NoteCompleter.complete("cou", ctx: ctx, model: m)
+        XCTAssertEqual(a.ghost, "nt")
+        XCTAssertEqual(a.list.first?.insert, "count")
+        XCTAssertTrue(a.list.contains { $0.insert == "count=6" })
+        let b = NoteCompleter.complete("count>", ctx: ctx, model: m)
+        XCTAssertEqual(b.ghost, "5")
+        let c = NoteCompleter.complete("dtr", ctx: ctx, model: m)
+        XCTAssertEqual(c.list.first?.insert, "D_TRIGGER")
+    }
+
+    func testLearnsYourWording() {
+        let ctx = NoteContext(columns: cols)
+        let m = NoteModel(notes: ["count>5 + compact + D_TRIGGER wait", "compact + D_TRIGGER wait then breakout", "MOR high, compact + D_TRIGGER wait"])
+        let a = NoteCompleter.complete("count>4 + compact + ", ctx: ctx, model: m)
+        XCTAssertEqual(a.ghost, "D_TRIGGER wait")
+        let b = NoteCompleter.complete("count>4 + compact + D_TRIGGER w", ctx: ctx, model: m)
+        XCTAssertEqual(b.ghost, "ait")
+    }
+
+    func testPatterns() {
+        let notes = ["count>5 + compact", "compact + count>5 + MOR>90", "compact only", "D_TRIGGER"]
+        let p = NotePatterns.find(notes, columns: cols)
+        XCTAssertEqual(p.first?.pieces, ["compact", "count>5"])
+        XCTAssertEqual(p.first?.notes, 2)
+    }
+}

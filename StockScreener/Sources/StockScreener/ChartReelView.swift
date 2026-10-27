@@ -170,6 +170,7 @@ struct ChartReelView: View {
         .onChange(of: sortMode) { _ in restart() }
         .onChange(of: mbMonth) { _ in restart() }
         .onChange(of: fOn) { _ in restart() }
+        .task(id: current?.key) { MBNoteFocus.shared.set(ReelSource(rawValue: source) == .multibaggers ? currentEvent : nil) }
         .onChange(of: mbf.matched) { _ in if fOn { restart() } }
         .onChange(of: mbCenter) { _ in restart() }
         .onChange(of: mbc.events.count) { _ in restart() }

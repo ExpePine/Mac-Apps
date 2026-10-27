@@ -61,6 +61,7 @@ struct MultibaggerView: View {
         }
         .navigationTitle("Multibaggers")
         .onAppear { mb.loadIfNeeded() }
+        .onChange(of: selection) { id in if let e = scoped.first(where: { $0.id == id }) { MBNoteFocus.shared.set(e) } }
         .onChange(of: threshold) { _ in mb.recompute() }
         .onChange(of: fromMonth) { _ in mb.recompute() }
         .onChange(of: usePeak) { _ in mb.recompute() }
