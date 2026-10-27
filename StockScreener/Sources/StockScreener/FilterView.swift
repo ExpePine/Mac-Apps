@@ -9,6 +9,11 @@ struct FilterView: View {
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var flashedDay: String?
     @StateObject private var finder = TableFinder()
+    @AppStorage("filter.dayChange") private var showDayChange = true
+    @ObservedObject private var live = LiveQuotes.shared
+    @State private var dayChange: [Int: (Double, Bool)] = [:]       // row id → (% change today, from Yahoo?)
+    @State private var dayChangeDay = ""
+    @State private var dayChangeVersion = 0
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
@@ -72,6 +77,12 @@ struct FilterView: View {
                                        ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm)        // blue dot = Chart 1, orange = Chart 2
                                    } : nil,
                                    chartDotsAfter: vm.labelIndex,
+                                   labelSuffix: showDayChange ? { row in
+                                       guard let (c, yahoo) = dayChange[row.id] else { return nil }
+                                       let color: NSColor = c > 0 ? .systemGreen : (c < 0 ? .systemRed : .secondaryLabelColor)
+                                       return (String(format: "%+.1f%%", c) + (yahoo ? "" : "ˢ"), color)
+                                   } : nil,
+                                   suffixVersion: dayChangeVersion &+ (showDayChange ? 1 : 0),
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
@@ -114,8 +125,13 @@ struct FilterView: View {
             visibility = conditionsVisible ? .all : .detailOnly
             flashedDay = nil
             flashIfNewDay()
+            refreshDayChange()
         }
+        .onChange(of: vm.importVersion) { _ in refreshDayChange() }
+        .onChange(of: live.tick) { _ in refreshDayChange() }
+        .onChange(of: vm.timelineIndex) { _ in refreshDayChange() }
         .onChange(of: vm.filterVersion) { _ in
+            if dayChange.isEmpty { refreshDayChange() }
             flashIfNewDay()
             finder.update(rows: vm.filterRows, columns: vm.filterColumnIndices)
         }
@@ -203,6 +219,17 @@ struct FilterView: View {
         .sheet(isPresented: $vm.showRulesEditor) {
             EmailRulesSheet().environmentObject(vm)
         }
+    }
+
+    /// Today's % change per row, shown in brackets after the symbol. Held until the next refresh (sheet import
+    /// or live Yahoo pass). Yahoo's price for the day if it has one, else the sheet's change% column (marked ˢ).
+    private func refreshDayChange() {
+        let shown = vm.displayedDayKey
+        let latest = vm.priceBook.series(for: ScreenerViewModel.benchmarkSymbol)?.lastDay ?? ""
+        let day = vm.timelineIndex != nil ? shown : max(latest, shown)
+        dayChange = vm.tgChanges(for: vm.table, day: day)
+        dayChangeDay = day
+        dayChangeVersion &+= 1
     }
 
     /// Flash what changed since the previous stored day, once per data day while this window is open.

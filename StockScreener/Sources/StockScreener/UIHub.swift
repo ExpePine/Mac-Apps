@@ -139,6 +139,7 @@ struct SettingsHubView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @AppStorage("hub.indicators") private var indicators = true
+    @AppStorage("filter.dayChange") private var dayChange = true
     @AppStorage("hub.streak") private var streak = false
     @AppStorage("hub.t3") private var t3 = false
     @AppStorage("hub.priceT3") private var priceT3 = false
@@ -158,6 +159,7 @@ struct SettingsHubView: View {
                     .font(.callout).foregroundStyle(.secondary)
 
                 group("Filter columns & indicators", "function", $indicators) {
+                    Toggle("Show today's % change in brackets after each symbol in the Filter", isOn: $dayChange)
                     sub("STREAK — days in a row of the delivery condition", $streak) { StreakSettings() }
                     sub("T3 on delivery — line on delivery charts, t3Color", $t3) { T3Settings() }
                     sub("T3 Fast / Slow on prices — T3_FAST, T3_SLOW, T3F, T3S", $priceT3) { PriceT3Settings() }

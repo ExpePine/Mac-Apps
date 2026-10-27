@@ -27,6 +27,9 @@ struct SheetTableView: NSViewRepresentable {
     var onHoverChart: ((SheetRow, Int) -> Void)? = nil
     /// Column (index into headers) the dots sit after — normally the symbol; nil = the first column.
     var chartDotsAfter: Int? = nil
+    /// Small coloured text after the symbol, e.g. "(+3.2%)" — shown in the `chartDotsAfter` (symbol) column.
+    var labelSuffix: ((SheetRow) -> (String, NSColor)?)? = nil
+    var suffixVersion = 0
     /// Previous day's text when this cell's value changed since then (cell gets a shaded border), else nil.
     var changedCell: ((SheetRow, Int) -> String?)? = nil
     var changedVersion = 0
@@ -177,9 +180,9 @@ struct SheetTableView: NSViewRepresentable {
 
         let flashToken = flash?.token ?? 0
         let findKey = findQuery + "|\(findCurrent?.row ?? -1),\(findCurrent?.column ?? -1)"
-        if version &+ changedVersion &* 7919 != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
+        if version &+ changedVersion &* 7919 &+ suffixVersion &* 104729 != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
             c.flashToken = flashToken
-            c.renderedVersion = version &+ changedVersion &* 7919
+            c.renderedVersion = version &+ changedVersion &* 7919 &+ suffixVersion &* 104729
             c.findKey = findKey
             left.reloadData()
             right.reloadData()
@@ -500,7 +503,8 @@ struct SheetTableView: NSViewRepresentable {
             cell.configure(text: text,
                            alignRight: isNumber,
                            bold: index == parent.emphasizedColumn || tableView === leftTable,
-                           background: parent.painter?.color(for: data, column: index))
+                           background: parent.painter?.color(for: data, column: index),
+                           suffix: index == (parent.chartDotsAfter ?? 0) ? parent.labelSuffix?(data) : nil)
             cell.setChanged(parent.changedCell?(data, index))
             let q = parent.findQuery
             if !q.isEmpty, text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
@@ -645,10 +649,19 @@ final class SheetCellView: NSTableCellView {
         changeLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
     }
 
-    func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?) {
-        label.stringValue = text
+    func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?, suffix: (String, NSColor)? = nil) {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: bold ? .semibold : .regular)
         label.alignment = alignRight ? .right : .left
-        label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: bold ? .semibold : .regular)
+        label.font = font
+        if let suffix {
+            let a = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+            a.append(NSAttributedString(string: " (\(suffix.0))", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 2, weight: .medium),
+                .foregroundColor: suffix.1]))
+            label.attributedStringValue = a
+        } else {
+            label.stringValue = text
+        }
         toolTip = text.count > 14 ? text : nil
         layer?.backgroundColor = background?.cgColor
     }
