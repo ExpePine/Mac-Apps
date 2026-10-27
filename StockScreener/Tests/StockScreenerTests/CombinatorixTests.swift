@@ -825,7 +825,8 @@ final class NoteCompleterTests: XCTestCase {
     func testPatterns() {
         let notes = ["count>5 + compact", "compact + count>5 + MOR>90", "compact only", "D_TRIGGER"]
         let p = NotePatterns.find(notes, columns: cols)
-        XCTAssertEqual(p.first?.pieces, ["compact", "count>5"])
-        XCTAssertEqual(p.first?.notes, 2)
+        XCTAssertEqual(p.first?.pieces, ["compact"])
+        XCTAssertEqual(p.first?.notes, 3)
+        XCTAssertTrue(p.contains { $0.pieces == ["compact", "count>5"] && $0.notes == 2 })
     }
 }
