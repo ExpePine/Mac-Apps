@@ -39,7 +39,6 @@ struct ChartReelView: View {
     @ObservedObject private var mbc = MultibaggerCenter.shared
     @ObservedObject private var mbf = MBFilterCenter.shared
     @AppStorage("mb.fOn") private var fOn = false
-    @State private var showF = false
     @State private var phase = 0                  // "1 → 2": 0 = showing Chart 1, 1 = Chart 2
     @State private var zoomTick = 0               // redraws the zoom labels
 
@@ -127,6 +126,10 @@ struct ChartReelView: View {
         VStack(spacing: 0) {
             sourceBar
             Divider()
+            if ReelSource(rawValue: source) == .multibaggers {
+                MBFormulaBar(event: currentEvent)
+                Divider()
+            }
             if list.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "film.stack").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -275,11 +278,6 @@ struct ChartReelView: View {
                 .labelsHidden().frame(width: 120)
                 Picker("", selection: $mbCenter) { ForEach(MBCenter.allCases) { Text($0.rawValue).tag($0.rawValue) } }
                     .labelsHidden().fixedSize().help("Date both charts jump to (TradingView Go to date)")
-                Button { showF.toggle() } label: { FBadge(on: fOn) }
-                    .buttonStyle(.plain)
-                    .help("F: pick combinations from the stock on screen (its values just before the move), check them on all multibaggers, save and edit them")
-                    .popover(isPresented: $showF, arrowEdge: .bottom) { MBFPanel(event: currentEvent, on: $fOn).environmentObject(vm) }
-                if fOn, mbf.ready { Text("F\(mbf.activeName.map { " " + $0 } ?? ""): \(mbf.matched.count)").font(.caption.bold()).foregroundStyle(Color.accentColor).lineLimit(1) }
                 Button("Multibaggers…") { openWindow(id: "multibaggers") }
             }
             Spacer()

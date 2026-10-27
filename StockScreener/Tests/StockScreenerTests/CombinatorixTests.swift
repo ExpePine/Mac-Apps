@@ -740,3 +740,29 @@ final class MBComboTests: XCTestCase {
         XCTAssertEqual(back[0].result!.hitRate, 5, accuracy: 1e-9)
     }
 }
+
+final class FormulaBarTests: XCTestCase {
+    func testFormulaTextFromGroup() {
+        var g = FilterGroup(mode: .all, conditions: [FilterCondition(column: "STREAK", op: .greaterOrEqual, value: "5"),
+                                                    FilterCondition(column: "DEL %", op: .greaterThan, value: "40")])
+        g.groups = [FilterGroup(mode: .any, conditions: [FilterCondition(column: "MOR", op: .greaterThan, value: "90"),
+                                                         FilterCondition(column: "Sector", op: .equals, value: "IT")])]
+        XCTAssertEqual(g.formulaText, "STREAK >= 5 AND [DEL %] > 40 AND (MOR > 90 OR Sector = 'IT')")
+        XCTAssertEqual(FilterGroup.formula("A > 1").formulaText, "A > 1")
+    }
+
+    func testSuggestions() {
+        let cols = ["STREAK", "t3Color", "DEL %", "MOR", "T3_FAST"]
+        XCTAssertEqual(FormulaField.suggestions("t3", columns: cols, bracketed: false), ["t3Color", "T3_FAST"])
+        XCTAssertEqual(FormulaField.suggestions("del", columns: cols, bracketed: false), ["[DEL %]"])
+        XCTAssertEqual(FormulaField.suggestions("an", columns: cols, bracketed: false), ["AND"])
+    }
+
+    func testFormulaTextCompiles() throws {
+        let t = SheetTable(headers: ["Symbol", "STREAK", "DEL %"], rows: [SheetRow(id: 0, cells: ["A", "6", "50"], numbers: [nil, 6, 50])])
+        let g = FilterGroup(mode: .all, conditions: [FilterCondition(column: "STREAK", op: .greaterOrEqual, value: "5"),
+                                                    FilterCondition(column: "DEL %", op: .greaterThan, value: "40")])
+        let f = try Formula.compile(g.formulaText!, table: t)
+        XCTAssertTrue(f.predicate(t.rows[0]))
+    }
+}
