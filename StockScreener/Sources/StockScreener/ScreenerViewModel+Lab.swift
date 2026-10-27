@@ -110,7 +110,7 @@ extension ScreenerViewModel {
     /// change% per stock for `day`: Yahoo when available, otherwise the sheet's change% column.
     func tgChanges(for source: SheetTable, day: String) -> [Int: (Double, Bool)] {
         guard let label = labelIndex else { return [:] }
-        let sheetCol = source.index(of: "change%") ?? source.index(of: "change %") ?? source.index(of: "change")
+        let sheetCol = source.index(of: "change%") ?? source.index(of: "change %") ?? source.index(of: "changepct") ?? source.index(of: "change_pct") ?? source.index(of: "pchange") ?? source.index(of: "change")
         var out: [Int: (Double, Bool)] = [:]
         for row in source.rows {
             let sym = row.text(label)
