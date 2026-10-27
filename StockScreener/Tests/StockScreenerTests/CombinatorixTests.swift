@@ -766,3 +766,26 @@ final class FormulaBarTests: XCTestCase {
         XCTAssertTrue(f.predicate(t.rows[0]))
     }
 }
+
+final class QuickFTests: XCTestCase {
+    let headers = ["Symbol", "count", "compact", "D_Trigger", "DEL %", "Sector"]
+
+    func testQuickSyntax() throws {
+        XCTAssertEqual(try QuickF.formula("count>5 + compact + d_trigger", headers: headers),
+                       "count > 5 AND (NOT EMPTY(compact) AND NOT (compact = 0)) AND (NOT EMPTY(D_Trigger) AND NOT (D_Trigger = 0))")
+        XCTAssertEqual(try QuickF.formula("del % >= 40, sector = IT | count = 3", headers: headers),
+                       "[DEL %] >= 40 AND (Sector = 'IT' OR count = 3)")
+        XCTAssertThrowsError(try QuickF.formula("nope > 1", headers: headers))
+        XCTAssertEqual(QuickF.key("Count > 5 +  Compact"), "count>5+compact")
+    }
+
+    func testQuickSyntaxEvaluates() throws {
+        let t = SheetTable(headers: headers, rows: [
+            SheetRow(id: 0, cells: ["A", "6", "1", "2", "50", "IT"], numbers: [nil, 6, 1, 2, 50, nil]),
+            SheetRow(id: 1, cells: ["B", "6", "0", "2", "50", "IT"], numbers: [nil, 6, 0, 2, 50, nil]),
+            SheetRow(id: 2, cells: ["C", "6", "1", "", "50", "IT"], numbers: [nil, 6, 1, nil, 50, nil]),
+        ])
+        let f = try Formula.compile(try QuickF.formula("count>5 + compact + D_TRIGGER", headers: headers), table: t)
+        XCTAssertEqual(t.rows.filter(f.predicate).map(\.id), [0])
+    }
+}

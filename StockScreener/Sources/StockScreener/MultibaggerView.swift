@@ -43,8 +43,6 @@ struct MultibaggerView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            MBFormulaBar(event: scoped.first { $0.id == selection })
-            Divider()
             if mb.book.series.isEmpty && !mb.isFetching {
                 VStack(spacing: 12) {
                     Image(systemName: "chart.line.uptrend.xyaxis.circle").font(.system(size: 44)).foregroundStyle(.secondary)
@@ -101,6 +99,10 @@ struct MultibaggerView: View {
                     .labelsHidden().fixedSize()
                     .help("The date the Chart Reel jumps both TradingView charts to (TradingView's Go to date)")
                 SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 120)
+                QuickFButton()
+                Button { showF.toggle() } label: { Image(systemName: "slider.horizontal.3") }
+                    .help("Full F panel: pick values from the selected stock, AND / OR editor, saved combinations")
+                    .popover(isPresented: $showF, arrowEdge: .bottom) { MBFPanel(event: scoped.first { $0.id == selection }, on: $fOn).environmentObject(vm) }
                 Spacer()
                 if let s = mb.status { Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 Menu {

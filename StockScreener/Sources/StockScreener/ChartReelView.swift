@@ -126,10 +126,6 @@ struct ChartReelView: View {
         VStack(spacing: 0) {
             sourceBar
             Divider()
-            if ReelSource(rawValue: source) == .multibaggers {
-                MBFormulaBar(event: currentEvent)
-                Divider()
-            }
             if list.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "film.stack").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -278,6 +274,8 @@ struct ChartReelView: View {
                 .labelsHidden().frame(width: 120)
                 Picker("", selection: $mbCenter) { ForEach(MBCenter.allCases) { Text($0.rawValue).tag($0.rawValue) } }
                     .labelsHidden().fixedSize().help("Date both charts jump to (TradingView Go to date)")
+                QuickFButton()
+                if fOn, mbf.ready { Text("F: \(mbf.matched.count)").font(.caption.bold()).foregroundStyle(Color.accentColor) }
                 Button("Multibaggers…") { openWindow(id: "multibaggers") }
             }
             Spacer()
