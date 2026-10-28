@@ -95,13 +95,23 @@ enum LabBuild {
                 chop = Float(flips) / 11
             }
             let friday: Float = df.date(from: d.day).map { cal.component(.weekday, from: $0) == 6 ? 1 : 0 } ?? 0
-            let x: [Float] = [
-                ret, d.o / p.c - 1, closeAt(5) / d.o - 1, closeAt(n - 1) / closeAt(n - 7) - 1, closeAt(n - 1) / closeAt(n - 13) - 1,
-                rng > 0 ? (d.c - d.l) / rng - 0.5 : 0, d.c / vwap - 1, log(rv[i] + 1e-4), log(wk + 1e-4), log(mo + 1e-4),
-                rng / p.c, vv > 0 ? lastHourV / vv : 0, log((d.v + 1) / (avgV + 1)), d.c / days[i - 5].c - 1, trend,
-                rng > 0 ? (d.h - max(d.o, d.c)) / rng : 0, rng > 0 ? (min(d.o, d.c) - d.l) / rng : 0, friday,
-                market[d.day] ?? 0, last15, chop,
-            ].map { $0.isFinite ? $0 : 0 }
+            let clv: Float = rng > 0 ? (d.c - d.l) / rng - 0.5 : 0
+            let lhShare: Float = vv > 0 ? lastHourV / vv : 0
+            let upW: Float = rng > 0 ? (d.h - max(d.o, d.c)) / rng : 0
+            let loW: Float = rng > 0 ? (min(d.o, d.c) - d.l) / rng : 0
+            let gap: Float = d.o / p.c - 1
+            let first30: Float = closeAt(5) / d.o - 1
+            let last30: Float = closeAt(n - 1) / closeAt(n - 7) - 1
+            let last60: Float = closeAt(n - 1) / closeAt(n - 13) - 1
+            let vw: Float = d.c / vwap - 1
+            let lrv: Float = log(rv[i] + 1e-4), lwk: Float = log(wk + 1e-4), lmo: Float = log(mo + 1e-4)
+            let rngP: Float = rng / p.c
+            let volR: Float = log((d.v + 1) / (avgV + 1))
+            let ret5: Float = d.c / days[i - 5].c - 1
+            let mkt: Float = market[d.day] ?? 0
+            var x: [Float] = [ret, gap, first30, last30, last60, clv, vw, lrv, lwk, lmo]
+            x += [rngP, lhShare, volR, ret5, trend, upW, loW, friday, mkt, last15, chop]
+            x = x.map { $0.isFinite ? $0 : 0 }
             // naive: the stock's usual excursion over its last 10 days
             var hiEx: Float = 0, loEx: Float = 0, m: Float = 0
             for k in max(1, i - 9)...i { let pc = days[k - 1].c; if pc > 0 { hiEx += days[k].h / pc - 1; loEx += days[k].l / pc - 1; m += 1 } }
@@ -401,7 +411,13 @@ enum LabEngine {
             q[t] = LabMath.quantile(ensErr[t], 0.8)                 // final bands use all out-of-sample errors
         }
         for t in 0..<4 {
-            let maes = (0..<4).map { m in errs[m][t].reduce(0, +) / Double(max(1, errs[m][t].count)) } + [ensErr[t].reduce(0, +) / Double(ensErr[t].count)]
+            var maes: [Double] = []
+            for m in 0..<4 {
+                let e: [Double] = errs[m][t]
+                maes.append(e.reduce(0, +) / Double(max(1, e.count)))
+            }
+            let ens: [Double] = ensErr[t]
+            maes.append(ens.reduce(0, +) / Double(max(1, ens.count)))
             res.score.rows.append(.init(target: LabFeatures.targets[t], mae: maes, coverage: cover[t]))
         }
         // direction
