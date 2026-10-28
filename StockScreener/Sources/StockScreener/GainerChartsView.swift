@@ -92,7 +92,7 @@ struct GainerChartsView: View {
                 VSplitView {
                     chartPane(cur, chart).frame(minHeight: 260)
                     if showDelivery {
-                        DeliveryMiniChart(symbol: cur.symbol, lw: lw, syncNote: sync ? syncNote : nil)
+                        DeliveryMiniChart(symbol: cur.symbol, lw: lw, syncNote: sync ? syncNote : nil, focus: day)
                             .frame(minHeight: 110, idealHeight: 220)
                     }
                 }
@@ -215,7 +215,7 @@ struct GainerChartsView: View {
                     }
                 }
             }
-            Button { vm.openChart(it.symbol, queue: items.map(\.symbol), openWindow: openWindow) } label: { Label("Chart viewer", systemImage: "arrow.up.forward.app") }
+            Button { vm.openChart(it.symbol, queue: items.map(\.symbol), goTo: day, openWindow: openWindow) } label: { Label("Chart viewer", systemImage: "arrow.up.forward.app") }
             Text("\(rank + 1) / \(count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }
         .controlSize(.small)
@@ -225,7 +225,7 @@ struct GainerChartsView: View {
     private func chartPane(_ it: Item, _ c: Int) -> some View {
         Group {
             if let u = vm.chartURL(it.symbol, column: min(c, vm.chartCount - 1)) {
-                ReelWebView(web: pool.view(for: u, slot: c))
+                ReelWebView(web: pool.view(for: u, slot: c, goTo: day))
                     .overlay(alignment: .topTrailing) { zoomBar(c) }
             } else {
                 Text("No chart link for \(it.symbol)").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -323,7 +323,7 @@ struct GainerChartsView: View {
         let s = p / perStock
         var urls: [(URL, Int, String?)] = []
         for j in [s, s + 1, s + 2, s - 1] where list.indices.contains(j) {
-            for c in 0..<perStock { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, nil)) } }
+            for c in 0..<perStock { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, day)) } }
         }
         pool.preload(urls, keep: perStock * 4)
     }
@@ -333,7 +333,7 @@ struct GainerChartsView: View {
         guard !list.isEmpty else { return nil }
         let p = min(pos, list.count * perStock - 1)
         let c = p % perStock
-        return vm.chartURL(list[p / perStock].symbol, column: min(c, vm.chartCount - 1)).map { pool.view(for: $0, slot: c) }
+        return vm.chartURL(list[p / perStock].symbol, column: min(c, vm.chartCount - 1)).map { pool.view(for: $0, slot: c, goTo: day) }
     }
 
     /// TradingView → delivery chart: follow the visible dates of the chart on screen.

@@ -104,9 +104,10 @@ extension ScreenerViewModel {
     }
 
     /// Opens a stock's chart (in the app's chart window, or the browser). `queue` = the list for ◀ ▶.
-    func openChart(_ symbol: String, queue: [String] = [], openWindow: OpenWindowAction) {
+    func openChart(_ symbol: String, queue: [String] = [], goTo: String? = nil, openWindow: OpenWindowAction) {
         let sym = symbol.trimmingCharacters(in: .whitespaces).uppercased()
         guard !sym.isEmpty else { return }
+        chartGoTo = goTo
         if !queue.isEmpty { chartQueue = queue.map { $0.uppercased() } } else if !chartQueue.contains(sym) { chartQueue = [sym] }
         if settings.chartOpenInApp {
             chartSymbol = sym

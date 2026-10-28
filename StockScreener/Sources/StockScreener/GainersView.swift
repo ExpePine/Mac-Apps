@@ -281,7 +281,7 @@ struct GainersView: View {
                            onHeaderClick: { i in
                                if sortColumn == i { sortDescending.toggle() } else { sortColumn = i; sortDescending = true }
                            },
-                           onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: rows.map { vm.rowKey($0) }, openWindow: openWindow) },
+                           onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: rows.map { vm.rowKey($0) }, goTo: vm.currentGainerDay, openWindow: openWindow) },
                            onHoverChart: ChartPeek.enabled ? { row, chart in ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm) } : nil,
                            chartDotsAfter: vm.labelIndex,
                            columnMenu: { i in

@@ -62,7 +62,7 @@ struct ChartReelView: View {
         switch ReelSource(rawValue: source) ?? .gainers {
         case .gainers:
             let day = vm.currentGainerDay
-            out = vm.gainers(on: day).map { ReelItem(symbol: $0.symbol, note: String(format: "%+.1f%%", $0.change), row: $0.row, gainer: $0, day: day) }
+            out = vm.gainers(on: day).map { ReelItem(symbol: $0.symbol, note: String(format: "%+.1f%%", $0.change), row: $0.row, gainer: $0, day: day, goTo: day) }
         case .filter:
             out = vm.filterRows.map { ReelItem(symbol: sym($0), note: "", row: $0) }
         case .column:

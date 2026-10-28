@@ -137,6 +137,8 @@ final class ScreenerViewModel: ObservableObject {
     // Chart links & in-app chart viewer
     @Published var chartBook = ChartLinkBook.load()
     @Published var chartSymbol: String?
+    /// Date the Chart viewer centres TradingView (and the delivery chart) on after loading — e.g. a gainer's day.
+    @Published var chartGoTo: String?
     @Published var chartQueue: [String] = []        // the list the chart was opened from (for ◀ ▶)
     @Published var chartStatus: String?
     @Published var isImportingCharts = false

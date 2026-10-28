@@ -47,7 +47,7 @@ struct ChartViewer: View {
                 if showDelivery && !symbol.isEmpty {
                     VSplitView {
                         ReelWebView(web: web.view).frame(minHeight: 260)
-                        DeliveryMiniChart(symbol: symbol, lw: mini, syncNote: syncNote).frame(minHeight: 110, idealHeight: 200)
+                        DeliveryMiniChart(symbol: symbol, lw: mini, syncNote: syncNote, focus: vm.chartGoTo).frame(minHeight: 110, idealHeight: 200)
                     }
                 } else {
                     ReelWebView(web: web.view)
@@ -203,6 +203,21 @@ struct ChartViewer: View {
         web.signingIn = false
         web.view.stopLoading()
         web.view.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+        centreOnGoTo()
+    }
+
+    /// Opened from Daily Gainers: once TradingView has loaded, centre it on the gainer's day (the current bar).
+    private func centreOnGoTo() {
+        guard let day = vm.chartGoTo else { return }
+        let sym = symbol
+        func attempt(_ n: Int) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                guard symbol == sym, vm.chartGoTo == day else { return }
+                if web.view.isLoading && n > 0 { attempt(n - 1); return }
+                ReelPool.helper.goTo(web.view, date: day, tries: 3, native: true)
+            }
+        }
+        attempt(8)
     }
 
     /// TradingView → delivery chart: follow TradingView's visible dates (and delivery → TradingView via onUserRange).
