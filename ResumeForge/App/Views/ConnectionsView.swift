@@ -433,3 +433,74 @@ struct ContactDetail: View {
         newNote = ""
     }
 }
+
+struct PasteConversationSheet: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    var onDone: (UUID) -> Void
+    @State private var text = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Paste a LinkedIn conversation").font(.title2.bold())
+            Text("Copy the messages from LinkedIn and paste them here. The app works out who it's with and saves it to their history.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $text).frame(minHeight: 260).overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") {
+                    let t = text
+                    store.run("Reading the conversation…") {
+                        if let id = try await store.importConversation(image: nil, text: t) { onDone(id) }
+                    }
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).count < 20)
+            }
+        }
+        .padding(20)
+        .frame(width: 600)
+    }
+}
+
+// MARK: - Settings ▸ Networking
+
+struct NetworkingSettings: View {
+    @AppStorage("findPeopleOnApply") private var onApply = true
+    @AppStorage("peoplePerCompany") private var perCompany = 8
+    @AppStorage("searchDailyCap") private var cap = 30
+    @State private var keys: [SearchProvider: String] = [:]
+    @State private var status = ""
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(SearchProvider.allCases) { p in
+                    HStack {
+                        SecureField(p.title, text: Binding(get: { keys[p] ?? "" }, set: { keys[p] = $0 }), prompt: Text("API key"))
+                        Button("Save") {
+                            Keychain.save(keys[p] ?? "", account: p.account)
+                            status = "\(p.title) key saved."
+                        }
+                        if let u = URL(string: p.keyURL) { Link("Get key", destination: u) }
+                    }
+                }
+                if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
+            } header: {
+                Text("People search (Google results)")
+            } footer: {
+                Text("Serper returns Google results and handles the site:linkedin.com searches best (free: 2,500 searches, one-time). Tavily is the fallback (free: 1,000 a month). Each \"find people\" uses up to 3 searches. If your Serper key has been visible on a web page, create a new one for the app.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("When I apply") {
+                Toggle("Find key people at the company automatically", isOn: $onApply)
+                Stepper("Keep the top \(perCompany) people per company", value: $perCompany, in: 3...20)
+                Stepper("At most \(cap) searches a day (used today: \(WebSearch.usedToday))", value: $cap, in: 3...200, step: 3)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { for p in SearchProvider.allCases { keys[p] = p.key } }
+    }
+}
