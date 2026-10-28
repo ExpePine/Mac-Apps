@@ -115,6 +115,18 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
+        Window("Data Lab", id: "datalab") {
+            DataLabView()
+                .environmentObject(vm)
+                .frame(minWidth: 1050, minHeight: 620)
+        }
+        .keyboardShortcut("b", modifiers: [.command, .option])
+
+        Window("Data Storage", id: "storage") {
+            StorageView()
+                .frame(minWidth: 760, minHeight: 480)
+        }
+
         Window("F Notes", id: "mbnotes") {
             MBNotesWindow()
                 .environmentObject(vm)
@@ -217,6 +229,7 @@ struct ToolsCommands: Commands {
     var body: some Commands {
         CommandMenu("Tools") {
             Button("Settings…") { openWindow(id: "hub") }
+            Button("Data Storage — what the app stores and how big it is") { openWindow(id: "storage") }
             Button("Update 5-minute data now (Yahoo, for MOR / DAY)") { Intraday5mCenter.shared.update(Intraday5mCenter.allSheetSymbols, force: true) }
             ForEach(AppWindows.groups) { g in
                 Divider()

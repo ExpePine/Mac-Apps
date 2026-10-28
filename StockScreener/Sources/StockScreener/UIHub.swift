@@ -25,6 +25,7 @@ enum AppWindows {
             AppWindow(title: "Changes", id: "changes", icon: "rectangle.grid.2x2", shortcut: "⇧⌘8", note: "what changed since yesterday"),
             AppWindow(title: "Symbols", id: "symbols", icon: "plus.rectangle.on.rectangle", shortcut: "⌥⌘Y", note: "add / hide symbols"),
             AppWindow(title: "Watchlists", id: "watch", icon: "star", shortcut: "", note: ""),
+            AppWindow(title: "Data Storage", id: "storage", icon: "internaldrive", shortcut: "", note: "what the app stores, and how big"),
         ]),
         AppWindowGroup(name: "Market & gainers", icon: "flame", windows: [
             AppWindow(title: "Daily Gainers", id: "gainers", icon: "flame", shortcut: "⇧⌘G", note: "live, with indices and news"),
@@ -45,6 +46,7 @@ enum AppWindows {
             AppWindow(title: "Event Scan", id: "eventscan", icon: "scope", shortcut: "⌥⌘L", note: "days since a condition"),
         ]),
         AppWindowGroup(name: "Tests & evaluations", icon: "testtube.2", windows: [
+            AppWindow(title: "Data Lab", id: "datalab", icon: "flask.fill", shortcut: "⌥⌘B", note: "tomorrow's candle from 1-min / 5-min data"),
             AppWindow(title: "Performance", id: "perf", icon: "chart.line.uptrend.xyaxis", shortcut: "⇧⌘9", note: "returns after an event"),
             AppWindow(title: "Experiments", id: "experiments", icon: "flask", shortcut: "⌥⌘E", note: "compare triggers"),
             AppWindow(title: "Timing Lab", id: "timinglab", icon: "timer", shortcut: "⌥⌘T", note: "buy triggers after a shortlist"),

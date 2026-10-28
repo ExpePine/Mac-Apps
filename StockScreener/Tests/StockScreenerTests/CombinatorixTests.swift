@@ -830,3 +830,61 @@ final class NoteCompleterTests: XCTestCase {
         XCTAssertTrue(p.contains { $0.pieces == ["compact", "count>5"] && $0.notes == 2 })
     }
 }
+
+final class DataLabTests: XCTestCase {
+    func testOHLCVRoundTripAndDays() {
+        var b = OHLCV()
+        let start: Int32 = 1_767_239_100          // 2026-01-01 09:15 IST
+        for d in 0..<2 { for k in 0..<75 { let t = start + Int32(d * 86_400 + k * 300); b.append(t, 100, 101, 99, 100 + Float(k) / 100, 10) } }
+        let back = OHLCV(b.data)!
+        XCTAssertEqual(back.count, 150)
+        XCTAssertEqual(back.c, b.c)
+        let days = back.days()
+        XCTAssertEqual(days.count, 2)
+        XCTAssertEqual(days[0].day, "2026-01-01")
+        XCTAssertEqual(days[0].v, 750)
+        XCTAssertEqual(days[0].c, 100.74, accuracy: 1e-4)
+    }
+
+    func testRidgeRecoversSlope() {
+        var X: [[Double]] = [], y: [Double] = []
+        for i in 0..<500 { let a = Double(i % 17) - 8, b = Double(i % 5) - 2; X.append([a, b]); y.append(0.5 + 2 * a - 3 * b) }
+        let m = LabMath.ridge(X, y, lambda: 0)
+        XCTAssertEqual(m.w[0], 2, accuracy: 1e-6)
+        XCTAssertEqual(m.w[1], -3, accuracy: 1e-6)
+        XCTAssertEqual(m.b0, 0.5, accuracy: 1e-6)
+    }
+
+    /// Synthetic market where tomorrow's close follows today's last 30 minutes: the models should beat naive.
+    func testEngineFindsPlantedSignal() {
+        var rng = SystemRandomNumberGenerator()
+        var samples: [LabSample] = []
+        let start: Int32 = 1_767_239_100
+        for s in 0..<40 {
+            var b = OHLCV()
+            var price: Float = 100
+            var carry: Float = 0
+            for d in 0..<30 {
+                let dayStart = start + Int32(d * 86_400)
+                price *= (1 + carry)                               // tomorrow's move = 0.6 × today's last-30-min move
+                var last30: Float = 0
+                let open = price
+                for k in 0..<75 {
+                    let r = Float.random(in: -0.002...0.002, using: &rng)
+                    let o = price
+                    price *= (1 + r)
+                    if k >= 69 { last30 += r }
+                    b.append(dayStart + Int32(k * 300), o, max(o, price) * 1.0005, min(o, price) * 0.9995, price, 1000)
+                }
+                _ = open
+                carry = 0.6 * last30
+            }
+            samples += LabBuild.samples("S\(s)", m5: b, m1: nil, market: [:])
+        }
+        let res = LabEngine.run(samples, testDays: 6)
+        XCTAssertFalse(res.predictions.isEmpty)
+        let close = res.score.rows.first { $0.target == "Close" }!
+        XCTAssertLessThan(close.mae[2], close.mae[0] * 0.9, "ridge should beat naive on the planted signal")
+        XCTAssertGreaterThan(res.score.dirHit, 0.6)
+    }
+}
