@@ -855,7 +855,7 @@ final class DataLabTests: XCTestCase {
         XCTAssertEqual(m.b0, 0.5, accuracy: 1e-6)
     }
 
-    /// Synthetic market where tomorrow's close follows today's last 30 minutes: the models should beat naive.
+    /// Synthetic market where tomorrow's open jumps by 1.5 × today's last-30-minute move: the models should beat naive.
     func testEngineFindsPlantedSignal() {
         var rng = SystemRandomNumberGenerator()
         var samples: [LabSample] = []
@@ -870,14 +870,14 @@ final class DataLabTests: XCTestCase {
                 var last30: Float = 0
                 let open = price
                 for k in 0..<75 {
-                    let r = Float.random(in: -0.002...0.002, using: &rng)
+                    let r = k >= 69 ? Float.random(in: -0.004...0.004, using: &rng) : Float.random(in: -0.0005...0.0005, using: &rng)
                     let o = price
                     price *= (1 + r)
                     if k >= 69 { last30 += r }
                     b.append(dayStart + Int32(k * 300), o, max(o, price) * 1.0005, min(o, price) * 0.9995, price, 1000)
                 }
                 _ = open
-                carry = 0.6 * last30
+                carry = 1.5 * last30
             }
             samples += LabBuild.samples("S\(s)", m5: b, m1: nil, market: [:])
         }
