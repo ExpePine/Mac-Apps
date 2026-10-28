@@ -58,6 +58,15 @@ struct ChartViewer: View {
                         Text(s).font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         let c = min(vm.settings.chartLinkColumn, vm.chartCount - 1)
+                        if let link = vm.chartSource(symbol, column: c).url?.absoluteString {
+                            Text("Chart \(c + 1): \(link)").font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                                .textSelection(.enabled).frame(maxWidth: 420, alignment: .trailing)
+                                .help(link)
+                            Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(link, forType: .string) } label: { Image(systemName: "doc.on.doc") }
+                                .buttonStyle(.borderless).help("Copy this link")
+                            Button { if let u = URL(string: link) { NSWorkspace.shared.open(u) } } label: { Image(systemName: "safari") }
+                                .buttonStyle(.borderless).help("Open this link in your browser")
+                        }
                         if vm.duplicateChartLayouts(for: symbol)[c] != nil, let id = vm.suggestedLayout(column: c) {
                             Button("Use layout \(id) for every stock in \(vm.chartBook.columns[c])") {
                                 vm.settings.chartLayoutOverride[vm.chartBook.columns[c]] = id
