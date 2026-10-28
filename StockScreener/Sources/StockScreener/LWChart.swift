@@ -616,6 +616,27 @@ enum TVRange {
         """
     }
 
+    /// Centres the chart on `day` (unix s, noon) keeping the current zoom: "ok", "clamped:<centre>" when TradingView
+    /// wouldn't scroll that far (e.g. into the empty space right of the last bar), or "noapi".
+    static func centreBody(_ t: Int) -> String {
+        finder + """
+        var c = __ssChart();
+        if (!c || typeof c.getVisibleRange !== 'function' || typeof c.setVisibleRange !== 'function') return 'noapi';
+        var r = c.getVisibleRange();
+        if (r && typeof r.then === 'function') r = await r;
+        if (!r || r.from == null) return 'norange';
+        var w = Math.max(86400 * 20, r.to - r.from);
+        var p = c.setVisibleRange({from: \(t) - w / 2, to: \(t) + w / 2});
+        if (p && typeof p.then === 'function') await p;
+        await new Promise(function(res){ setTimeout(res, 250); });
+        var n = c.getVisibleRange();
+        if (n && typeof n.then === 'function') n = await n;
+        if (!n || n.from == null) return 'ok';
+        var mid = (n.from + n.to) / 2;
+        return Math.abs(mid - \(t)) <= w * 0.15 ? 'ok' : 'clamped:' + Math.round(mid);
+        """
+    }
+
     /// Runs one of the bodies above in the page and hands back its text result (or the error).
     static func run(_ web: WKWebView, _ body: String, done: @escaping (String) -> Void) {
         web.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { r in

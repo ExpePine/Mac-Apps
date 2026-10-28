@@ -214,7 +214,7 @@ struct ChartViewer: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 guard symbol == sym, vm.chartGoTo == day else { return }
                 if web.view.isLoading && n > 0 { attempt(n - 1); return }
-                ReelPool.helper.goTo(web.view, date: day, tries: 3, native: true)
+                ReelPool.helper.centre(web.view, date: day, tries: 4)
             }
         }
         attempt(8)

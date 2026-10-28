@@ -748,11 +748,61 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         guard steps != 0 || date != nil else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
             guard let self, let webView else { return }
-            if steps != 0 { self.wheel(webView, steps: steps, tries: 4) }
+            // with a date to show, zoom around the right edge so the latest bars stay in view
+            if steps != 0 { self.wheel(webView, steps: steps, tries: 4, anchor: date == nil ? 0.7 : 0.97) }
             if let date {
-                DispatchQueue.main.asyncAfter(deadline: .now() + (steps != 0 ? 1.0 : 0)) { self.goTo(webView, date: date, tries: 3) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + (steps != 0 ? 1.0 : 0)) { self.centre(webView, date: date, tries: 4) }
             }
         }
+    }
+
+    // MARK: Centre on a date
+
+    /// A date within the last few days = the current bar (it can't be reached with Go to date's normal scroll).
+    static func isRecent(_ date: String) -> Bool {
+        guard let t = TVRange.unix(date) else { return false }
+        return Date().timeIntervalSince1970 - Double(t) < 6 * 86_400
+    }
+
+    /// Puts `date` in the middle of the chart, keeping the zoom. 1) TradingView's chart API (exact);
+    /// 2) for the current bar, drag the chart left so the last bar sits in the middle; 3) otherwise Go to date.
+    func centre(_ web: WKWebView, date: String, tries: Int) {
+        guard let t = TVRange.unix(date) else { return }
+        TVRange.run(web, TVRange.centreBody(t + 43_200)) { [weak self, weak web] r in
+            guard let self, let web else { return }
+            if r == "ok" { return }
+            if (r == "noapi" || r == "norange" || r.hasPrefix("jserror")) && tries > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.centre(web, date: date, tries: tries - 1) }
+                return
+            }
+            if Self.isRecent(date) { self.dragLastBarToMiddle(web) }
+            else { self.goTo(web, date: date, tries: 3) }
+        }
+    }
+
+    /// No chart API: scroll to the newest bar (End key), then drag the chart left by about half its width.
+    func dragLastBarToMiddle(_ web: WKWebView) {
+        let js = """
+        (function(){
+          var best=null, area=0;
+          document.querySelectorAll('canvas').forEach(function(c){
+            var r=c.getBoundingClientRect(); var a=r.width*r.height; if(a>area){area=a; best=c;} });
+          if(!best || area < 40000) return 'wait';
+          var r=best.getBoundingClientRect(), y=r.top+r.height*0.5;
+          var x0=r.left+r.width*0.9, x1=r.left+r.width*0.45;
+          function fire(kind, x, target){
+            var o={clientX:x, clientY:y, screenX:x, screenY:y, bubbles:true, cancelable:true, view:window,
+                   button:0, buttons:kind==='up'?0:1, pointerId:1, pointerType:'mouse', isPrimary:true};
+            try { target.dispatchEvent(new PointerEvent('pointer'+kind, o)); } catch(e) {}
+            target.dispatchEvent(new MouseEvent('mouse'+kind, o));
+          }
+          fire('down', x0, best);
+          for (var i=1;i<=12;i++){ var x=x0+(x1-x0)*i/12; fire('move', x, best); fire('move', x, document); }
+          fire('up', x1, best); fire('up', x1, document);
+          return 'ok';
+        })()
+        """
+        web.evaluateJavaScript(js, completionHandler: nil)
     }
 
     // MARK: Go to date
@@ -824,11 +874,11 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
     func goToAgain(slot: Int, date: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(date, forType: .string)
-        for (k, v) in views where slots[k] == slot && v.superview != nil { goTo(v, date: date, tries: 2, native: true) }
+        for (k, v) in views where slots[k] == slot && v.superview != nil { centre(v, date: date, tries: 1) }
     }
 
     /// Turns the mouse wheel `steps` times over the chart (+ = zoom in). Retries while the chart is still drawing.
-    private func wheel(_ web: WKWebView, steps: Int, tries: Int) {
+    private func wheel(_ web: WKWebView, steps: Int, tries: Int, anchor: Double = 0.7) {
         let s = swap ? -steps : steps
         let js = """
         (function(n){
@@ -836,7 +886,7 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
           document.querySelectorAll('canvas').forEach(function(c){
             var r=c.getBoundingClientRect(); var a=r.width*r.height; if(a>area){area=a; best=c;} });
           if(!best || area < 40000) return 'wait';
-          var r=best.getBoundingClientRect(); var x=r.left+r.width*0.7, y=r.top+r.height*0.5;
+          var r=best.getBoundingClientRect(); var x=r.left+r.width*\(anchor), y=r.top+r.height*0.5;
           for(var i=0;i<Math.abs(n);i++){
             best.dispatchEvent(new WheelEvent('wheel',{deltaY:(n>0?-100:100), deltaMode:0, clientX:x, clientY:y, bubbles:true, cancelable:true, view:window}));
           }
@@ -845,7 +895,7 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         """
         web.evaluateJavaScript(js) { [weak self, weak web] result, _ in
             guard let self, let web, (result as? String) == "wait", tries > 0 else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.wheel(web, steps: steps, tries: tries - 1) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.wheel(web, steps: steps, tries: tries - 1, anchor: anchor) }
         }
     }
 
