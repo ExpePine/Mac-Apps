@@ -233,6 +233,75 @@ async function buildMenus() {
   add({ id: "rf-root", title: "ResumeForge: add action", contexts: MENU_CONTEXTS });
   for (const [id, title] of ACTION_PRESETS) add({ id: "rf-act-" + id, parentId: "rf-root", title, contexts: MENU_CONTEXTS });
   add({ id: "rf-act-custom", parentId: "rf-root", title: "Custom action…", contexts: MENU_CONTEXTS });
+  // LinkedIn outreach log (only on linkedin.com)
+  const LI = { contexts: ["page", "selection", "editable", "link"], documentUrlPatterns: ["*://*.linkedin.com/*"] };
+  add({ id: "rf-li-root", title: "ResumeForge: LinkedIn", ...LI });
+  add({ id: "rf-li-sent", parentId: "rf-li-root", title: "Log the message I'm sending (selected or typed text)", ...LI });
+  add({ id: "rf-li-thread", parentId: "rf-li-root", title: "Log this conversation (picks up replies)", ...LI });
+}
+
+// ---------- LinkedIn outreach: log a message you send / a whole conversation ----------
+// Runs inside the LinkedIn tab only when you choose the menu item. LinkedIn changes its page structure often,
+// so several selectors are tried and the visible page text is the fallback.
+function grabLinkedIn() {
+  const pick = (sels) => {
+    for (const s of sels) {
+      const el = document.querySelector(s);
+      if (el && el.innerText && el.innerText.trim().length > 20) return el.innerText;
+    }
+    return "";
+  };
+  const thread = pick([
+    ".msg-overlay-conversation-bubble--is-active", ".msg-convo-wrapper", ".msg-thread",
+    ".msg-s-message-list", "[class*='msg-thread']", "[class*='msg-s-message-list']",
+  ]);
+  const dialog = pick(["[role='dialog']", "[role='alertdialog']"]);
+  const h1 = ((document.querySelector("main h1") || document.querySelector("h1") || {}).innerText || "").trim();
+  let typed = "";
+  const ta = document.querySelector("[role='dialog'] textarea");
+  if (ta && ta.value) typed = ta.value;
+  const active = document.activeElement;
+  if (!typed && active && (active.isContentEditable || active.tagName === "TEXTAREA")) typed = active.value || active.innerText || "";
+  if (!typed) {
+    const box = document.querySelector(".msg-form__contenteditable");
+    if (box) typed = box.innerText || "";
+  }
+  return {
+    h1, typed: typed.trim(), title: document.title,
+    thread: thread.slice(-12000), dialog: dialog.slice(0, 3000),
+    body: thread ? "" : (document.body.innerText || "").slice(0, 8000),
+  };
+}
+
+async function sendLinkedIn(tab, kind, selection) {
+  let g = {};
+  try {
+    const res = await api.scripting.executeScript({ target: { tabId: tab.id }, func: grabLinkedIn });
+    g = (res && res[0] && res[0].result) || {};
+  } catch (_) { /* fall back to what we have */ }
+  const text = (selection || "").trim() || g.typed || "";
+  if (kind === "li-sent" && !text) {
+    flash("?", COLORS.err, "Select your message text first (or right-click inside the message box before sending).", 2500);
+    return;
+  }
+  const parts = [];
+  if (g.h1) parts.push("NAME ON PAGE:\n" + g.h1);
+  if (g.dialog) parts.push("DIALOG:\n" + g.dialog);
+  if (g.thread) parts.push("THREAD:\n" + g.thread);
+  if (g.body) parts.push("PAGE:\n" + g.body);
+  const payload = {
+    kind, text: "", selection: kind === "li-sent" ? text : "",
+    pageURL: tab.url || "", pageTitle: g.title || tab.title || "",
+    pageText: parts.join("\n\n").slice(0, 12000), job: null,
+  };
+  try {
+    const reply = await api.runtime.sendNativeMessage(NATIVE_APP_ID, { action: "saveAction", payload });
+    if (!reply || !reply.ok) throw new Error((reply && reply.error) || "No reply from ResumeForge");
+    flash("✓", COLORS.ok, kind === "li-sent" ? "Message logged in ResumeForge → Outreach" : "Conversation sent to ResumeForge → Outreach", 1400);
+  } catch (e) {
+    await api.storage.local.set({ lastError: String((e && e.message) || e), lastErrorAt: Date.now() });
+    await setBadge("ERR", COLORS.err, "Couldn't log to ResumeForge — see the status page.");
+  }
 }
 
 async function sendAction(tab, kind, text, selection) {
@@ -272,6 +341,10 @@ async function sendAction(tab, kind, text, selection) {
 if (menus && menus.onClicked) {
   menus.onClicked.addListener(async (info, tab) => {
     const id = String(info.menuItemId || "");
+    if ((id === "rf-li-sent" || id === "rf-li-thread") && tab) {
+      await sendLinkedIn(tab, id.slice(3), info.selectionText || "");
+      return;
+    }
     if (!id.startsWith("rf-act-") || !tab) return;
     const kind = id.slice(7);
     if (kind === "custom") {

@@ -53,6 +53,8 @@ struct ConnectionsView: View {
                         ForEach(filtered) { c in ContactRow(contact: c).tag(c.id) }
                     }
                 }
+                .onAppear { if let s = store.selectedContactID { selected = s; store.selectedContactID = nil } }
+                .onChange(of: store.selectedContactID) { v in if let v { selected = v; store.selectedContactID = nil } }
                 .searchable(text: $search, placement: .sidebar, prompt: "Search people")
                 .overlay {
                     if store.contacts.isEmpty {
@@ -206,6 +208,7 @@ struct ContactDetail: View {
     @State private var goal = ""
     @State private var drafting = false
     @State private var newNote = ""
+    @State private var newLogMode = "note"
     @State private var copiedID: String?
 
     private var c: Contact { store.contactIndex(id).map { store.contacts[$0] } ?? Contact() }
@@ -372,13 +375,30 @@ struct ContactDetail: View {
                     if it.fromMe { Spacer(minLength: 0) }
                 }
                 .contextMenu {
+                    if AppStore.isTracked(it) {
+                        Menu("Outcome") {
+                            Button("Work it out automatically") { store.setOutcome(contactID: id, msgID: it.id, nil) }
+                            Divider()
+                            ForEach(OutreachOutcome.allCases) { o in Button(o.label) { store.setOutcome(contactID: id, msgID: it.id, o) } }
+                        }
+                        Menu("Type") {
+                            ForEach(OutreachKind.allCases) { k in Button(k.label) { store.setMessageField(contactID: id, msgID: it.id, kind: k.rawValue) } }
+                        }
+                    }
                     Button("Delete", role: .destructive) {
                         if let i = store.contactIndex(id) { store.data.contacts?[i].interactions.removeAll { $0.id == it.id } }
                     }
                 }
             }
             HStack {
-                TextField("Log something manually (e.g. 'Spoke on call, will refer next week')", text: $newNote)
+                Picker("", selection: $newLogMode) {
+                    Text("Note to self").tag("note")
+                    Text("Message I sent").tag("sent")
+                    Text("Their reply").tag("reply")
+                }
+                .labelsHidden().frame(width: 140)
+                TextField(newLogMode == "note" ? "e.g. 'Spoke on call, will refer next week'" : newLogMode == "sent" ? "Paste the message you sent" : "Paste what they wrote (or leave short, e.g. 'replied')", text: $newNote, axis: .vertical)
+                    .lineLimit(1...4)
                     .onSubmit(addLog)
                 Button("Add", action: addLog).disabled(newNote.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -388,7 +408,14 @@ struct ContactDetail: View {
     private func caption(_ it: Interaction) -> String {
         let who: String = it.fromMe ? "Me" : (c.name.split(separator: " ").first.map(String.init) ?? "Them")
         let when: String = it.dateText.isEmpty ? it.date.formatted(date: .abbreviated, time: .omitted) : it.dateText
-        return "\(who) · \(when) · \(it.source)"
+        var bits = ["\(who)", when]
+        if AppStore.isTracked(it) {
+            if let k = it.kind.flatMap(OutreachKind.init(rawValue:)) { bits.append(k.label) }
+            if let r = store.sentRecords.first(where: { $0.id == it.id }) { bits.append(r.outcome.label + (r.automatic ? "" : " ✓")) }
+        } else {
+            bits.append(it.source)
+        }
+        return bits.joined(separator: " · ")
     }
 
     private func addLog() {
@@ -396,79 +423,13 @@ struct ContactDetail: View {
         guard !t.isEmpty, let i = store.contactIndex(id) else { return }
         var it = Interaction()
         it.text = t
-        it.source = "manual"
+        it.source = newLogMode == "sent" ? "manual-sent" : "manual"
+        if newLogMode == "sent" { it.kind = c.interactions.contains(where: AppStore.isTracked) ? "message" : "note" }
+        if newLogMode == "reply" {
+            it.fromMe = false
+            if AppStore.statusRank(c.status) < 4 { store.data.contacts?[i].status = "replied" }
+        }
         store.data.contacts?[i].interactions.append(it)
         newNote = ""
-    }
-}
-
-struct PasteConversationSheet: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) private var dismiss
-    var onDone: (UUID) -> Void
-    @State private var text = ""
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Paste a LinkedIn conversation").font(.title2.bold())
-            Text("Copy the messages from LinkedIn and paste them here. The app works out who it's with and saves it to their history.")
-                .font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $text).frame(minHeight: 260).overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    let t = text
-                    store.run("Reading the conversation…") {
-                        if let id = try await store.importConversation(image: nil, text: t) { onDone(id) }
-                    }
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).count < 20)
-            }
-        }
-        .padding(20)
-        .frame(width: 600)
-    }
-}
-
-// MARK: - Settings ▸ Networking
-
-struct NetworkingSettings: View {
-    @AppStorage("findPeopleOnApply") private var onApply = true
-    @AppStorage("peoplePerCompany") private var perCompany = 8
-    @AppStorage("searchDailyCap") private var cap = 30
-    @State private var keys: [SearchProvider: String] = [:]
-    @State private var status = ""
-
-    var body: some View {
-        Form {
-            Section {
-                ForEach(SearchProvider.allCases) { p in
-                    HStack {
-                        SecureField(p.title, text: Binding(get: { keys[p] ?? "" }, set: { keys[p] = $0 }), prompt: Text("API key"))
-                        Button("Save") {
-                            Keychain.save(keys[p] ?? "", account: p.account)
-                            status = "\(p.title) key saved."
-                        }
-                        if let u = URL(string: p.keyURL) { Link("Get key", destination: u) }
-                    }
-                }
-                if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
-            } header: {
-                Text("People search (Google results)")
-            } footer: {
-                Text("Serper returns Google results and handles the site:linkedin.com searches best (free: 2,500 searches, one-time). Tavily is the fallback (free: 1,000 a month). Each \"find people\" uses up to 3 searches. If your Serper key has been visible on a web page, create a new one for the app.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("When I apply") {
-                Toggle("Find key people at the company automatically", isOn: $onApply)
-                Stepper("Keep the top \(perCompany) people per company", value: $perCompany, in: 3...20)
-                Stepper("At most \(cap) searches a day (used today: \(WebSearch.usedToday))", value: $cap, in: 3...200, step: 3)
-            }
-        }
-        .formStyle(.grouped)
-        .onAppear { for p in SearchProvider.allCases { keys[p] = p.key } }
     }
 }

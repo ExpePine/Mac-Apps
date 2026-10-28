@@ -77,6 +77,32 @@ The app never sends messages for you. It opens the right place, and you send.
 
 Free LinkedIn accounts get only a few personalised notes a month. When you run out, connect without a note and send the "after they accept" message.
 
+## Outreach (learn which LinkedIn messages work)
+
+Every note and message you send is logged together with what happened next. The **Outreach** tab has three views: Messages, What works and Coach.
+
+**Ways to log a message:**
+- In Connections, **Copy & connect** / **Copy & open** on a draft. The type, purpose and angle are saved with it.
+- In Safari, on LinkedIn: right-click → **ResumeForge: LinkedIn → Log the message I'm sending**. This uses the text you've selected, or the text still in the message box.
+- **Log this conversation** reads the open chat, so replies are picked up automatically.
+- In the app, **Log copied message** / **Log a message**, or drop a screenshot into Connections.
+
+**How outcomes are worked out:**
+- A reply from them after your message means *Replied*.
+- An accepted invitation means *Accepted*.
+- No answer after 14 days means *No response*.
+- You can override any outcome yourself.
+
+**What works:** acceptance and reply rates, split by type, purpose, who you wrote to, angle, length, question, company mention, numbers, day and tone. There is also a 12-week chart. Groups smaller than 5 are greyed out.
+
+**Coach:**
+- With 5 or more messages that have an outcome, the coach writes your playbook: what's working, what isn't, rules, A/B tests and templates.
+- The rules, and your notes that were accepted or answered, are given to the draft writer, so new drafts follow your own results.
+- **Check a message** scores a draft before you send it.
+- Names and companies are replaced with placeholders before anything goes to the AI.
+
+The app never sends anything on LinkedIn for you.
+
 ## Templates (copy a CV design from a screenshot)
 
 Go to **Templates** in the sidebar and drop a screenshot of a CV you like. The AI reads the design (fonts, sizes, colours, heading style, single or two-column, section order) and saves it as a template. Fine-tune it in the editor, which shows a live preview. Pick a template on any resume, or set a default under **Settings ▸ Processing**. It approximates the design: photos, icons and charts aren't reproduced.

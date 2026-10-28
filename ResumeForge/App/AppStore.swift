@@ -7,6 +7,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case jobs = "Jobs"
     case actions = "Actions"
     case connections = "Connections"
+    case outreach = "Outreach"
     case saved = "Saved JDs"
     case lines = "Lines"
     case stories = "Stories"
@@ -22,6 +23,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         case .jobs: return "briefcase"
         case .actions: return "checklist"
         case .connections: return "person.2.wave.2"
+        case .outreach: return "paperplane"
         case .saved: return "heart"
         case .lines: return "text.quote"
         case .stories: return "book"
@@ -63,6 +65,8 @@ final class AppStore: ObservableObject {
     @Published var feedChecksDone = 0
     @Published var peopleSearchStatus: String?
     @Published var linesStatus: String?
+    @Published var outreachStatus: String?
+    @Published var selectedContactID: UUID?
     @Published var sheetsStatus: String?
     var sheetsLast: Date?
     var feedCheckTimer: Timer?
@@ -161,7 +165,11 @@ final class AppStore: ObservableObject {
                 errorMessage = "Couldn't read the action sent from Safari."
                 return
             }
-            ingestAction(a)
+            switch a.kind {
+            case "li-sent": Task { await self.logSentFromSafari(a) }
+            case "li-thread": Task { await self.logThreadFromSafari(a) }
+            default: ingestAction(a)
+            }
             return
         }
         guard let c = SharedConfig.decodeImportURL(url) else {

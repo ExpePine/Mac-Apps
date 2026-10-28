@@ -195,4 +195,5 @@ struct AppData: Codable {
     var commentary: Commentary?
     var contacts: [Contact]?
     var lines: [LineItem]?
+    var outreachPlaybook: OutreachPlaybook?
 }

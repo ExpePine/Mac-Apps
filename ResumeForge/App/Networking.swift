@@ -33,7 +33,15 @@ struct Interaction: Codable, Identifiable, Hashable {
     var fromMe = true
     var channel = "linkedin"
     var text = ""
-    var source = "manual"           // screenshot | pasted | draft | manual
+    var source = "manual"           // screenshot | pasted | draft | safari | manual
+    // Outreach tracking (messages you sent). Optional so older saved data still loads.
+    var kind: String?               // note | message | inmail | followUp
+    var intent: String?             // ConnectionType raw value
+    var tone: String?
+    var angle: String?              // the draft's angle, e.g. "shared domain" — used to learn what works
+    var outcome: String?            // set by you; nil = worked out automatically
+    var outcomeAt: Date?
+    var jobID: UUID?
 }
 
 struct MessageDraft: Codable, Identifiable, Hashable {
@@ -43,6 +51,7 @@ struct MessageDraft: Codable, Identifiable, Hashable {
     var notes: [String] = []        // connection-request notes (≤ 200 characters)
     var followUps: [String] = []    // messages to send after they accept
     var tip = ""
+    var angles: [String]?           // one short label per note, same order
     var at = Date()
 }
 
@@ -247,7 +256,7 @@ extension Prompts {
 
     static func connectionMessages(contactName: String, contactHeadline: String, category: String,
                                    jobTitle: String, company: String, type: String, tone: String, goal: String,
-                                   history: String, myHeadline: String, myHighlights: String) -> String {
+                                   history: String, myHeadline: String, myHighlights: String, learned: String = "") -> String {
         """
         TASK: Write LinkedIn messages from the candidate to \(contactName) (\(contactHeadline); \(category)) about the \
         "\(jobTitle)" role at \(company).
@@ -259,8 +268,9 @@ extension Prompts {
         CANDIDATE'S RELEVANT HIGHLIGHTS (true facts — use at most one per message):
         \(myHighlights)
         \(history.isEmpty ? "" : "PREVIOUS MESSAGES WITH THIS PERSON:\n\(history)")
-
-        Return: {"notes": ["3 different connection-request notes, each 200 characters or fewer"],
+        \(learned.isEmpty ? "" : "WHAT HAS WORKED FOR THIS CANDIDATE BEFORE (from their own sent messages and who answered — follow it, don't copy word for word):\n\(learned)\n")
+        Return: {"notes": ["3 different connection-request notes, each 200 characters or fewer, each with a DIFFERENT angle"],
+                 "angles": ["2–4 word label of each note's angle, same order, e.g. 'shared domain', 'question about team', 'applied – direct'"],
                  "followUps": ["2 messages to send after they accept, 350–600 characters"],
                  "tip": "one practical tip for this person/type, max 20 words"}
 
@@ -278,11 +288,11 @@ extension Prompts {
         Extract who it is with and the messages, so the candidate can remember how they networked.
 
         Return: {"person": "the other person's full name", "headline": "their headline/title if visible", "company": "",
-                 "messages": [{"fromMe": true, "date": "YYYY-MM-DD if visible, else the visible text like 'Tue' or ''", "text": "the message"}],
+                 "messages": [{"fromMe": true, "date": "YYYY-MM-DD if visible, else the visible text like 'Tue' or ''", "text": "the message", "kind": "note|message|inmail"}],
                  "status": "requested|connected|replied|meeting|none", "summary": "one line: what happened and what's next"}
 
         RULES: Copy message text exactly as shown. 'fromMe' is true for messages the account owner sent (usually on the right / \
-        labelled with their name or 'You'). status: requested = invitation pending; connected = accepted, no real reply yet; \
+        labelled with their name or 'You'). kind: note = the note sent with an invitation; inmail = InMail; otherwise message. status: requested = invitation pending; connected = accepted, no real reply yet; \
         replied = they wrote back; meeting = a call/meeting was agreed.
         """
     }
@@ -420,7 +430,8 @@ extension AppStore {
             Prompts.connectionMessages(contactName: c.name, contactHeadline: c.headline,
                                        category: ContactCategory(rawValue: c.category)?.label ?? c.category,
                                        jobTitle: job?.title ?? "a role", company: c.company, type: type.label, tone: tone, goal: goal,
-                                       history: history, myHeadline: headline, myHighlights: highlights.isEmpty ? "(none recorded)" : highlights)
+                                       history: history, myHeadline: headline, myHighlights: highlights.isEmpty ? "(none recorded)" : highlights,
+                                       learned: learnedBlock(category: c.category, intent: type.rawValue))
         }
         var d = MessageDraft()
         d.type = type.label
@@ -428,6 +439,8 @@ extension AppStore {
         d.notes = J.strings(o, "notes").map { Self.fit($0, 200) }
         d.followUps = J.strings(o, "followUps")
         d.tip = J.str(o, "tip")
+        let ang = J.strings(o, "angles")
+        d.angles = ang.isEmpty ? nil : ang
         guard let k = contactIndex(contactID) else { return }
         data.contacts?[k].drafts.insert(d, at: 0)
         data.contacts?[k].updatedAt = Date()
@@ -441,17 +454,27 @@ extension AppStore {
         return cut.trimmingCharacters(in: CharacterSet(charactersIn: " ,;—-")) + (cut.hasSuffix(".") ? "" : ".")
     }
 
-    /// Copies the message, opens their profile, and logs it as sent.
+    /// Copies the message, opens their profile, and logs it as sent (with its type, purpose and angle, so the app can learn what works).
     func useMessage(_ text: String, contactID: UUID, isNote: Bool) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         guard let i = contactIndex(contactID) else { return }
-        if let url = URL(string: contacts[i].linkedinURL) { NSWorkspace.shared.open(url) }
+        let c = contacts[i]
+        if let url = URL(string: c.linkedinURL) { NSWorkspace.shared.open(url) }
+        // Already logged (pressed twice)? Don't count it again.
+        if c.interactions.contains(where: { $0.fromMe && Self.norm($0.text) == Self.norm(text) }) { return }
         var it = Interaction()
         it.text = text
         it.source = "draft"
+        it.kind = isNote ? "note" : "message"
+        if let d = c.drafts.first(where: { $0.notes.contains(text) || $0.followUps.contains(text) }) {
+            it.intent = ConnectionType.allCases.first { $0.label == d.type }?.rawValue
+            it.tone = d.tone
+            if let k = d.notes.firstIndex(of: text), let a = d.angles, a.indices.contains(k) { it.angle = a[k] }
+        }
+        it.jobID = c.jobIDs.first
         data.contacts?[i].interactions.append(it)
-        if isNote, contacts[i].status == "suggested" { data.contacts?[i].status = "requested" }
+        if isNote, c.status == "suggested" { data.contacts?[i].status = "requested" }
         data.contacts?[i].updatedAt = Date()
     }
 
@@ -465,14 +488,16 @@ extension AppStore {
 
     /// Reads a LinkedIn screenshot (or pasted text), finds or creates the person, and adds the messages to their history.
     @discardableResult
-    func importConversation(image: Data?, text: String?) async throws -> UUID? {
+    func importConversation(image: Data?, text: String?, source: String? = nil) async throws -> UUID? {
         var o: [String: Any]
+        let owner = data.profile.name.isEmpty ? "" : " The account owner is \(data.profile.name); their messages are fromMe."
         if let image {
             guard let img = AIClient.preparedImage(image, maxSide: 1800) else { throw GroqError(message: "Couldn't read that image.") }
-            o = try await ask(output: 1500, temperature: 0.1, images: [img]) { _ in Prompts.readConversation() }
+            o = try await ask(output: 1500, temperature: 0.1, images: [img]) { _ in Prompts.readConversation() + owner }
         } else if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             o = try await ask(output: 1500, temperature: 0.1) { budget in
                 Prompts.readConversation().replacingOccurrences(of: "The image is a screenshot of", with: "The text below is a copy of")
+                    + owner + " If the text shows a list of several conversations plus one open thread, use only the open thread."
                     + "\n\nTEXT:\n" + Prompts.clip(text, max(2000, budget - 2000))
             }
         } else { return nil }
@@ -486,8 +511,13 @@ extension AppStore {
             it.text = t
             it.fromMe = m["fromMe"] as? Bool ?? (J.str(m, "fromMe") == "true")
             it.dateText = J.str(m, "date")
-            if let d = Self.parseDue(it.dateText) { it.date = d }
-            it.source = image != nil ? "screenshot" : "pasted"
+            // Dates in a conversation are in the past ("Tue" = last Tuesday, not next).
+            if var d = Self.parseDue(it.dateText) {
+                if d > Date() { d = Calendar.current.date(byAdding: .day, value: -7, to: d) ?? d }
+                if d <= Date() { it.date = d }
+            }
+            it.source = source ?? (image != nil ? "screenshot" : "pasted")
+            if it.fromMe { let k = J.str(m, "kind"); it.kind = ["note", "message", "inmail"].contains(k) ? k : nil }
             return it
         }
         var list = data.contacts ?? []
