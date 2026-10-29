@@ -444,7 +444,7 @@ enum CrossStudy {
             let x = s.metric(value: true)
             let hi = highestSMA(x, n: p.hiSma, length: p.hiLength)
             let t3 = p.t3.t3(p.t3.source(s))
-            guard let first = zip(t3, hi).firstIndex(where: { $0 != nil && $1 != nil }) else { return nil }
+            guard let first = t3.indices.first(where: { t3[$0] != nil && hi[$0] != nil }) else { return nil }
             var hits = crossovers(t3: t3, hi: hi)
             if p.needFast || p.needSlow {
                 guard let ps = prices[sym] else { return nil }
