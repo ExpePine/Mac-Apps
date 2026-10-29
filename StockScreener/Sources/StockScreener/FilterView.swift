@@ -124,6 +124,7 @@ struct FilterView: View {
         .hidingSystemSidebarToggle()
         .onAppear {
             visibility = conditionsVisible ? .all : .detailOnly
+            ColumnMenuView.openReel = { openWindow(id: "reel") }
             flashedDay = nil
             flashIfNewDay()
             refreshDayChange()

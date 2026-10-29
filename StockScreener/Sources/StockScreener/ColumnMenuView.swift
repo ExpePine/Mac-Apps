@@ -15,8 +15,11 @@ struct ColumnMenuView: View {
         d.set(true, forKey: "reel.alsoFilter")
         d.set(centre, forKey: "reel.centre")
         d.set(UUID().uuidString + "|", forKey: "reel.jump")
-        openWindow(id: "reel")
+        if let o = ColumnMenuView.openReel { o() } else { openWindow(id: "reel") }
     }
+
+    /// Set by the Filter window: this panel lives in an AppKit popover, where SwiftUI's openWindow may not reach the app.
+    @MainActor static var openReel: (() -> Void)?
 
     private var name: String { column < vm.headers.count ? vm.headers[column] : "" }
 
