@@ -4,7 +4,19 @@ import SwiftUI
 /// sort on the fly, the advanced conditions for this column, and its cell colors.
 struct ColumnMenuView: View {
     @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
     let column: Int
+
+    /// Chart Reel of this column's stocks, each chart centred on its own day.
+    private func reel(_ centre: String) {
+        let d = UserDefaults.standard
+        d.set(ReelSource.column.rawValue, forKey: "reel.source")
+        d.set(name, forKey: "reel.column"); d.set("has a value", forKey: "reel.op"); d.set("", forKey: "reel.value")
+        d.set(true, forKey: "reel.alsoFilter")
+        d.set(centre, forKey: "reel.centre")
+        d.set(UUID().uuidString + "|", forKey: "reel.jump")
+        openWindow(id: "reel")
+    }
 
     private var name: String { column < vm.headers.count ? vm.headers[column] : "" }
 
@@ -20,6 +32,15 @@ struct ColumnMenuView: View {
                 sortButton(descending: false)
                 sortButton(descending: true)
             }
+
+            HStack(spacing: 8) {
+                Image(systemName: "film.stack").foregroundStyle(.secondary)
+                Button("Charts: value = days ago (0 → n)") { reel("days") }
+                    .help("Chart Reel of this Filter's stocks with a value in \(name), sorted 0 → n, each centred \(name) trading days back")
+                Button("Charts: since it started") { reel("since") }
+                    .help("Chart Reel centred on the day each stock's \(name) value began (from the stored daily snapshots)")
+            }
+            .controlSize(.small)
 
             Divider()
 

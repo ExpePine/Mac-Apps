@@ -24,6 +24,12 @@ struct ChartReelView: View {
     @AppStorage("reel.op") private var op = "="
     @AppStorage("reel.value") private var value = "1"
     @AppStorage("reel.alsoFilter") private var alsoFilter = false
+    /// Column source: where each chart is centred — "" = latest bar, "days" = the value is days ago (0 = data day),
+    /// "since" = the day the stock's row started matching (consecutive stored days, newest back).
+    @AppStorage("reel.centre") private var centreMode = ""
+    @State private var since: [String: (days: Int, day: String)] = [:]
+    @State private var sinceKey = ""
+    @State private var sinceStatus: String?
     @AppStorage("reel.layout") private var layout = ReelLayout.chart1.rawValue
     @AppStorage("reel.preload") private var preload = true
     @AppStorage("reel.seconds") private var seconds = 3.0
@@ -70,6 +76,21 @@ struct ChartReelView: View {
             guard let pred = columnPredicate else { return [] }
             let ci = vm.table.index(of: column)
             out = rows.filter(pred).map { r in ReelItem(symbol: sym(r), note: ci.map { "\(column) \(r.text($0))" } ?? "", row: r) }
+            if centreMode == "days", let ci {
+                let cal = ColumnCentre.calendar(vm)
+                let end = cal.lastIndex(where: { $0 <= vm.displayedDayKey }) ?? cal.count - 1
+                out = out.compactMap { it -> (Int, ReelItem)? in
+                    guard let r = it.row, let v = r.number(ci), v >= 0, end >= 0 else { return nil }
+                    let n = Int(v.rounded())
+                    let day = end - n >= 0 ? cal[end - n] : nil
+                    return (n, ReelItem(symbol: it.symbol, note: "\(column) = \(n) → \(day ?? "before the calendar")", row: r, goTo: day, key: it.symbol))
+                }.sorted { ($0.0, $0.1.symbol) < ($1.0, $1.1.symbol) }.map(\.1)
+            } else if centreMode == "since" {
+                out = out.compactMap { it -> (Int, ReelItem)? in
+                    guard let d = since[it.symbol] else { return nil }
+                    return (d.days, ReelItem(symbol: it.symbol, note: "\(column) \(op) \(value) for \(d.days) day\(d.days == 1 ? "" : "s") · since \(d.day)", row: it.row, goTo: d.day, key: it.symbol))
+                }.sorted { ($0.0, $0.1.symbol) < ($1.0, $1.1.symbol) }.map(\.1)
+            }
         case .all:
             out = vm.table.rows.map { ReelItem(symbol: sym($0), note: "", row: $0) }
         case .scan:
@@ -334,7 +355,34 @@ struct ChartReelView: View {
                 .menuStyle(.borderlessButton).fixedSize().help("Values in this column")
             }
             Toggle("and my Filter", isOn: $alsoFilter).toggleStyle(.checkbox)
+            Picker("", selection: $centreMode) {
+                Text("Centre: latest bar").tag("")
+                Text("Centre: value = days ago").tag("days")
+                Text("Centre: day it started").tag("since")
+            }
+            .labelsHidden().fixedSize()
+            .help("Value = days ago: a column like D_Trigger = 3 centres the chart 3 trading days back (0 = the data day), sorted 0 → n. Day it started: how many stored days in a row the row has matched, centred on the first of them.")
+            if centreMode == "since", let st = sinceStatus { Text(st).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
         }
+        .task(id: "\(centreMode)|\(column)|\(op)|\(value)|\(alsoFilter)|\(vm.filterVersion)") { await computeSince() }
+    }
+
+    /// For "day it started": walks back through the stored daily snapshots while each stock keeps matching.
+    private func computeSince() async {
+        guard centreMode == "since", ReelSource(rawValue: source) == .column, let pred = columnPredicate, let label = vm.labelIndex else { return }
+        let key = "\(column)|\(op)|\(value)|\(vm.displayedDayKey)"
+        guard key != sinceKey else { return }
+        sinceStatus = "Checking stored days…"
+        let rows = alsoFilter ? vm.filterRows : vm.table.rows
+        let current = vm.table, today = vm.displayedDayKey
+        let start = Set(rows.filter(pred).map { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() })
+        let ops: [String: RuleOperator] = ["=": .equals, "≠": .notEquals, ">": .greaterThan, "≥": .greaterOrEqual, "<": .lessThan, "≤": .lessOrEqual, "contains": .contains, "has a value": .hasValue]
+        let cond = FilterCondition(column: column, op: ops[op] ?? .equals, value: value)
+        let res = await Task.detached(priority: .userInitiated) { ColumnCentre.since(start: start, today: today, condition: cond, current: current, label: label) }.value
+        since = res.map; sinceKey = key
+        sinceStatus = "\(res.map.count) stocks · looked back \(res.looked) stored day\(res.looked == 1 ? "" : "s")"
+        refresh += 1
+        restart()
     }
 
     private var distinctValues: [String] {
@@ -610,6 +658,37 @@ struct ChartReelView: View {
 enum ReelSource: String, CaseIterable, Identifiable {
     case gainers = "Daily gainers", column = "Column filter", filter = "My Filter", all = "All stocks", multibaggers = "Multibaggers", scan = "Event scan"
     var id: String { rawValue }
+}
+
+/// Helpers for centring Chart Reel charts on a day taken from a Filter column.
+enum ColumnCentre {
+    /// NSE trading days: the delivery calendar, else NIFTY's Yahoo days.
+    @MainActor static func calendar(_ vm: ScreenerViewModel) -> [String] {
+        let c = DeliveryCenter.shared.calendar
+        if !c.isEmpty { return c }
+        return vm.priceBook.series(for: ScreenerViewModel.benchmarkSymbol)?.days ?? []
+    }
+
+    /// For each stock in `start` (matching on `today`): consecutive stored days back it kept matching, and the first of them.
+    static func since(start: Set<String>, today: String, condition: FilterCondition, current: SheetTable, label: Int,
+                      maxDays: Int = 400) -> (map: [String: (days: Int, day: String)], looked: Int) {
+        var running = start
+        var out: [String: (days: Int, day: String)] = [:]
+        for s in start { out[s] = (0, today) }
+        var looked = 0
+        for d in HistoryStore.days().filter({ $0 < today }).reversed().prefix(maxDays) {
+            guard !running.isEmpty, let data = HistoryStore.load(d), let t = ScreenerViewModel.align(data, to: current) else { continue }
+            looked += 1
+            var issues: [String] = []
+            guard let pred = FilterCompiler.compile(condition, table: t, issues: &issues) else { break }
+            var match = Set<String>()
+            for r in t.rows where pred(r) { match.insert(r.text(label).trimmingCharacters(in: .whitespaces).uppercased()) }
+            for s in running {
+                if match.contains(s), let o = out[s] { out[s] = (o.days + 1, d) } else { running.remove(s) }
+            }
+        }
+        return (out, looked)
+    }
 }
 
 enum ReelLayout: String, CaseIterable, Identifiable {

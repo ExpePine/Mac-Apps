@@ -17,8 +17,9 @@ struct FilterView: View {
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
-    private func openReel(_ source: ReelSource, value: String? = nil, column: String? = nil, op: String = "=", sequence: Bool = false) {
+    private func openReel(_ source: ReelSource, value: String? = nil, column: String? = nil, op: String = "=", sequence: Bool = false, centre: String = "") {
         let d = UserDefaults.standard
+        d.set(centre, forKey: "reel.centre")
         d.set(source.rawValue, forKey: "reel.source")
         if let value {
             d.set(column ?? vm.settings.triggerColumn, forKey: "reel.column")
@@ -179,6 +180,18 @@ struct FilterView: View {
                             }
                         }
                         Button("Any column / value… (set it in the reel)") { openReel(.column, value: "1", sequence: true) }
+                    }
+                    Section("Centred on each stock's own day") {
+                        Menu("Column value = days ago (0 → n)…") {
+                            ForEach(vm.filterColumnIndices.map { vm.headers[$0] }, id: \.self) { h in
+                                Button(h) { openReel(.column, value: "", column: h, op: "has a value", centre: "days") }
+                            }
+                        }
+                        Menu("Since the column got its value…") {
+                            ForEach(vm.filterColumnIndices.map { vm.headers[$0] }, id: \.self) { h in
+                                Button(h) { openReel(.column, value: "", column: h, op: "has a value", centre: "since") }
+                            }
+                        }
                     }
                 } label: {
                     Label("Chart Reel", systemImage: "film.stack")
