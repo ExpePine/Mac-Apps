@@ -32,12 +32,6 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("2", modifiers: [.command, .shift])
 
-        Window("Neural Net", id: "nn") {
-            NeuralNetView()
-                .environmentObject(vm)
-                .frame(minWidth: 980, minHeight: 600)
-        }
-        .keyboardShortcut("4", modifiers: [.command, .shift])
 
         Window("Watchlists", id: "watch") {
             WatchlistView()
@@ -101,12 +95,6 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("p", modifiers: [.command, .option])
 
-        Window("Combinatorix", id: "combi") {
-            CombinatorixView()
-                .environmentObject(vm)
-                .frame(minWidth: 1100, minHeight: 640)
-        }
-        .keyboardShortcut("x", modifiers: [.command, .option])
 
         Window("Chart Reel", id: "reel") {
             ChartReelView()
@@ -115,12 +103,6 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("r", modifiers: [.command, .option])
 
-        Window("Data Lab", id: "datalab") {
-            DataLabView()
-                .environmentObject(vm)
-                .frame(minWidth: 1050, minHeight: 620)
-        }
-        .keyboardShortcut("b", modifiers: [.command, .option])
 
         Window("Data Storage", id: "storage") {
             StorageView()
@@ -162,12 +144,6 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("l", modifiers: [.command, .option])
 
-        Window("Timing Lab", id: "timinglab") {
-            TimingLabView()
-                .environmentObject(vm)
-                .frame(minWidth: 1100, minHeight: 640)
-        }
-        .keyboardShortcut("t", modifiers: [.command, .option])
 
         Window("News & Deals", id: "newschart") {
             NewsChartView()
@@ -176,12 +152,6 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("n", modifiers: [.command, .option])
 
-        Window("AUTO-PREDICT", id: "autopredict") {
-            AutoPredictView()
-                .environmentObject(vm)
-                .frame(minWidth: 1000, minHeight: 620)
-        }
-        .keyboardShortcut("a", modifiers: [.command, .option])
 
         Window("Gainer Charts", id: "gainerCharts") {
             GainerChartsView()
@@ -204,12 +174,6 @@ struct StockScreenerApp: App {
         }
         .keyboardShortcut("m", modifiers: [.command, .option])
 
-        Window("Experiments", id: "experiments") {
-            ExperimentsView()
-                .environmentObject(vm)
-                .frame(minWidth: 1050, minHeight: 650)
-        }
-        .keyboardShortcut("e", modifiers: [.command, .option])
 
         Window("Symbols", id: "symbols") {
             SymbolsView()

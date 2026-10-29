@@ -831,60 +831,27 @@ final class NoteCompleterTests: XCTestCase {
     }
 }
 
-final class DataLabTests: XCTestCase {
-    func testOHLCVRoundTripAndDays() {
-        var b = OHLCV()
-        let start: Int32 = 1_767_239_100          // 2026-01-01 09:15 IST
-        for d in 0..<2 { for k in 0..<75 { let t = start + Int32(d * 86_400 + k * 300); b.append(t, 100, 101, 99, 100 + Float(k) / 100, 10) } }
-        let back = OHLCV(b.data)!
-        XCTAssertEqual(back.count, 150)
-        XCTAssertEqual(back.c, b.c)
-        let days = back.days()
-        XCTAssertEqual(days.count, 2)
-        XCTAssertEqual(days[0].day, "2026-01-01")
-        XCTAssertEqual(days[0].v, 750)
-        XCTAssertEqual(days[0].c, 100.74, accuracy: 1e-4)
+final class BarsSinceStudyTests: XCTestCase {
+    func testHitsMatchPercentRank100() {
+        var v: [Double] = []
+        for i in 0..<400 { v.append(Double((i * 37) % 101) + (i % 50 == 0 ? 500 : 0)) }
+        let fast = BarsSinceStudy.hits(v, length: 30)
+        let slow = (30..<v.count).filter { DeliveryColumns.percentRank(v, length: 30, at: $0) == 100 }
+        XCTAssertEqual(fast, slow)
     }
 
-    func testRidgeRecoversSlope() {
-        var X: [[Double]] = [], y: [Double] = []
-        for i in 0..<500 { let a = Double(i % 17) - 8, b = Double(i % 5) - 2; X.append([a, b]); y.append(0.5 + 2 * a - 3 * b) }
-        let m = LabMath.ridge(X, y, lambda: 0)
-        XCTAssertEqual(m.w[0], 2, accuracy: 1e-6)
-        XCTAssertEqual(m.w[1], -3, accuracy: 1e-6)
-        XCTAssertEqual(m.b0, 0.5, accuracy: 1e-6)
-    }
-
-    /// Synthetic market where tomorrow's open jumps by 1.5 × today's last-30-minute move: the models should beat naive.
-    func testEngineFindsPlantedSignal() {
-        var rng = SystemRandomNumberGenerator()
-        var samples: [LabSample] = []
-        let start: Int32 = 1_767_239_100
-        for s in 0..<40 {
-            var b = OHLCV()
-            var price: Float = 100
-            var carry: Float = 0
-            for d in 0..<30 {
-                let dayStart = start + Int32(d * 86_400)
-                price *= (1 + carry)                               // tomorrow's move = 0.6 × today's last-30-min move
-                var last30: Float = 0
-                let open = price
-                for k in 0..<75 {
-                    let r = k >= 69 ? Float.random(in: -0.004...0.004, using: &rng) : Float.random(in: -0.0005...0.0005, using: &rng)
-                    let o = price
-                    price *= (1 + r)
-                    if k >= 69 { last30 += r }
-                    b.append(dayStart + Int32(k * 300), o, max(o, price) * 1.0005, min(o, price) * 0.9995, price, 1000)
-                }
-                _ = open
-                carry = 1.5 * last30
-            }
-            samples += LabBuild.samples("S\(s)", m5: b, m1: nil, market: [:])
+    func testRunBarsSinceAndReturns() {
+        var s = DeliverySeries()
+        for i in 0..<40 {
+            s.days.append(String(format: "2026-01-%02d", i + 1))
+            s.qty.append(i == 35 ? 1000 : 10)          // one spike on bar 35
+            s.close.append(100 + Double(i))
+            s.per.append(50)
         }
-        let res = LabEngine.run(samples, testDays: 6)
-        XCTAssertFalse(res.predictions.isEmpty)
-        let close = res.score.rows.first { $0.target == "Close" }!
-        XCTAssertLessThan(close.mae[2], close.mae[0] * 0.9, "ridge should beat naive on the planted signal")
-        XCTAssertGreaterThan(res.score.dirHit, 0.6)
+        let r = BarsSinceStudy.run(["AAA": s], symbols: nil, length: 30, horizons: [2, 22])
+        XCTAssertEqual(r.events.map(\.day), ["2026-01-36"])
+        XCTAssertEqual(r.now.first?.barsSince, 4)
+        XCTAssertEqual(r.events.first!.fwd[0]!, 137.0 / 135.0 - 1, accuracy: 1e-9)
+        XCTAssertNil(r.events.first!.fwd[1])
     }
 }

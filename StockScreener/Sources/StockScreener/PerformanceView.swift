@@ -27,8 +27,9 @@ struct PerformanceView: View {
                 Picker("", selection: $mode) {
                     Text("Study").tag(0)
                     Text("Compare indicators & hidden patterns").tag(1)
+                    Text("Studies").tag(2)
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 420)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 520)
                 Spacer()
                 Text("\(vm.perfRuns.count) saved run\(vm.perfRuns.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
             }
@@ -36,6 +37,8 @@ struct PerformanceView: View {
             Divider()
             if mode == 1 {
                 CompareView()
+            } else if mode == 2 {
+                StudiesView()
             } else {
                 studyBody
             }

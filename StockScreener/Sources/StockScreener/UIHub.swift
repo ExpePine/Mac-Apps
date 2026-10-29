@@ -45,14 +45,8 @@ enum AppWindows {
             AppWindow(title: "Delivery Analysis", id: "delivery", icon: "shippingbox", shortcut: "⌥⌘D", note: "NSE delivery highs"),
             AppWindow(title: "Event Scan", id: "eventscan", icon: "scope", shortcut: "⌥⌘L", note: "days since a condition"),
         ]),
-        AppWindowGroup(name: "Tests & evaluations", icon: "testtube.2", windows: [
-            AppWindow(title: "Data Lab", id: "datalab", icon: "flask.fill", shortcut: "⌥⌘B", note: "tomorrow's candle from 1-min / 5-min data"),
-            AppWindow(title: "Performance", id: "perf", icon: "chart.line.uptrend.xyaxis", shortcut: "⇧⌘9", note: "returns after an event"),
-            AppWindow(title: "Experiments", id: "experiments", icon: "flask", shortcut: "⌥⌘E", note: "compare triggers"),
-            AppWindow(title: "Timing Lab", id: "timinglab", icon: "timer", shortcut: "⌥⌘T", note: "buy triggers after a shortlist"),
-            AppWindow(title: "Combinatorix", id: "combi", icon: "square.stack.3d.up", shortcut: "⌥⌘X", note: "combinations behind gainers"),
-            AppWindow(title: "AUTO-PREDICT", id: "autopredict", icon: "wand.and.stars", shortcut: "⌥⌘A", note: "learns what comes before ≥ 30%"),
-            AppWindow(title: "Neural Net", id: "nn", icon: "point.3.connected.trianglepath.dotted", shortcut: "", note: "shared values of top gainers"),
+        AppWindowGroup(name: "Performance", icon: "chart.line.uptrend.xyaxis", windows: [
+            AppWindow(title: "Performance & Studies", id: "perf", icon: "chart.line.uptrend.xyaxis", shortcut: "⇧⌘9", note: "returns after an event · Studies: bars since delivery top"),
         ]),
         AppWindowGroup(name: "Alerts", icon: "bell", windows: [
             AppWindow(title: "Alerts", id: "alertlog", icon: "bell", shortcut: "⇧⌘3", note: "everything that fired"),

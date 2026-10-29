@@ -102,7 +102,6 @@ struct AlertsBrowserView: View {
             }
             Button { openWindow(id: "tracker") } label: { Label("Tracker", systemImage: "binoculars") }.fixedSize()
                 .help("Every stock a shortlist alert fired on — % change since, chosen Filter columns, watches like count = 5 (⌥⌘J)")
-            Button { openWindow(id: "autopredict") } label: { Label("AUTO-PREDICT…", systemImage: "wand.and.stars") }.fixedSize()
                 .help("Stocks AUTO-PREDICT expects to gain ≥ 30% within a month — turn “Show predictions in Alerts” on there")
         }
         .padding(10)
