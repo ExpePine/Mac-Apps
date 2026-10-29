@@ -233,7 +233,8 @@ struct NewsChartView: View {
         if showDeliv { layers.insert(.deliv) }
         if showNews { layers.insert(.news) }
         if showDeals { layers.insert(.deals) }
-        let metric = DeliveryMetric(rawValue: metricRaw) ?? .value
+        let metric = DeliveryChartBasis.metric(signal: DeliveryMetric(rawValue: metricRaw) ?? .value,
+                                               basis: UserDefaults.standard.string(forKey: DeliveryChartBasis.key) ?? "")
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
                                  full: true, onlyRises: true, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: layers, events: LWChartData.eventMarkers(s, layers: layers)))

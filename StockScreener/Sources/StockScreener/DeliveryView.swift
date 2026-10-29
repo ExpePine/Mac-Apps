@@ -446,7 +446,9 @@ struct DeliveryMiniChart: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("deliv.length") private var length = 300
     @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
-    private var metric: DeliveryMetric { DeliveryMetric(rawValue: metricRaw) ?? .value }
+    @AppStorage(DeliveryChartBasis.key) private var basis = ""
+    private var signalMetric: DeliveryMetric { DeliveryMetric(rawValue: metricRaw) ?? .value }
+    private var metric: DeliveryMetric { DeliveryChartBasis.metric(signal: signalMetric, basis: basis) }
     @AppStorage("deliv.onlyRises") private var onlyRises = true
     @AppStorage("deliv.full") private var full = true
     @AppStorage("viewer.delivRange") private var range = "1Y"
@@ -479,6 +481,11 @@ struct DeliveryMiniChart: View {
                         .controlSize(.mini).fixedSize()
                         .help("Fine-tune: shift the delivery chart by a few bars if it still doesn't line up with TradingView")
                 }
+                Picker("", selection: Binding(get: { DeliveryChartBasis.shown(signal: signalMetric, basis: basis) }, set: { basis = $0 })) {
+                    Text("Raw").tag("raw"); Text("SMA \(signalMetric == .sma66 ? 66 : 22)").tag("sma")
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
+                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA: of its \(signalMetric == .sma66 ? 66 : 22)-day average. Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases.filter { $0 != .candles })
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
@@ -493,6 +500,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: dc.revision) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
+        .onChange(of: basis) { _ in push() }
         .onChange(of: colorScheme) { _ in push() }
         .onChange(of: layersRaw) { _ in push() }
         .onChange(of: t3Rev) { _ in push() }

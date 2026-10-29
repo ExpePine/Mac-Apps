@@ -184,6 +184,23 @@ struct DeliveryBook {
 }
 
 /// What ta.highest(…, 300) and the charts are computed on.
+/// What the delivery charts draw — chosen on the chart, separately from the Delivery Analysis signal:
+/// "raw" = DELIV_QTY*CLOSE_PRICE itself (its ta.highest and ta.percentrank, no SMA), "sma" = its 22/66-day SMA,
+/// "" = follow the Delivery Analysis signal.
+enum DeliveryChartBasis {
+    static let key = "deliv.chartBasis"
+    static func metric(signal: DeliveryMetric, basis: String) -> DeliveryMetric {
+        switch basis {
+        case "raw": return signal == .qty ? .qty : .value
+        case "sma": return signal == .sma66 ? .sma66 : .sma22
+        default: return signal
+        }
+    }
+    static func shown(signal: DeliveryMetric, basis: String) -> String {
+        basis.isEmpty ? (signal == .sma22 || signal == .sma66 ? "sma" : "raw") : basis
+    }
+}
+
 enum DeliveryMetric: String, CaseIterable, Identifiable {
     case value, qty, sma22, sma66
     var id: String { rawValue }
