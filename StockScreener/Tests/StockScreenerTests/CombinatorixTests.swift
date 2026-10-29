@@ -844,7 +844,7 @@ final class BarsSinceStudyTests: XCTestCase {
         var s = DeliverySeries()
         for i in 0..<40 {
             s.days.append(String(format: "2026-01-%02d", i + 1))
-            s.qty.append(i == 35 ? 1000 : 10)          // one spike on bar 35
+            s.qty.append(i == 35 ? 1000 : Double(60 - i))   // falling delivery, one spike on bar 35
             s.close.append(100 + Double(i))
             s.per.append(50)
         }
