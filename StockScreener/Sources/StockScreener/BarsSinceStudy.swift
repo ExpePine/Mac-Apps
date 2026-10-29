@@ -67,6 +67,15 @@ enum BarsSinceStudy {
     }
 
     static func run(_ series: [String: DeliverySeries], symbols: [String]?, length: Int, horizons: [Int]) -> Result {
+        assemble(series, symbols: symbols, length: length, horizons: horizons) { _, s in
+            let v = s.metric(value: true)
+            return v.count > length ? (hits(v, length: length), length) : nil
+        }
+    }
+
+    /// Shared by every study: `events(sym, series)` gives the event bars and the first bar the condition can be judged.
+    static func assemble(_ series: [String: DeliverySeries], symbols: [String]?, length: Int, horizons: [Int],
+                         events: (String, DeliverySeries) -> (hits: [Int], start: Int)?) -> Result {
         var res = Result(horizons: horizons, length: length)
         let H = horizons.count
         func newBucket(_ l: String) -> Bucket { Bucket(label: l, n: .init(repeating: 0, count: H), sum: .init(repeating: 0, count: H), wins: .init(repeating: 0, count: H)) }
@@ -77,9 +86,9 @@ enum BarsSinceStudy {
             if let syms, !syms.contains(sym) { continue }
             let v = s.metric(value: true)
             let c = s.close
-            guard v.count > length else { continue }
+            guard let ev = events(sym, s) else { continue }
             res.stocks += 1
-            let hs = hits(v, length: length)
+            let hs = ev.hits
             func fwd(_ i: Int) -> [Double?] {
                 horizons.map { h in i + h < c.count && c[i] > 0 ? c[i + h] / c[i] - 1 : nil }
             }
@@ -91,7 +100,7 @@ enum BarsSinceStudy {
             }
             // every day: forward return by barssince bucket, and for all days (baseline)
             var k = 0, lastHit: Int? = nil
-            for i in length..<v.count {
+            for i in max(0, ev.start)..<v.count {
                 while k < hs.count && hs[k] <= i { lastHit = hs[k]; k += 1 }
                 let f = fwd(i)
                 for (h, r) in f.enumerated() {
@@ -128,6 +137,11 @@ struct StudiesView: View {
     @AppStorage("study.bs.h2") private var h2 = 22
     @AppStorage("study.bs.scope") private var scope = "Sheet stocks"
     @AppStorage("study.bs.tab") private var tab = 0
+    @AppStorage("study.kind") private var kind = 0                   // 0 = bars since delivery top, 1 = T3F + T3S + T3 × HI
+    @AppStorage("study.x.fast") private var needFast = true
+    @AppStorage("study.x.slow") private var needSlow = true
+    @AppStorage("study.x.sma") private var hiSma = 0                  // 0 = follow the Delivery signal (22 unless 66)
+    private var ev1: String { kind == 0 ? "==100 day" : "signal day" }
     @AppStorage("study.bs.recent") private var recentDays = 0          // 0 = all events
     @State private var result: BarsSinceStudy.Result?
     @State private var running = false
@@ -155,7 +169,7 @@ struct StudiesView: View {
                 Divider()
                 Picker("", selection: $tab) {
                     Text("Now — bars since, per stock (\(r.now.count))").tag(0)
-                    Text("Every ==100 day (\(r.events.count))").tag(1)
+                    Text("Every \(ev1) (\(r.events.count))").tag(1)
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 460).padding(8)
                 if tab == 0 { nowTable(r) } else { eventsTable(r) }
@@ -166,13 +180,32 @@ struct StudiesView: View {
         .onAppear { dc.loadIfNeeded(); if result == nil { run() } }
         .onChange(of: dc.revision) { _ in run() }
         .onChange(of: scope) { _ in run() }
+        .onChange(of: kind) { _ in result = nil; run() }
     }
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Text("ta.barssince(ta.percentrank(DELIV_QTY*CLOSE,").font(.callout.monospaced())
-            TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
-            Text(") == 100)").font(.callout.monospaced())
+            Picker("", selection: $kind) {
+                Text("Bars since delivery top").tag(0)
+                Text("T3F + T3S + T3 crosses HI").tag(1)
+            }
+            .labelsHidden().fixedSize()
+            if kind == 0 {
+                Text("ta.barssince(ta.percentrank(DELIV_QTY*CLOSE,").font(.callout.monospaced())
+                TextField("", value: $length, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                Text(") == 100)").font(.callout.monospaced())
+            } else {
+                Toggle("T3F = 1", isOn: $needFast).toggleStyle(.checkbox)
+                    .help("T3_FAST > T3_FAST[1] on that day (Yahoo daily prices; set in Settings → T3 Fast / Slow)")
+                Toggle("T3S = 1", isOn: $needSlow).toggleStyle(.checkbox)
+                    .help("T3_SLOW > T3_SLOW[1] on that day")
+                Text("and ta.crossover(T3, HI)").font(.callout.monospaced())
+                    .help("T3 = Tilson T3 of delivery (Settings → T3 on delivery). HI = ta.highest(ta.sma(DELIV_QTY*CLOSE, n), 300)")
+                Picker("", selection: $hiSma) {
+                    Text("HI sma: signal's").tag(0); Text("HI sma 22").tag(22); Text("HI sma 66").tag(66)
+                }
+                .labelsHidden().fixedSize()
+            }
             Divider().frame(height: 16)
             Text("returns after").font(.caption)
             TextField("", value: $h1, format: .number).frame(width: 34).multilineTextAlignment(.trailing)
@@ -198,7 +231,7 @@ struct StudiesView: View {
                     let avg = vals.isEmpty ? nil : vals.reduce(0, +) / Double(vals.count)
                     let win = vals.isEmpty ? nil : Double(vals.filter { $0 > 0 }.count) / Double(vals.count)
                     let base = r.baseline.avg(h)
-                    GroupBox("\(r.horizons[h]) days after a ==100 day") {
+                    GroupBox("\(r.horizons[h]) days after a \(ev1)") {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack { Text("Average").frame(width: 70, alignment: .leading); Text(pct(avg)).monospacedDigit().foregroundStyle(color(avg)) }
                             HStack { Text("Median").frame(width: 70, alignment: .leading); Text(pct(BarsSinceStudy.median(vals))).monospacedDigit() }
@@ -235,7 +268,7 @@ struct StudiesView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 10) {
-                Text("\(r.stocks) stocks · \(ev.count) ==100 days").font(.caption).foregroundStyle(.secondary)
+                Text("\(r.stocks) stocks · \(ev.count) \(ev1)s").font(.caption).foregroundStyle(.secondary)
                 Picker("Events from", selection: $recentDays) {
                     Text("all stored days").tag(0); Text("last 22 days").tag(22); Text("last 66 days").tag(66); Text("last 250 days").tag(250)
                 }
@@ -255,18 +288,18 @@ struct StudiesView: View {
     private func nowTable(_ r: BarsSinceStudy.Result) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Bars since the last ==100 day, newest first").font(.caption.bold())
+                Text("Bars since the last \(ev1), newest first").font(.caption.bold())
                 Spacer()
                 Button { reel(r.now.filter { selNow.isEmpty || selNow.contains($0.id) }.map { ($0.sym, "BS \($0.barsSince) · \(pct($0.sinceReturn)) since", $0.lastDay) }) } label: {
                     Label(selNow.isEmpty ? "Chart Reel of all" : "Chart Reel of \(selNow.count)", systemImage: "film.stack")
                 }
-                .help("Chart 1 + delivery chart for each, centred on its last ==100 day")
+                .help("Chart 1 + delivery chart for each, centred on its last \(ev1)")
             }
             .controlSize(.small).padding(.horizontal, 10).padding(.vertical, 5)
             Table(r.now, selection: $selNow) {
                 TableColumn("Symbol") { n in SymbolWithDots(symbol: n.sym) }.width(min: 100, ideal: 120)
                 TableColumn("Bars since") { n in Text("\(n.barsSince)").monospacedDigit().bold() }.width(70)
-                TableColumn("Last ==100 day") { n in Text(n.lastDay).monospacedDigit() }.width(95)
+                TableColumn("Last \(ev1)") { n in Text(n.lastDay).monospacedDigit() }.width(95)
                 TableColumn("Since then") { n in Text(pct(n.sinceReturn)).monospacedDigit().foregroundStyle(color(n.sinceReturn)) }.width(80)
                 TableColumn("\(r.horizons[0])d after") { n in Text(pct(n.fwd[0])).monospacedDigit().foregroundStyle(color(n.fwd[0])) }.width(75)
                 TableColumn("\(r.horizons[1])d after") { n in Text(pct(n.fwd[1])).monospacedDigit().foregroundStyle(color(n.fwd[1])) }.width(75)
@@ -328,13 +361,100 @@ struct StudiesView: View {
     private func run() {
         guard !running, !dc.book.series.isEmpty else { return }
         running = true
-        let series = dc.book.series, len = max(2, length), hz = horizons
+        let series = dc.book.series, len = max(2, length), hz = horizons, k = kind
+        // the longer of the two Yahoo price histories, per stock, for T3F / T3S
+        var prices = vm.priceBook.series
+        if k == 1 {
+            for (sym, s) in MultibaggerCenter.shared.book.series where s.days.count > (prices[sym]?.days.count ?? 0) { prices[sym] = s }
+        }
+        var params = CrossStudy.Params()
+        params.hiSma = hiSma == 0 ? DeliveryColumns.hiSma : hiSma
+        params.needFast = needFast; params.needSlow = needSlow
         var syms: [String]? = nil
         if scope == "Sheet stocks" { syms = vm.allSymbols.map { $0.uppercased() } }
         if scope == "My Filter", let l = vm.labelIndex { syms = vm.filterRows.map { $0.text(l).trimmingCharacters(in: .whitespaces).uppercased() } }
         Task {
-            let r = await Task.detached(priority: .userInitiated) { BarsSinceStudy.run(series, symbols: syms, length: len, horizons: hz) }.value
+            let r: BarsSinceStudy.Result
+            if k == 0 {
+                r = await Task.detached(priority: .userInitiated) { BarsSinceStudy.run(series, symbols: syms, length: len, horizons: hz) }.value
+            } else {
+                r = await Task.detached(priority: .userInitiated) { CrossStudy.run(series, prices: prices, symbols: syms, horizons: hz, p: params) }.value
+            }
             result = r; running = false
+        }
+    }
+}
+
+
+// MARK: - Study 2: T3F = 1 and T3S = 1 and delivery T3 crosses over HI
+
+/// Event day: ta.crossover(T3, HI) on the delivery series, where
+///   T3 = Tilson T3 of DELIV_QTY*CLOSE (Settings → STREAK · T3 → T3 on delivery)
+///   HI = ta.highest(ta.sma(DELIV_QTY*CLOSE, 22 or 66), 300)   (the same HI as the Filter's HI/T3 column)
+/// and on that same day the price T3 lines are rising: T3F = 1 (T3_FAST > T3_FAST[1]) and T3S = 1 (T3_SLOW > T3_SLOW[1]),
+/// from Yahoo daily prices. A day without a Yahoo price can't be judged and is skipped.
+enum CrossStudy {
+    struct Params {
+        var hiSma = 22
+        var hiLength = 300
+        var t3 = T3Def.current
+        var fast = PriceT3.fast
+        var slow = PriceT3.slow
+        var needFast = true
+        var needSlow = true
+    }
+
+    /// Bars where T3 crosses over HI.
+    static func crossovers(t3: [Double?], hi: [Double?]) -> [Int] {
+        var out: [Int] = []
+        guard t3.count == hi.count, t3.count > 1 else { return out }
+        for i in 1..<t3.count {
+            if let a = t3[i], let b = hi[i], let a0 = t3[i - 1], let b0 = hi[i - 1], a > b, a0 <= b0 { out.append(i) }
+        }
+        return out
+    }
+
+    /// ta.highest(ta.sma(x, n), length) per bar (nil until n − 1 + length bars).
+    static func highestSMA(_ x: [Double], n: Int, length: Int) -> [Double?] {
+        let sm = DeliverySignal.sma(x, n)
+        var out = [Double?](repeating: nil, count: x.count)
+        let first = n - 1 + length - 1
+        guard x.count > first else { return out }
+        var dq: [Int] = [], head = 0
+        for i in (n - 1)..<x.count {
+            while head < dq.count && dq[head] <= i - length { head += 1 }
+            while dq.count > head && sm[dq[dq.count - 1]] <= sm[i] { dq.removeLast() }
+            dq.append(i)
+            if i >= first { out[i] = sm[dq[head]] }
+        }
+        return out
+    }
+
+    /// Day → rising (1) / not (0) for a price T3 line.
+    static func rising(_ p: PriceT3, _ s: PriceSeries) -> [String: Int] {
+        let t = T3Def(length: max(1, p.length), factor: p.factor, useQty: false).t3(p.series(s))
+        var out: [String: Int] = [:]
+        for i in 1..<max(1, t.count) { if let a = t[i], let b = t[i - 1] { out[s.days[i]] = a > b ? 1 : 0 } }
+        return out
+    }
+
+    static func run(_ series: [String: DeliverySeries], prices: [String: PriceSeries], symbols: [String]?,
+                    horizons: [Int], p: Params) -> BarsSinceStudy.Result {
+        BarsSinceStudy.assemble(series, symbols: symbols, length: p.hiLength, horizons: horizons) { sym, s in
+            let x = s.metric(value: true)
+            let hi = highestSMA(x, n: p.hiSma, length: p.hiLength)
+            let t3 = p.t3.t3(p.t3.source(s))
+            guard let first = zip(t3, hi).firstIndex(where: { $0 != nil && $1 != nil }) else { return nil }
+            var hits = crossovers(t3: t3, hi: hi)
+            if p.needFast || p.needSlow {
+                guard let ps = prices[sym] else { return nil }
+                let f = p.needFast ? rising(p.fast, ps) : [:], sl = p.needSlow ? rising(p.slow, ps) : [:]
+                hits = hits.filter { i in
+                    let d = s.days[i]
+                    return (!p.needFast || f[d] == 1) && (!p.needSlow || sl[d] == 1)
+                }
+            }
+            return (hits, first)
         }
     }
 }

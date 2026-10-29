@@ -855,3 +855,21 @@ final class BarsSinceStudyTests: XCTestCase {
         XCTAssertNil(r.events.first!.fwd[1])
     }
 }
+
+final class CrossStudyTests: XCTestCase {
+    func testHighestSMAMatchesBruteForce() {
+        let x = (0..<120).map { Double(($0 * 53) % 97) }
+        let hi = CrossStudy.highestSMA(x, n: 5, length: 20)
+        let sm = DeliverySignal.sma(x, 5)
+        for i in x.indices {
+            if i < 4 + 20 - 1 { XCTAssertNil(hi[i]); continue }
+            XCTAssertEqual(hi[i]!, sm[(i - 19)...i].max()!, accuracy: 1e-9)
+        }
+    }
+
+    func testCrossovers() {
+        let t3: [Double?] = [nil, 1, 2, 5, 4, 6, 7]
+        let hi: [Double?] = [nil, 3, 3, 3, 5, 5, 8]
+        XCTAssertEqual(CrossStudy.crossovers(t3: t3, hi: hi), [3, 5])
+    }
+}
