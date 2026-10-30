@@ -30,6 +30,8 @@ struct ChartReelView: View {
     @State private var since: [String: (days: Int, day: String)] = [:]
     @State private var sinceKey = ""
     @State private var sinceStatus: String?
+    /// Charts only: hides the bars, list strip and slider (← → still step; Esc or the button brings them back).
+    @AppStorage("reel.expanded") private var expanded = false
     @AppStorage("reel.layout") private var layout = ReelLayout.chart1.rawValue
     @AppStorage("reel.preload") private var preload = true
     @AppStorage("reel.seconds") private var seconds = 3.0
@@ -145,8 +147,10 @@ struct ChartReelView: View {
         let list = items
         let current = list.indices.contains(shown) ? list[shown] : nil
         VStack(spacing: 0) {
-            sourceBar
-            Divider()
+            if !expanded {
+                sourceBar
+                Divider()
+            }
             if list.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "film.stack").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -154,8 +158,10 @@ struct ChartReelView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                infoBar(current, count: list.count)
-                Divider()
+                if !expanded {
+                    infoBar(current, count: list.count)
+                    Divider()
+                }
                 charts(current).overlay(alignment: .center) {
                     if dragging, list.indices.contains(Int(index)) {
                         let it = list[Int(index)]
@@ -167,10 +173,35 @@ struct ChartReelView: View {
                         .padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                     }
                 }
-                Divider()
-                filmstrip(list)
-                scrubber(list)
+                .overlay(alignment: .bottomLeading) {
+                    if expanded, let it = current {
+                        HStack(spacing: 8) {
+                            Button { step(-1, list) } label: { Image(systemName: "chevron.left") }
+                            Text("\(it.symbol)  \(shown + 1) / \(list.count)").font(.caption.bold().monospacedDigit())
+                            if !it.note.isEmpty { Text(it.note).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                            Button { step(1, list) } label: { Image(systemName: "chevron.right") }
+                            Button { expanded = false } label: { Label("Show controls", systemImage: "arrow.down.right.and.arrow.up.left") }
+                                .help("Bring back the bars, list and slider (Esc)")
+                        }
+                        .controlSize(.small).buttonStyle(.borderless)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(10)
+                    }
+                }
+                if !expanded {
+                    Divider()
+                    filmstrip(list)
+                    scrubber(list)
+                }
             }
+        }
+        .background {
+            Group {
+                Button("") { expanded.toggle() }.keyboardShortcut("x", modifiers: [.command, .shift])
+                Button("") { if expanded { expanded = false } }.keyboardShortcut(.escape, modifiers: [])
+            }
+            .opacity(0).frame(width: 0, height: 0)
         }
         .navigationTitle(current.map { "Chart Reel — \($0.symbol)" } ?? "Chart Reel")
         .onAppear {
@@ -266,7 +297,9 @@ struct ChartReelView: View {
     // MARK: Bars
 
     private var sourceBar: some View {
-        HStack(spacing: 8) {
+        FlowLayout(spacing: 8, lineSpacing: 6) {
+            Button { expanded = true } label: { Label("Expand charts", systemImage: "arrow.up.left.and.arrow.down.right") }
+                .help("Charts only — hide these bars, the list strip and the slider (⇧⌘X; Esc to come back)")
             Picker("", selection: $source) {
                 ForEach(ReelSource.allCases) { Text($0.rawValue).tag($0.rawValue) }
             }
@@ -300,7 +333,6 @@ struct ChartReelView: View {
                 if fOn, mbf.ready { Text("F: \(mbf.matched.count)").font(.caption.bold()).foregroundStyle(Color.accentColor) }
                 Button("Multibaggers…") { openWindow(id: "multibaggers") }
             }
-            Spacer()
             Picker("", selection: $sortMode) {
                 ForEach(["List order", "A → Z", "Day % (high first)"], id: \.self) { Text($0).tag($0) }
             }
