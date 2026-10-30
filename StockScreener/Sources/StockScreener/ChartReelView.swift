@@ -39,7 +39,7 @@ struct ChartReelView: View {
     @AppStorage("reel.seq1") private var seq1 = 3.0          // "1 → 2": seconds on Chart 1
     @AppStorage("reel.seq2") private var seq2 = 3.0          // … then on Chart 2
     @AppStorage("reel.autoZoom") private var autoZoom = true
-    @AppStorage("reel.zoomDelay") private var zoomDelay = 2.5
+    @AppStorage("reel.zoomDelay") private var zoomDelay = 1.5
     @AppStorage("reel.zoomSwap") private var zoomSwap = false
     @AppStorage("reel.mbMonth") private var mbMonth = ""
     @AppStorage("reel.mbScope") private var mbScope = "Sheet stocks"
@@ -678,10 +678,10 @@ struct ChartReelView: View {
         let l = ReelLayout(rawValue: layout) ?? .chart1
         let cols: [Int] = l == .chart1 || l == .withDelivery ? [0] : (l == .chart2 ? [1] : [0, 1])
         var urls: [(URL, Int, String?)] = []
-        for j in [i, i + 1, i + 2, i - 1] where list.indices.contains(j) {
+        for j in [i, i + 1, i + 2, i + 3, i - 1] where list.indices.contains(j) {
             for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
         }
-        pool.preload(urls, keep: cols.count * 4)
+        pool.preload(urls, keep: cols.count * 5)
     }
 }
 
@@ -757,7 +757,7 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         return v == 0 ? 1 : v
     }
     private var autoZoom: Bool { UserDefaults.standard.object(forKey: "reel.autoZoom") as? Bool ?? true }
-    private var delay: Double { let d = UserDefaults.standard.double(forKey: "reel.zoomDelay"); return d == 0 ? 2.5 : d }
+    private var delay: Double { let d = UserDefaults.standard.double(forKey: "reel.zoomDelay"); return d == 0 ? 1.5 : d }
     private var swap: Bool { UserDefaults.standard.bool(forKey: "reel.zoomSwap") }
 
     private static func key(_ url: URL, _ goTo: String?) -> String { url.absoluteString + (goTo.map { "#goto=" + $0 } ?? "") }

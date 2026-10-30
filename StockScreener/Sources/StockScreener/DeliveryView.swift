@@ -473,6 +473,21 @@ struct DeliveryMiniChart: View {
                     Text(dc.storedDays.isEmpty ? "No NSE delivery data yet — open Delivery Analysis (⌥⌘D) to download it." : "No NSE delivery data for \(symbol).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                if s != nil {
+                    let sym = SymbolBook.clean(symbol)
+                    let gapCount = dc.stockGaps(sym).count
+                    if let note = dc.recheckNote[sym] {
+                        Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1).help(note)
+                    } else if gapCount > 0 {
+                        Text("⚠️ \(gapCount) trading day\(gapCount == 1 ? "" : "s") without data").font(.caption2).foregroundStyle(.orange)
+                    }
+                    Button { dc.recheck(sym) } label: {
+                        if dc.rechecking == sym { ProgressView().controlSize(.mini) } else { Image(systemName: "arrow.triangle.2.circlepath") }
+                    }
+                    .buttonStyle(.borderless).controlSize(.mini)
+                    .disabled(dc.rechecking != nil || dc.isFetching)
+                    .help("Recheck: re-download NSE's files for the days this stock has no data, then redraw. Days NSE itself has no row for (not traded / suspended) stay empty.")
+                }
                 Spacer()
                 if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
                 if let n = syncNote {

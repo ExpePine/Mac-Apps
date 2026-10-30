@@ -741,6 +741,69 @@ struct DeliveryColumns {
 
     func cancel() { task?.cancel() }
 
+    // MARK: Per-stock recheck (fills gaps on one stock's chart)
+
+    /// Result of the last recheck per symbol, shown on its delivery chart.
+    @Published var recheckNote: [String: String] = [:]
+    @Published private(set) var rechecking: String?
+
+    /// NSE trading days between the stock's first stored day and the latest calendar day that have no row for it.
+    func stockGaps(_ symbol: String) -> [String] {
+        guard let s = book.series[symbol], let first = s.days.first else { return [] }
+        let have = Set(s.days)
+        let last = calendar.last ?? book.days.last ?? first
+        let ref = calendar.isEmpty ? book.days : calendar
+        return ref.filter { $0 >= first && $0 <= last && !have.contains($0) }
+    }
+
+    /// Re-downloads the NSE files for the days this stock is missing (day files that are missing, and day files
+    /// that exist but have no row for it), then rebuilds. Days NSE itself has no row for = not traded / suspended.
+    func recheck(_ symbol: String) {
+        guard rechecking == nil, !isFetching else { return }
+        rechecking = symbol
+        recheckNote[symbol] = "Rechecking…"
+        Task {
+            await refreshCalendar()
+            let gaps = stockGaps(symbol).sorted(by: >)
+            guard !gaps.isEmpty else {
+                rechecking = nil
+                recheckNote[symbol] = "No gaps: a row on every NSE trading day since \(book.series[symbol]?.days.first ?? "—")."
+                return
+            }
+            let todo = Array(gaps.prefix(150))
+            var fixed = 0, noRow: [String] = [], failed = 0, i = 0
+            while i < todo.count {
+                let batch = Array(todo[i..<min(i + 4, todo.count)]); i += batch.count
+                let results = await withTaskGroup(of: (String, NSEDeliveryClient.Result).self) { g in
+                    for d in batch { g.addTask { (d, await NSEDeliveryClient.fetch(d)) } }
+                    var r: [(String, NSEDeliveryClient.Result)] = []
+                    for await x in g { r.append(x) }
+                    return r
+                }
+                for (d, r) in results {
+                    switch r {
+                    case .rows(let rows):
+                        try? DeliveryFiles.save(rows, day: d)
+                        if rows.contains(where: { $0.symbol == symbol }) { fixed += 1 } else { noRow.append(d) }
+                    case .noFile, .blocked: failed += 1
+                    }
+                }
+                recheckNote[symbol] = "Rechecking \(i)/\(todo.count) days…"
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            rechecking = nil
+            var note = fixed > 0 ? "Filled \(fixed) day\(fixed == 1 ? "" : "s")." : "Nothing new from NSE."
+            if !noRow.isEmpty {
+                let r = noRow.sorted()
+                note += " NSE has no row for \(symbol) on \(r.count) trading day\(r.count == 1 ? "" : "s") (\(r.first!) … \(r.last!)) — not traded / suspended then, so those stay empty."
+            }
+            if failed > 0 { note += " \(failed) day\(failed == 1 ? "" : "s") couldn't be fetched (NSE busy) — try again later." }
+            if gaps.count > todo.count { note += " Checked the latest \(todo.count) of \(gaps.count) gap days; press again for older ones." }
+            recheckNote[symbol] = note
+            if fixed > 0 { reload() }
+        }
+    }
+
     /// Called from the app's refresh loop: picks up new days once an hour (only after history exists).
     func autoUpdateIfDue() {
         guard !isFetching, Date().timeIntervalSince(lastAutoCheck) > 3600, !DeliveryFiles.days().isEmpty else { return }

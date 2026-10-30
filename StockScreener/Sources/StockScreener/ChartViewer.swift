@@ -211,7 +211,7 @@ struct ChartViewer: View {
         web.use(account: acct)
         web.signingIn = false
         web.view.stopLoading()
-        web.view.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+        web.view.load(URLRequest(url: url))
         centreOnGoTo()
     }
 
