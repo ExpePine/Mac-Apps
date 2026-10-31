@@ -1,0 +1,30 @@
+name: Stock Screener screenshots
+
+on:
+  workflow_dispatch:
+
+jobs:
+  shots:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: StockScreener
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Take screenshots on demo data
+        run: |
+          mkdir -p shots
+          ( .build/debug/StockScreener --demo-screenshots "$PWD/shots" & echo $! > pid ) 
+          for i in $(seq 1 150); do
+            sleep 2
+            if [ -f shots/shots.tsv ]; then break; fi
+          done
+          kill $(cat pid) 2>/dev/null || true
+          ls -la shots
+          cat shots/shots.tsv || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stock-screener-shots
+          path: StockScreener/shots/*.png

@@ -9,6 +9,7 @@ struct StockScreenerApp: App {
             ImportView()
                 .environmentObject(vm)
                 .frame(minWidth: 900, minHeight: 520)
+                .task { if DemoShots.active { await DemoShots.run(vm) } }
         }
 
         Window("Filter", id: "filter") {

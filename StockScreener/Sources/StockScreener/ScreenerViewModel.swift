@@ -423,6 +423,9 @@ final class ScreenerViewModel: ObservableObject {
     /// Rebuilds the table from the last download (e.g. after new NN scores).
     func setTableKeepingRaw() { setTable(rawTable) }
 
+    /// Demo screenshots only (see DemoShots).
+    func applyDemoTable(_ t: SheetTable) { setTable(t) }
+
     /// Adds DLVR (₹ Cr on the day ta.highest(DELIV_QTY×CLOSE, 300) updated — the latest NSE day — else blank)
     /// and Safety (ta.sma(DELIV_QTY, 100) × 0.05) from the stored NSE delivery data.
     private func withDeliveryColumns(_ t: SheetTable) -> SheetTable {

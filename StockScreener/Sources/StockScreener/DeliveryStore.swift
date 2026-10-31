@@ -649,7 +649,7 @@ struct DeliveryColumns {
             self.revision += 1
             self.onReload?()
             // once per session: find days missing against the trading calendar and fetch them
-            if !self.repairedThisSession, !days.isEmpty {
+            if !self.repairedThisSession, !days.isEmpty, !DemoShots.active {
                 self.repairedThisSession = true
                 await self.refreshCalendar()
                 if !self.gaps.isEmpty && !self.isFetching { self.repairGaps() }
@@ -806,7 +806,7 @@ struct DeliveryColumns {
 
     /// Called from the app's refresh loop: picks up new days once an hour (only after history exists).
     func autoUpdateIfDue() {
-        guard !isFetching, Date().timeIntervalSince(lastAutoCheck) > 3600, !DeliveryFiles.days().isEmpty else { return }
+        guard !DemoShots.active, !isFetching, Date().timeIntervalSince(lastAutoCheck) > 3600, !DeliveryFiles.days().isEmpty else { return }
         lastAutoCheck = Date()
         download(target: max(600, DeliveryFiles.days().count))
     }

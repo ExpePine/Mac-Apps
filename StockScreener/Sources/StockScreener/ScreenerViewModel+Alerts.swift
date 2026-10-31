@@ -142,7 +142,7 @@ extension ScreenerViewModel {
     /// Once a day after the market closes (default 15:45 IST, Mon–Fri): rule emails, in-app alerts, shortlist
     /// alerts and tracker watches are checked on the day's final data and shown together in one pop-up.
     func runEndOfDayAlertsIfDue() async {
-        guard AlertSchedule.endOfDay, AlertSchedule.isDue() else { return }
+        guard !DemoShots.active, AlertSchedule.endOfDay, AlertSchedule.isDue() else { return }
         AlertSchedule.markDone()
         await runAlertChecks()
         raiseInAppAlerts(asPopup: true)
