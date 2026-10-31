@@ -84,6 +84,8 @@ enum DemoShots {
         vm.settings.labelColumn = "Symbol"
         vm.settings.triggerColumn = "D_Trigger"
         vm.applyDemoTable(SheetTable(headers: headers, rows: rows))
+        vm.settings.filterColumns = ["Symbol", "Sector", "change%", "D_Trigger", "count", "compact", "MS", "DS", "Long_Green", "DLVR", "DELSMA", "STREAK", "HI/T3", "t3Color"]
+        vm.settings.frozenColumns = 1
         DeliveryCenter.shared.reload()
 
         // a few alerts that "fired"
