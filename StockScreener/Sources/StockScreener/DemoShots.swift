@@ -123,6 +123,26 @@ enum DemoShots {
         }
     }
 
+    /// The window as the screen shows it (own windows need no screen-recording permission); if that fails,
+    /// the content view drawn onto the window's dark background.
+    @MainActor static func capture(_ w: NSWindow) -> Data? {
+        w.orderFrontRegardless()
+        if let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(w.windowNumber), [.boundsIgnoreFraming, .bestResolution]),
+           cg.width > 100 {
+            return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
+        }
+        guard let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return nil }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        let img = NSImage(size: v.bounds.size)
+        img.lockFocus()
+        NSColor(calibratedWhite: 0.12, alpha: 1).setFill()
+        NSRect(origin: .zero, size: v.bounds.size).fill()
+        rep.draw(in: NSRect(origin: .zero, size: v.bounds.size))
+        img.unlockFocus()
+        guard let t = img.tiffRepresentation, let r = NSBitmapImageRep(data: t) else { return nil }
+        return r.representation(using: .png, properties: [:])
+    }
+
     @MainActor static func run(_ vm: ScreenerViewModel) async {
         guard let out = outputFolder, !started else { return }
         started = true
@@ -144,13 +164,10 @@ enum DemoShots {
             w.contentView = NSHostingView(rootView: view(id, vm).frame(width: size.width, height: size.height))
             w.makeKeyAndOrderFront(nil)
             try? await Task.sleep(nanoseconds: 5_000_000_000)
-            if let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
-                v.cacheDisplay(in: v.bounds, to: rep)
-                if let png = rep.representation(using: .png, properties: [:]) {
-                    try? png.write(to: out.appendingPathComponent("\(id).png"))
-                    log += "\(id)\t\(title)\tok\n"
-                } else { log += "\(id)\t\(title)\tno png\n" }
-            } else { log += "\(id)\t\(title)\tno view\n" }
+            if let png = capture(w) {
+                try? png.write(to: out.appendingPathComponent("\(id).png"))
+                log += "\(id)\t\(title)\tok\n"
+            } else { log += "\(id)\t\(title)\tfailed\n" }
             w.orderOut(nil)
         }
         try? log.write(to: out.appendingPathComponent("shots.tsv"), atomically: true, encoding: .utf8)

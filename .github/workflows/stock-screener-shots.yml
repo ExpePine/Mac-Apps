@@ -19,6 +19,7 @@ jobs:
       - name: Take screenshots on demo data
         run: |
           mkdir -p shots
+          system_profiler SPDisplaysDataType | grep -i resolution || true
           ( .build/debug/StockScreener --demo-screenshots "$PWD/shots" & echo $! > pid ) 
           for i in $(seq 1 150); do
             sleep 2
