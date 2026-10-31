@@ -405,6 +405,48 @@ struct PriceT3: Codable, Equatable {
     var pine: String { "T3(\(source), \(length), \(CombiEngine.fmt(factor)))" }
 }
 
+// MARK: - DAYS_DELSMA: ta.barssince(DELSMA > threshold)
+
+struct DelsmaDaysDef: Equatable {
+    var op = ">"
+    var value = 70.0
+    var length = 300
+
+    static var current: DelsmaDaysDef {
+        let d = UserDefaults.standard
+        var x = DelsmaDaysDef()
+        if let o = d.string(forKey: "delsmaDays.op"), !o.isEmpty { x.op = o }
+        if d.object(forKey: "delsmaDays.value") != nil { x.value = d.double(forKey: "delsmaDays.value") }
+        return x
+    }
+
+    var pine: String { "ta.barssince(DELSMA \(op) \(CombiEngine.fmt(value)))" }
+
+    func passes(_ v: Double) -> Bool {
+        switch op {
+        case "≥", ">=": return v >= value
+        case "<": return v < value
+        case "≤", "<=": return v <= value
+        default: return v > value
+        }
+    }
+
+    /// Bars since DELSMA (= ta.percentrank(ta.sma(x, n), 300)) last passed, on bar i: 0 = passes on bar i; nil = it never
+    /// did within the stored history (Pine's na), or bar i has no DELSMA yet.
+    func days(_ x: [Double], at i: Int, smaLength n: Int) -> Int? {
+        guard i < x.count, i >= n - 1 + length else { return nil }
+        let sm = DeliverySignal.sma(Array(x[...i]), n)
+        let valid = Array(sm[(n - 1)...])
+        var k = valid.count - 1
+        while k >= length {
+            guard let pr = DeliveryColumns.percentRank(valid, length: length, at: k) else { return nil }
+            if passes(pr) { return valid.count - 1 - k }
+            k -= 1
+        }
+        return nil
+    }
+}
+
 // MARK: - STREAK: consecutive days a condition on ta.percentrank(ta.sma(DELIV_QTY*close, n), length) holds
 
 struct StreakDef: Equatable {
@@ -469,6 +511,7 @@ struct DeliveryColumns {
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
+    var delsmaDays: Int? = nil   // DAYS_DELSMA = ta.barssince(DELSMA > threshold) (0 = true today, nil = never / not enough data)
     let day: String          // the stock's latest NSE day
 
     static var length: Int { let v = UserDefaults.standard.integer(forKey: "deliv.length"); return v < 2 ? 300 : v }
@@ -491,7 +534,8 @@ struct DeliveryColumns {
                                jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i, smaLength: hiSma),
                                streak: StreakDef.current.streak(m, at: i),
                                t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)),
-                               hiT3: hiOverT3(m, t3Source: T3Def.current.source(s, upTo: i)), day: latestDay)
+                               hiT3: hiOverT3(m, t3Source: T3Def.current.source(s, upTo: i)),
+                               delsmaDays: DelsmaDaysDef.current.days(m, at: i, smaLength: hiSma), day: latestDay)
     }
 
     /// SMA length for HI/T3: follows Delivery Analysis' Signal (66 when ta.sma(…, 66) is picked, else 22).

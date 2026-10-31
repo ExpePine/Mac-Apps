@@ -728,11 +728,37 @@ struct StreakSettings: View {
 }
 
 
+/// DAYS_DELSMA: which DELSMA condition the "days since" counts from.
+struct DelsmaDaysSettings: View {
+    @AppStorage("delsmaDays.op") private var op = ">"
+    @AppStorage("delsmaDays.value") private var value = 70.0
+    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("DAYS_DELSMA = ta.barssince(DELSMA").font(.caption.monospaced())
+                Picker("", selection: $op) { ForEach([">", "≥", "<", "≤"], id: \.self) { Text($0).tag($0) } }.labelsHidden().fixedSize()
+                TextField("", value: $value, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                Text(")").font(.caption.monospaced())
+                ForEach([50.0, 60, 70, 80, 90, 99], id: \.self) { v in
+                    Button(CombiEngine.fmt(v)) { op = ">"; value = v }.controlSize(.small)
+                }
+            }
+            Text("DELSMA = ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(DeliveryMetric(rawValue: metricRaw) == .sma66 ? 66 : 22)), 300). 0 = the condition holds today; 5 = it last held 5 trading days ago; blank = not within the stored NSE history.")
+                .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+        }
+        .onChange(of: op) { _ in DeliveryCenter.shared.refreshColumns() }
+        .onChange(of: value) { _ in DeliveryCenter.shared.refreshColumns() }
+    }
+}
+
 /// One button for the STREAK and delivery-T3 settings, each in a collapsible section.
 struct IndicatorSettingsButton: View {
     @State private var open = false
     @AppStorage("hub.streak") private var streak = false
     @AppStorage("hub.t3") private var t3 = false
+    @AppStorage("hub.delsmaDays") private var daysOpen = true
 
     var body: some View {
         Button { open.toggle() } label: { Label("STREAK · T3", systemImage: "slider.horizontal.3") }
@@ -742,6 +768,8 @@ struct IndicatorSettingsButton: View {
                     DisclosureGroup("STREAK", isExpanded: $streak) { StreakSettings().padding(.vertical, 6) }
                     Divider()
                     DisclosureGroup("T3 on delivery", isExpanded: $t3) { T3Settings().padding(.vertical, 6) }
+                    Divider()
+                    DisclosureGroup("DAYS_DELSMA — days since DELSMA > …", isExpanded: $daysOpen) { DelsmaDaysSettings().padding(.vertical, 6) }
                 }
                 .padding(14).frame(width: 520)
             }

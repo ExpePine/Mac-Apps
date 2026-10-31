@@ -873,3 +873,24 @@ final class CrossStudyTests: XCTestCase {
         XCTAssertEqual(CrossStudy.crossovers(t3: t3, hi: hi), [3, 5])
     }
 }
+
+final class DelsmaDaysTests: XCTestCase {
+    func testDaysSince() {
+        // rising series: DELSMA = 100 every bar → 0 days
+        let up = (0..<400).map { Double($0 + 1) }
+        var d = DelsmaDaysDef(); d.length = 50; d.value = 70
+        XCTAssertEqual(d.days(up, at: up.count - 1, smaLength: 5), 0)
+        // rise then a long fall: the last bar above 70 is where the fall began (give or take the SMA lag)
+        var x = up
+        for k in 0..<30 { x.append(Double(400 - k * 10)) }
+        let got = d.days(x, at: x.count - 1, smaLength: 5)!
+        let brute: Int = {
+            let sm = DeliverySignal.sma(x, 5), valid = Array(sm[4...])
+            var k = valid.count - 1
+            while k >= 50 { if DeliveryColumns.percentRank(valid, length: 50, at: k)! > 70 { return valid.count - 1 - k }; k -= 1 }
+            return -1
+        }()
+        XCTAssertEqual(got, brute)
+        XCTAssertGreaterThan(got, 0)
+    }
+}
