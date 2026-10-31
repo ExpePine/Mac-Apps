@@ -25,6 +25,7 @@ struct DayStory {
     }
 
     var date: Date
+    var periodLabel: String? = nil     // e.g. "Last 4 hours · 11:00 AM – 3:00 PM"
     var tagline = ""
     var headline = ""
     var activeSeconds: Double = 0
@@ -42,22 +43,35 @@ struct DayStory {
 }
 
 extension ReportArchive {
-    func story(for day: Date) -> DayStory {
+    /// A replay for a whole day, or (with `window`) just part of it, e.g. the last 4 hours.
+    func story(for day: Date, window: DateInterval? = nil) -> DayStory {
         let cal = Calendar.current
         let midnight = cal.startOfDay(for: day)
         func frac(_ d: Date) -> Double { min(1, max(0, d.timeIntervalSince(midnight) / 86_400)) }
         func time(_ secs: Int) -> String { clockText(secs, on: day) }
 
-        let rec = load(day)
-        let entries = store.entries(on: day).sorted { $0.periodStart < $1.periodStart }
-        let answered = entries.filter { $0.status != .missed && $0.status != .skipped }
+        let rec = window == nil ? load(day) : nil
+        var entries = store.entries(on: day).sorted { $0.periodStart < $1.periodStart }
         let u = usage.usage(for: day)
-        let segments = u.segments ?? []
+        var segments = u.segments ?? []
+        if let w = window {
+            entries = entries.filter { $0.periodEnd > w.start && $0.periodStart < w.end }
+            let ws = Int(w.start.timeIntervalSince(midnight)), we = Int(w.end.timeIntervalSince(midnight))
+            segments = segments.compactMap { seg in
+                let a = max(seg.start, ws), b = min(seg.end, we)
+                guard b > a else { return nil }
+                return UsageSegment(start: a, end: b, app: seg.app, site: seg.site)
+            }
+        }
+        let answered = entries.filter { $0.status != .missed && $0.status != .skipped }
 
         var s = DayStory(date: day)
         s.tagline = rec?.tagline ?? rec.map { RecapBuilder.threeWords($0.headline) } ?? ""
-        s.headline = rec?.headline ?? (answered.isEmpty ? "A quiet day." : "\(answered.count) check-ins logged.")
-        s.activeSeconds = u.activeSeconds
+        s.headline = rec?.headline ?? (answered.isEmpty ? "A quiet stretch." : "\(answered.count) check-ins logged.")
+        s.activeSeconds = window == nil ? u.activeSeconds : Double(segments.reduce(0) { $0 + $1.seconds })
+        if let w = window {
+            s.periodLabel = "\(w.start.formatted(date: .omitted, time: .shortened)) – \(w.end.formatted(date: .omitted, time: .shortened))"
+        }
         s.checkIns = answered.count
         s.missed = entries.filter { $0.status == .missed }.count
 
@@ -70,7 +84,8 @@ extension ReportArchive {
         } else if !answered.isEmpty {
             s.blocks = answered.map {
                 DayStory.Block(start: frac($0.periodStart), end: frac($0.periodEnd),
-                               title: String(CoachService.text(of: $0).prefix(48)), category: "Check-in",
+                               title: String(CoachService.text(of: $0).prefix(48)),
+                               category: $0.goalTag ?? ($0.checkinKind == "drift" ? "Drift" : ($0.checkinKind?.capitalized ?? "Check-in")),
                                success: RecapBuilder.keywordSuccess(CoachService.text(of: $0)))
             }
         } else if !segments.isEmpty {
@@ -88,8 +103,29 @@ extension ReportArchive {
             s.categories = minutes.sorted { $0.value > $1.value }.prefix(6).map { DayStory.Item(title: $0.key, value: $0.value) }
         }
 
-        s.sites = u.top(u.sites, 6).filter { $0.seconds >= 60 }.map { DayStory.Item(title: $0.name, value: $0.seconds) }
-        s.hourly = (0..<24).map { u.hourly[String(format: "%02d", $0)] ?? 0 }
+        if window == nil {
+            s.sites = u.top(u.sites, 6).filter { $0.seconds >= 60 }.map { DayStory.Item(title: $0.name, value: $0.seconds) }
+            s.hourly = (0..<24).map { u.hourly[String(format: "%02d", $0)] ?? 0 }
+        } else {
+            var sites: [String: Double] = [:]
+            var hourly = Array(repeating: 0.0, count: 24)
+            for seg in segments {
+                if let site = seg.site { sites[site, default: 0] += Double(seg.seconds) }
+                var t = seg.start
+                while t < seg.end {
+                    let h = min(23, t / 3600)
+                    let next = min(seg.end, (h + 1) * 3600)
+                    hourly[h] += Double(next - t)
+                    t = next
+                }
+            }
+            s.sites = sites.filter { $0.value >= 60 }.sorted { $0.value > $1.value }.prefix(6)
+                .map { DayStory.Item(title: $0.key, value: $0.value) }
+            s.hourly = hourly
+            // Tagline for a stretch: its main direction.
+            if let top = s.categories.first?.title { s.tagline = top }
+            if let tagged = answered.compactMap(\.goalTag).first { s.tagline = tagged }
+        }
         s.wins = rec?.solved
             ?? answered.filter { RecapBuilder.keywordSuccess(CoachService.text(of: $0)) == true }
                        .map { String(CoachService.text(of: $0).prefix(70)) }
@@ -126,7 +162,8 @@ extension ReportArchive {
             s.drifts.append(.init(icon: "moon.zzz.fill", title: "Away \(durationText(Double(g.1 - g.0)))",
                                   detail: "\(time(g.0)) – \(time(g.1))", tint: .indigo))
         }
-        for b in (plans?.plans ?? []).flatMap(\.blockers) where cal.isDate(b.date, inSameDayAs: day) {
+        for b in (plans?.plans ?? []).flatMap(\.blockers)
+            where cal.isDate(b.date, inSameDayAs: day) && (window?.contains(b.date) ?? true) {
             s.drifts.append(.init(icon: "bolt.horizontal.circle.fill", title: b.reason,
                                   detail: "Flow broke on: \(b.stepText)", tint: .red))
         }
@@ -146,6 +183,7 @@ extension ReportArchive {
 
 struct DayStoryView: View {
     let story: DayStory
+    var onClose: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -237,7 +275,7 @@ struct DayStoryView: View {
                 .keyboardShortcut(.space, modifiers: [])
             Button { next() } label: { Image(systemName: "forward.fill") }
                 .keyboardShortcut(.rightArrow, modifiers: [])
-            Button("Close") { dismiss() }
+            Button("Close") { if let onClose { onClose() } else { dismiss() } }
                 .keyboardShortcut(.cancelAction)
         }
         .buttonStyle(.plain)
@@ -329,7 +367,7 @@ private struct IntroScene: View {
     var body: some View {
         VStack(spacing: 26) {
             Spacer()
-            Text(story.date.formatted(.dateTime.weekday(.wide).day().month(.wide)).uppercased())
+            Text((story.periodLabel.map { "Last stretch · \($0)" } ?? story.date.formatted(.dateTime.weekday(.wide).day().month(.wide))).uppercased())
                 .font(.callout.weight(.semibold)).opacity(0.75)
             Text(story.tagline.isEmpty ? "Your day" : story.tagline)
                 .font(.system(size: 52, weight: .heavy, design: .rounded))

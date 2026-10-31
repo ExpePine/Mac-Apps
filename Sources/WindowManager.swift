@@ -9,6 +9,9 @@ final class WindowManager: NSObject, NSWindowDelegate {
     private var deviationWindow: NSWindow?
     private var deviationModel: DeviationModel?
     private var gateWindow: NSWindow?
+    private var replayWindow: NSWindow?
+
+    var isBusy: Bool { promptWindow != nil || gateWindow != nil || deviationWindow != nil || replayWindow != nil }
 
     /// Called when the user closes the check-in window with the red ✕.
     var onPromptClosedByUser: (@MainActor () -> Void)?
@@ -25,7 +28,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.center()
+        placeTopRight(window)
         promptWindow = window
         bringToFront(window)
     }
@@ -112,7 +115,40 @@ final class WindowManager: NSObject, NSWindowDelegate {
         gateWindow = nil
     }
 
+    // MARK: 4-hour replay
+
+    func showReplay(_ story: DayStory) {
+        closeReplay()
+        let view = DayStoryView(story: story, onClose: { [weak self] in self?.closeReplay() })
+        let host = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: host)
+        window.title = "Your last 4 hours"
+        window.styleMask = [.titled, .closable]
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        replayWindow = window
+        // Don't steal focus from what the user is typing: show it without activating.
+        window.orderFrontRegardless()
+    }
+
+    func closeReplay() {
+        let window = replayWindow
+        replayWindow = nil
+        window?.close()
+    }
+
     // MARK: Helpers
+
+    /// Top-right corner, just under the menu bar, so the check-in doesn't cover the middle of the screen.
+    private func placeTopRight(_ window: NSWindow) {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { window.center(); return }
+        let vf = screen.visibleFrame
+        let size = window.frame.size
+        window.setFrameOrigin(NSPoint(x: vf.maxX - size.width - 12, y: vf.maxY - size.height - 8))
+    }
 
     private func bringToFront(_ window: NSWindow) {
         if #available(macOS 14.0, *) {
@@ -131,6 +167,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
         } else if window === mainWindow {
             mainWindow = nil
             NSApp.setActivationPolicy(.accessory)   // back to menu-bar only
+        } else if window === replayWindow {
+            replayWindow = nil
         } else if window === deviationWindow {
             deviationWindow = nil
             deviationModel = nil

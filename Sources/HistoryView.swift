@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct HistoryView: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var settings: SettingsStore
+    var notes: NotesStore? = nil
     @StateObject private var player = AudioPlayer()
     @State private var search = ""
     @State private var hideMissed = false
@@ -26,7 +27,12 @@ struct HistoryView: View {
 
     private var days: [DayGroup] {
         let groups = Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.periodEnd) }
-        return groups.keys.sorted(by: >).map { day in
+        // Days that only have notes still appear.
+        var keys = Set(groups.keys)
+        for n in notes?.notes ?? [] where !n.text.isEmpty && (search.isEmpty || n.text.localizedCaseInsensitiveContains(search)) {
+            keys.insert(Calendar.current.startOfDay(for: n.created))
+        }
+        return keys.sorted(by: >).map { day in
             DayGroup(day: day, entries: (groups[day] ?? []).sorted { $0.periodEnd > $1.periodEnd })
         }
     }
@@ -35,7 +41,7 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search entries", text: $search)
+                TextField("Search entries and notes", text: $search)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 260)
                 Toggle("Hide missed/skipped", isOn: $hideMissed)
@@ -58,6 +64,24 @@ struct HistoryView: View {
                 List {
                     ForEach(days) { group in
                         Section(header: Text(group.day.formatted(.dateTime.weekday(.wide).day().month(.wide)))) {
+                            let dayNotes = (notes?.notes(on: group.day) ?? [])
+                                .filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) }
+                            if !dayNotes.isEmpty {
+                                ForEach(dayNotes) { n in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Image(systemName: "note.text").foregroundStyle(.yellow)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            HStack(spacing: 6) {
+                                                Text(n.created.formatted(date: .omitted, time: .shortened))
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                                if let g = n.goal { Text(g).font(.caption).foregroundStyle(areaColor(g)) }
+                                            }
+                                            Text(n.text).textSelection(.enabled).lineLimit(6)
+                                        }
+                                    }
+                                    .padding(.vertical, 3)
+                                }
+                            }
                             ForEach(group.entries) { entry in
                                 EntryRow(entry: entry, store: store, settings: settings, player: player)
                             }

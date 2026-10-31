@@ -74,6 +74,7 @@ struct EmailSettingsView: View {
             Section {
                 Toggle("Set today's and this month's goals before check-ins start", isOn: $settings.requireGoals)
                 Toggle("Compare each check-in with my goals", isOn: $settings.coachChecksEnabled)
+                Toggle("Every 4 hours, replay what I actually did", isOn: $settings.replayEvery4h)
             } header: {
                 Text("Coach")
             } footer: {

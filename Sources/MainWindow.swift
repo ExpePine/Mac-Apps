@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, Hashable, CaseIterable, Identifiable {
-    case today, goals, plans, insights, stuck, screenTime, reports, history, settings
+    case today, goals, plans, notes, insights, stuck, screenTime, reports, history, settings
     var id: String { rawValue }
 
     var title: String {
@@ -10,6 +10,7 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
         case .today: return "Today"
         case .goals: return "Goals"
         case .plans: return "Plans"
+        case .notes: return "Notes"
         case .insights: return "Insights"
         case .stuck: return "Stuck"
         case .reports: return "Reports"
@@ -24,6 +25,7 @@ enum MainSection: String, Hashable, CaseIterable, Identifiable {
         case .today: return "sun.max"
         case .goals: return "target"
         case .plans: return "checklist"
+        case .notes: return "note.text"
         case .insights: return "chart.line.uptrend.xyaxis"
         case .stuck: return "lifepreserver"
         case .reports: return "doc.richtext"
@@ -52,7 +54,7 @@ struct MainWindowView: View {
         NavigationSplitView {
             List(selection: $nav.section) {
                 Section {
-                    ForEach([MainSection.today, .goals, .plans, .insights, .stuck]) { s in
+                    ForEach([MainSection.today, .goals, .plans, .notes, .insights, .stuck]) { s in
                         Label(s.title, systemImage: s.icon).tag(s)
                     }
                 }
@@ -79,6 +81,8 @@ struct MainWindowView: View {
             GoalsView(goals: app.goals, coach: app.coach) { text in app.startPlan(goal: text, autoSuggest: true) }
         case .plans:
             PlansView(app: app, plans: app.plans, nav: nav)
+        case .notes:
+            NotesView(notes: app.notes, goalOptions: (app.goals.activeMonth + app.goals.activeToday).map(\.text))
         case .insights:
             InsightsView(app: app, analysis: app.analysis, nav: nav)
         case .stuck:
@@ -88,7 +92,7 @@ struct MainWindowView: View {
         case .screenTime:
             ScreenTimeView(app: app, tracker: app.tracker)
         case .history:
-            HistoryView(store: app.store, settings: app.settings)
+            HistoryView(store: app.store, settings: app.settings, notes: app.notes)
         case .settings:
             EmailSettingsView(settings: app.settings, reports: app.reports, tracker: app.tracker)
         }

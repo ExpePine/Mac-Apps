@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let archive: ReportArchive
     let plans: PlanStore
     let analysis: AnalysisStore
+    let notes: NotesStore
     let nav = Navigator()
 
     /// The check-in that is waiting for an answer (if any).
@@ -46,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         archive = ReportArchive(baseDirectory: store.directory, store: store, usage: usage, goals: goals)
         archive.plans = plans
         analysis = AnalysisStore(directory: store.directory)
+        notes = NotesStore(directory: store.directory)
         reports = ReportService(settings: settings, store: store, usage: usage, goals: goals, archive: archive)
         super.init()
 
@@ -84,7 +86,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 try? await Task.sleep(nanoseconds: 600_000_000_000)
             }
         }
+
+        // Replay of the last 4 hours: checked every 5 minutes.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            while !Task.isCancelled {
+                self?.maybeShowReplay()
+                try? await Task.sleep(nanoseconds: 300_000_000_000)
+            }
+        }
     }
+
+    // MARK: - 4-hour replay
+
+    private static let replayKey = "lastReplayShown"
+    private static let replayGap: TimeInterval = 4 * 3600
+
+    /// Shows the replay when 4 hours have passed since the last one (or since today's first activity),
+    /// the user is at the Mac, and no other window from the app is waiting for them.
+    private func maybeShowReplay(force: Bool = false) {
+        guard force || settings.replayEvery4h, !isDayOff else { return }
+        let now = Date()
+        if !force {
+            guard !windows.isBusy, activeSession == nil else { return }
+            let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+            guard idle < 300 else { return }
+            let todayStart = Calendar.current.startOfDay(for: now)
+            let firstToday = store.entries.filter { $0.periodEnd >= todayStart }.map(\.periodStart).min()
+            let last = UserDefaults.standard.object(forKey: Self.replayKey) as? Date
+            // Count from the later of: last replay, or the first check-in today.
+            let anchor = [last, firstToday].compactMap { $0 }.filter { $0 >= todayStart }.max() ?? firstToday
+            guard let anchor, now.timeIntervalSince(anchor) >= Self.replayGap else { return }
+        }
+        let window = DateInterval(start: now.addingTimeInterval(-Self.replayGap), end: now)
+        let story = archive.story(for: now, window: window)
+        guard force || story.activeSeconds >= 30 * 60 || !story.blocks.isEmpty else { return }
+        UserDefaults.standard.set(now, forKey: Self.replayKey)
+        windows.showReplay(story)
+    }
+
+    /// Menu bar: "Replay last 4 hours".
+    func replayNow() { maybeShowReplay(force: true) }
 
     // MARK: - Main window & goals
 
@@ -223,6 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         configurePath(session)
         session.onFinish = { [weak self] entry in self?.resolve(entry) }
         session.onStuck = { [weak self] in self?.showMain(.stuck) }
+        session.onQuickNote = { [weak self] text, goal in self?.notes.add(text, goal: goal) }
         activeSession = session
         windows.showPrompt(session)
     }

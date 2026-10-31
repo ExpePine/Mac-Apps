@@ -27,6 +27,7 @@ final class SettingsStore: ObservableObject {
         static let askGoalsMorning = "askGoalsMorning"
         static let requireGoals = "requireGoals"
         static let guessPosition = "guessPosition"
+        static let replayEvery4h = "replayEvery4h"
     }
 
     static let intervalPresets = [15, 20, 30, 40, 60]
@@ -80,6 +81,7 @@ final class SettingsStore: ObservableObject {
     @Published var requireGoals: Bool { didSet { defaults.set(requireGoals, forKey: Keys.requireGoals) } }
     /// At each check-in, guess where on your path you are (Groq).
     @Published var guessPosition: Bool { didSet { defaults.set(guessPosition, forKey: Keys.guessPosition) } }
+    @Published var replayEvery4h: Bool { didSet { defaults.set(replayEvery4h, forKey: Keys.replayEvery4h) } }
 
     init() {
         defaults.register(defaults: [
@@ -106,6 +108,7 @@ final class SettingsStore: ObservableObject {
             Keys.askGoalsMorning: true,
             Keys.requireGoals: true,
             Keys.guessPosition: true,
+            Keys.replayEvery4h: true,
         ])
         intervalMinutes = defaults.integer(forKey: Keys.interval)
         entryWindowMinutes = defaults.integer(forKey: Keys.window)
@@ -130,6 +133,7 @@ final class SettingsStore: ObservableObject {
         askGoalsMorning = defaults.bool(forKey: Keys.askGoalsMorning)
         requireGoals = defaults.bool(forKey: Keys.requireGoals)
         guessPosition = defaults.bool(forKey: Keys.guessPosition)
+        replayEvery4h = defaults.bool(forKey: Keys.replayEvery4h)
     }
 }
 

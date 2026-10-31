@@ -30,6 +30,12 @@ struct MenuContentView: View {
                 }
                 .help(scheduler.isPaused ? "Resume check-ins" : "Pause check-ins")
             }
+            HStack(spacing: 14) {
+                Button { app.replayNow() } label: { Label("Replay last 4 h", systemImage: "play.rectangle") }
+                Button { app.showMain(.notes) } label: { Label("Notes", systemImage: "note.text") }
+            }
+            .buttonStyle(.borderless)
+            .font(.callout)
 
             Button {
                 if app.needsGoals { app.showGoalsGate() } else { app.showMain(.goals) }

@@ -16,6 +16,8 @@ final class PromptSession: ObservableObject {
 
     var onFinish: (@MainActor (Entry) -> Void)?
     var onStuck: (@MainActor () -> Void)?
+    /// Saves a free-form note (not a check-in) to Notes.
+    var onQuickNote: (@MainActor (String, String?) -> Void)?
     /// Today's open goals, shown as a reminder in the window.
     var goalTexts: [String] = []
     /// The current step of the active plan, if any.
