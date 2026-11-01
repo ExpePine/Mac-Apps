@@ -153,7 +153,8 @@ struct DeliverySeries {
         switch k {
         case .value: return metric(value: true)
         case .qty: return qty
-        case .sma22, .sma66, .sma100, .sma300: return DeliverySignal.sma(metric(value: true), k.smaLength ?? 22)
+        case .sma22, .sma66, .sma100, .sma300, .ema22, .ema66, .ema100, .ema300:
+            return DeliverySignal.avg(metric(value: true), k.smaLength ?? 22, ema: k.isEMA)
         }
     }
 }
@@ -201,36 +202,59 @@ enum DeliveryChartBasis {
 }
 
 enum DeliveryMetric: String, CaseIterable, Identifiable {
-    case value, qty, sma22, sma66, sma100, sma300
+    case value, qty, sma22, sma66, sma100, sma300, ema22, ema66, ema100, ema300
     var id: String { rawValue }
-    /// The SMA length, or nil for the raw value / quantity.
+    /// The moving-average length (SMA or EMA), or nil for the raw value / quantity.
     var smaLength: Int? {
         switch self {
-        case .sma22: return 22
-        case .sma66: return 66
-        case .sma100: return 100
-        case .sma300: return 300
+        case .sma22, .ema22: return 22
+        case .sma66, .ema66: return 66
+        case .sma100, .ema100: return 100
+        case .sma300, .ema300: return 300
         default: return nil
         }
     }
+    var isEMA: Bool { [.ema22, .ema66, .ema100, .ema300].contains(self) }
+    /// "ta.sma" or "ta.ema"
+    var avgFn: String { isEMA ? "ta.ema" : "ta.sma" }
+    /// "SMA 22", "EMA 100" …
+    var avgName: String { "\(isEMA ? "EMA" : "SMA") \(smaLength ?? 22)" }
     var pine: String {
         switch self {
         case .value: return "DELIV_QTY*CLOSE_PRICE"
         case .qty: return "DELIV_QTY"
-        default: return "ta.sma(DELIV_QTY*CLOSE_PRICE, \(smaLength ?? 22))"
+        default: return "\(avgFn)(DELIV_QTY*CLOSE_PRICE, \(smaLength ?? 22))"
         }
     }
     var short: String {
         switch self {
         case .value: return "Deliv value ₹"
         case .qty: return "DELIV_QTY"
-        default: return "SMA\(smaLength ?? 22) value ₹"
+        default: return "\(isEMA ? "EMA" : "SMA")\(smaLength ?? 22) value ₹"
         }
     }
+    /// The Delivery Analysis signal's average type: EMA when an EMA is picked (STREAK, DELSMA, HI follow it).
+    static var signalIsEMA: Bool { current.isEMA }
     static var current: DeliveryMetric { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value }
 }
 
 enum DeliverySignal {
+    /// ta.sma or ta.ema, by the flag.
+    static func avg(_ x: [Double], _ n: Int, ema: Bool) -> [Double] { ema ? self.ema(x, n) : sma(x, n) }
+
+    /// Pine's ta.ema(x, n): seeded with the SMA of the first n bars, then α = 2 / (n + 1); the first n − 1 bars
+    /// (na in Pine) are 0, like sma(), so they can never be a high.
+    static func ema(_ x: [Double], _ n: Int) -> [Double] {
+        guard n > 1 else { return x }
+        var out = [Double](repeating: 0, count: x.count)
+        guard x.count >= n else { return out }
+        let a = 2.0 / Double(n + 1)
+        var e = x[0..<n].reduce(0, +) / Double(n)
+        out[n - 1] = e
+        for i in n..<x.count { e = a * x[i] + (1 - a) * e; out[i] = e }
+        return out
+    }
+
     /// Pine's ta.sma(x, n); the first n − 1 bars (na in Pine) are 0 so they can never be a high.
     static func sma(_ x: [Double], _ n: Int) -> [Double] {
         guard n > 1 else { return x }
@@ -442,7 +466,7 @@ struct DelsmaDaysDef: Equatable {
     /// did within the stored history (Pine's na), or bar i has no DELSMA yet.
     func days(_ x: [Double], at i: Int, smaLength n: Int) -> Int? {
         guard i < x.count, i >= n - 1 + length else { return nil }
-        let sm = DeliverySignal.sma(Array(x[...i]), n)
+        let sm = DeliverySignal.avg(Array(x[...i]), n, ema: DeliveryMetric.signalIsEMA)
         let valid = Array(sm[(n - 1)...])
         var k = valid.count - 1
         while k >= length {
@@ -468,7 +492,7 @@ struct StreakDef: Equatable {
         return DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "")?.smaLength ?? 22
     }
 
-    var pine: String { "ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(smaUsed)), \(length)) \(op) \(CombiEngine.fmt(value))" }
+    var pine: String { "ta.percentrank(\(DeliveryMetric.signalIsEMA ? "ta.ema" : "ta.sma")(DELIV_QTY*CLOSE_PRICE, \(smaUsed)), \(length)) \(op) \(CombiEngine.fmt(value))" }
 
     static var current: StreakDef {
         let d = UserDefaults.standard
@@ -494,7 +518,7 @@ struct StreakDef: Equatable {
     func streak(_ x: [Double], at i: Int) -> Int? {
         let n = smaUsed
         guard i < x.count, i >= n - 1 + length else { return nil }
-        let sm = DeliverySignal.sma(Array(x[...i]), n)
+        let sm = DeliverySignal.avg(Array(x[...i]), n, ema: DeliveryMetric.signalIsEMA)
         let valid = Array(sm[(n - 1)...])
         var k = valid.count - 1, count = 0
         while k >= length, let pr = DeliveryColumns.percentRank(valid, length: length, at: k), passes(pr) {
@@ -549,7 +573,7 @@ struct DeliveryColumns {
     /// highest, ~6 × T3 length for T3, like Pine's na; nil when T3 ≤ 0).
     static func hiOverT3(_ x: [Double], t3Source: [Double], sma n: Int = hiSma, length: Int = 300) -> Double? {
         guard x.count >= n - 1 + length else { return nil }
-        let sm = DeliverySignal.sma(x, n)
+        let sm = DeliverySignal.avg(x, n, ema: DeliveryMetric.signalIsEMA)
         guard let hi = sm.suffix(length).max(), let t = T3Def.current.t3(t3Source).last ?? nil, t > 0 else { return nil }
         return hi / t
     }
@@ -558,7 +582,7 @@ struct DeliveryColumns {
     /// percent rank needs 300 earlier SMA values, so it's nil until bar 21 + 300.
     static func delSma(_ x: [Double], at i: Int, smaLength: Int = 22, length: Int = 300) -> Double? {
         guard i < x.count, i >= smaLength - 1 + length else { return nil }
-        let sm = DeliverySignal.sma(Array(x[...i]), smaLength)
+        let sm = DeliverySignal.avg(Array(x[...i]), smaLength, ema: DeliveryMetric.signalIsEMA)
         let valid = Array(sm[(smaLength - 1)...])
         return percentRank(valid, length: length, at: valid.count - 1)
     }

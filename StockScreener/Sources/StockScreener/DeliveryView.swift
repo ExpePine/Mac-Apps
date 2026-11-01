@@ -499,10 +499,10 @@ struct DeliveryMiniChart: View {
                         .help("Fine-tune: shift the delivery chart by a few bars if it still doesn't line up with TradingView")
                 }
                 Picker("", selection: Binding(get: { DeliveryChartBasis.shown(signal: signalMetric, basis: basis) }, set: { basis = $0 })) {
-                    Text("Raw").tag("raw"); Text("SMA \(signalMetric.smaLength ?? 22)").tag("sma")
+                    Text("Raw").tag("raw"); Text(signalMetric.smaLength == nil ? "SMA 22" : signalMetric.avgName).tag("sma")
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
-                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA: of its \(signalMetric.smaLength ?? 22)-day average. Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
+                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases.filter { $0 != .candles })
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
@@ -697,7 +697,7 @@ struct StreakSettings: View {
             Text("STREAK column").font(.headline)
             Text("Number of consecutive trading days, ending on the Filter's data day, where:").font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 4) {
-                Text("ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE,").font(.caption.monospaced())
+                Text("ta.percentrank(\((DeliveryMetric(rawValue: metricRaw) ?? .value).avgFn)(DELIV_QTY*CLOSE_PRICE,").font(.caption.monospaced())
                 Picker("", selection: $sma) {
                     Text("signal's (\(DeliveryMetric(rawValue: metricRaw)?.smaLength ?? 22))").tag(0)
                     Text("22").tag(22)
@@ -749,7 +749,7 @@ struct DelsmaDaysSettings: View {
                     Button(CombiEngine.fmt(v)) { op = ">"; value = v }.controlSize(.small)
                 }
             }
-            Text("DELSMA = ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(DeliveryMetric(rawValue: metricRaw)?.smaLength ?? 22)), 300). 0 = the condition holds today; 5 = it last held 5 trading days ago; blank = not within the stored NSE history.")
+            Text("DELSMA = ta.percentrank(\((DeliveryMetric(rawValue: metricRaw) ?? .value).avgFn)(DELIV_QTY*CLOSE_PRICE, \(DeliveryMetric(rawValue: metricRaw)?.smaLength ?? 22)), 300). 0 = the condition holds today; 5 = it last held 5 trading days ago; blank = not within the stored NSE history.")
                 .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading).fixedSize(horizontal: false, vertical: true)
         }
         .onChange(of: op) { _ in DeliveryCenter.shared.refreshColumns() }

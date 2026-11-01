@@ -894,3 +894,17 @@ final class DelsmaDaysTests: XCTestCase {
         XCTAssertGreaterThan(got, 0)
     }
 }
+
+final class DeliveryEMATests: XCTestCase {
+    func testPineEMA() {
+        let x: [Double] = [1, 2, 3, 4, 5, 6]
+        let e = DeliverySignal.ema(x, 3)
+        XCTAssertEqual(e[0], 0); XCTAssertEqual(e[1], 0)
+        XCTAssertEqual(e[2], 2, accuracy: 1e-12)               // seeded with sma(1,2,3)
+        XCTAssertEqual(e[3], 0.5 * 4 + 0.5 * 2, accuracy: 1e-12) // α = 2 / (3 + 1)
+        XCTAssertEqual(e[5], 0.5 * 6 + 0.5 * (0.5 * 5 + 0.5 * 3), accuracy: 1e-12)
+        XCTAssertEqual(DeliveryMetric.ema100.smaLength, 100)
+        XCTAssertTrue(DeliveryMetric.ema100.isEMA)
+        XCTAssertEqual(DeliveryMetric.ema66.pine, "ta.ema(DELIV_QTY*CLOSE_PRICE, 66)")
+    }
+}

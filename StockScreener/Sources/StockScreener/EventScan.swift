@@ -82,7 +82,10 @@ enum ScanEngine {
         case .per: return s.per.map { Optional($0) }
         case .sma22: return sma(22)
         case .sma66: return sma(66)
-        case .delSma: return prank(sma(DeliveryColumns.hiSma))
+        case .delSma:
+            let k = DeliveryColumns.hiSma
+            let a = DeliverySignal.avg(v, k, ema: DeliveryMetric.signalIsEMA)
+            return prank(a.indices.map { $0 >= k - 1 ? a[$0] : nil })
         case .dqPrank: return prank(s.qty.map { Optional($0) })
         case .t3: return T3Def.current.t3(T3Def.current.source(s))
         case .t3Color:
@@ -91,7 +94,7 @@ enum ScanEngine {
         case .hiT3:
             let k = DeliveryColumns.hiSma
             guard n >= k - 1 + 300 else { return Array(repeating: nil, count: n) }
-            let sm = DeliverySignal.sma(v, k)
+            let sm = DeliverySignal.avg(v, k, ema: DeliveryMetric.signalIsEMA)
             let hi = DeliverySignal.highest(Array(sm[(k - 1)...]), length: 300, full: true)
             let t3 = T3Def.current.t3(T3Def.current.source(s))
             var out = [Double?](repeating: nil, count: n)

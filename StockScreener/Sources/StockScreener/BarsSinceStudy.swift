@@ -396,6 +396,7 @@ struct StudiesView: View {
 enum CrossStudy {
     struct Params {
         var hiSma = 22
+        var ema = DeliveryMetric.signalIsEMA
         var hiLength = 300
         var t3 = T3Def.current
         var fast = PriceT3.fast
@@ -415,8 +416,8 @@ enum CrossStudy {
     }
 
     /// ta.highest(ta.sma(x, n), length) per bar (nil until n − 1 + length bars).
-    static func highestSMA(_ x: [Double], n: Int, length: Int) -> [Double?] {
-        let sm = DeliverySignal.sma(x, n)
+    static func highestSMA(_ x: [Double], n: Int, length: Int, ema: Bool = false) -> [Double?] {
+        let sm = DeliverySignal.avg(x, n, ema: ema)
         var out = [Double?](repeating: nil, count: x.count)
         let first = n - 1 + length - 1
         guard x.count > first else { return out }
@@ -442,7 +443,7 @@ enum CrossStudy {
                     horizons: [Int], p: Params) -> BarsSinceStudy.Result {
         BarsSinceStudy.assemble(series, symbols: symbols, length: p.hiLength, horizons: horizons) { sym, s in
             let x = s.metric(value: true)
-            let hi = highestSMA(x, n: p.hiSma, length: p.hiLength)
+            let hi = highestSMA(x, n: p.hiSma, length: p.hiLength, ema: p.ema)
             let t3 = p.t3.t3(p.t3.source(s))
             guard let first = t3.indices.first(where: { t3[$0] != nil && hi[$0] != nil }) else { return nil }
             var hits = crossovers(t3: t3, hi: hi)
