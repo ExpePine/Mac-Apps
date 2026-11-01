@@ -63,6 +63,7 @@ struct DeliveryView: View {
             }
         }
         .navigationTitle("Delivery Analysis")
+        .task(id: selected) { if let s = selected { MBNoteFocus.shared.setChart(s, day: nil) } }
         .onAppear { dc.loadIfNeeded(); recompute() }
         .onChange(of: dc.revision) { _ in recompute(); pushChart() }
         .onChange(of: length) { _ in recompute() }
@@ -245,6 +246,7 @@ struct DeliveryView: View {
                     Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                         .opacity(pane == "Chart" ? 1 : 0.4)
+                    QuickFButton()
                     Button("TradingView") { vm.openChart(s, queue: shownRows.map(\.symbol), openWindow: openWindow) }.controlSize(.small).fixedSize()
                 }
                 if let series = dc.book.series[s] { stats(series) }
@@ -497,10 +499,10 @@ struct DeliveryMiniChart: View {
                         .help("Fine-tune: shift the delivery chart by a few bars if it still doesn't line up with TradingView")
                 }
                 Picker("", selection: Binding(get: { DeliveryChartBasis.shown(signal: signalMetric, basis: basis) }, set: { basis = $0 })) {
-                    Text("Raw").tag("raw"); Text("SMA \(signalMetric == .sma66 ? 66 : 22)").tag("sma")
+                    Text("Raw").tag("raw"); Text("SMA \(signalMetric.smaLength ?? 22)").tag("sma")
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
-                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA: of its \(signalMetric == .sma66 ? 66 : 22)-day average. Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
+                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA: of its \(signalMetric.smaLength ?? 22)-day average. Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases.filter { $0 != .candles })
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
@@ -697,9 +699,11 @@ struct StreakSettings: View {
             HStack(spacing: 4) {
                 Text("ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE,").font(.caption.monospaced())
                 Picker("", selection: $sma) {
-                    Text("signal's (\(DeliveryMetric(rawValue: metricRaw) == .sma66 ? 66 : 22))").tag(0)
+                    Text("signal's (\(DeliveryMetric(rawValue: metricRaw)?.smaLength ?? 22))").tag(0)
                     Text("22").tag(22)
                     Text("66").tag(66)
+                    Text("100").tag(100)
+                    Text("300").tag(300)
                 }
                 .labelsHidden().fixedSize()
                 .help("“signal's” follows the SMA picked in Delivery Analysis' Signal (22 unless ta.sma(…, 66) is selected)")
@@ -745,7 +749,7 @@ struct DelsmaDaysSettings: View {
                     Button(CombiEngine.fmt(v)) { op = ">"; value = v }.controlSize(.small)
                 }
             }
-            Text("DELSMA = ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(DeliveryMetric(rawValue: metricRaw) == .sma66 ? 66 : 22)), 300). 0 = the condition holds today; 5 = it last held 5 trading days ago; blank = not within the stored NSE history.")
+            Text("DELSMA = ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(DeliveryMetric(rawValue: metricRaw)?.smaLength ?? 22)), 300). 0 = the condition holds today; 5 = it last held 5 trading days ago; blank = not within the stored NSE history.")
                 .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading).fixedSize(horizontal: false, vertical: true)
         }
         .onChange(of: op) { _ in DeliveryCenter.shared.refreshColumns() }

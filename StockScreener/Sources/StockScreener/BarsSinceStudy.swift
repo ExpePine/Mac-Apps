@@ -202,7 +202,7 @@ struct StudiesView: View {
                 Text("and ta.crossover(T3, HI)").font(.callout.monospaced())
                     .help("T3 = Tilson T3 of delivery (Settings → T3 on delivery). HI = ta.highest(ta.sma(DELIV_QTY*CLOSE, n), 300)")
                 Picker("", selection: $hiSma) {
-                    Text("HI sma: signal's").tag(0); Text("HI sma 22").tag(22); Text("HI sma 66").tag(66)
+                    Text("HI sma: signal's").tag(0); Text("HI sma 22").tag(22); Text("HI sma 66").tag(66); Text("HI sma 100").tag(100); Text("HI sma 300").tag(300)
                 }
                 .labelsHidden().fixedSize()
             }

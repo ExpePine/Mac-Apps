@@ -80,6 +80,7 @@ struct ChartViewer: View {
             }
         }
         .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
+        .task(id: symbol + "|" + (vm.chartGoTo ?? "")) { if !symbol.isEmpty { MBNoteFocus.shared.setChart(symbol, day: vm.chartGoTo) } }
         .onAppear { load(); vm.refreshChartLinksIfStale() }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
         .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0 }
@@ -115,6 +116,7 @@ struct ChartViewer: View {
             if let p = pos, vm.chartQueue.count > 1 {
                 Text("\(p + 1) / \(vm.chartQueue.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
+            QuickFButton()
             SymbolField(vm: vm, placeholder: "Symbol", text: $typed) {
                 let s = SymbolBook.clean(typed)
                 if !s.isEmpty { vm.chartSymbol = s }

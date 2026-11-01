@@ -85,6 +85,7 @@ struct NewsChartView: View {
             }
         }
         .navigationTitle(symbol.isEmpty ? "News & Deals" : "News & Deals — \(symbol)")
+        .task(id: symbol) { if !symbol.isEmpty { MBNoteFocus.shared.setChart(symbol, day: nil) } }
         .onAppear {
             deals.update(days: 730)
             if symbol.isEmpty, let c = vm.chartSymbol, !c.isEmpty { symbol = c.uppercased() }
@@ -111,6 +112,7 @@ struct NewsChartView: View {
                     let t = search.trimmingCharacters(in: .whitespaces).uppercased()
                     if !t.isEmpty { symbol = t; search = "" }
                 }).frame(width: 200)
+                QuickFButton()
                 if !symbol.isEmpty {
                     HStack(spacing: 6) {
                         Text(symbol).font(.title3.bold())

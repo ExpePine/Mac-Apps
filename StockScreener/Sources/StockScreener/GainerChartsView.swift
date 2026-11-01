@@ -109,6 +109,7 @@ struct GainerChartsView: View {
             }
         }
         .navigationTitle(cur.map { "Gainer Charts — \($0.symbol) · Chart \(chart + 1)" } ?? "Gainer Charts")
+        .task(id: cur?.symbol) { if let c = cur { MBNoteFocus.shared.setChart(c.symbol, day: day) } }
         .onAppear { vm.refreshChartLinksIfStale(); restart() }
         .task { await LiveQuotes.shared.keepLive(vm) }
         .onChange(of: mode) { _ in restart() }
@@ -182,6 +183,7 @@ struct GainerChartsView: View {
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             Text("\(count) stock\(count == 1 ? "" : "s") · \(count * perStock) charts").font(.caption.bold()).fixedSize()
             Toggle("Delivery chart", isOn: $showDelivery).toggleStyle(.checkbox).fixedSize()
+            QuickFButton()
             Toggle("🔗 Sync dates", isOn: $sync).toggleStyle(.checkbox).fixedSize()
                 .help("Keep the delivery chart on the same dates as the TradingView chart (and back)")
             Menu {

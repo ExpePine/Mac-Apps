@@ -153,8 +153,7 @@ struct DeliverySeries {
         switch k {
         case .value: return metric(value: true)
         case .qty: return qty
-        case .sma22: return DeliverySignal.sma(metric(value: true), 22)
-        case .sma66: return DeliverySignal.sma(metric(value: true), 66)
+        case .sma22, .sma66, .sma100, .sma300: return DeliverySignal.sma(metric(value: true), k.smaLength ?? 22)
         }
     }
 }
@@ -192,32 +191,40 @@ enum DeliveryChartBasis {
     static func metric(signal: DeliveryMetric, basis: String) -> DeliveryMetric {
         switch basis {
         case "raw": return signal == .qty ? .qty : .value
-        case "sma": return signal == .sma66 ? .sma66 : .sma22
+        case "sma": return signal.smaLength == nil ? .sma22 : signal
         default: return signal
         }
     }
     static func shown(signal: DeliveryMetric, basis: String) -> String {
-        basis.isEmpty ? (signal == .sma22 || signal == .sma66 ? "sma" : "raw") : basis
+        basis.isEmpty ? (signal.smaLength != nil ? "sma" : "raw") : basis
     }
 }
 
 enum DeliveryMetric: String, CaseIterable, Identifiable {
-    case value, qty, sma22, sma66
+    case value, qty, sma22, sma66, sma100, sma300
     var id: String { rawValue }
+    /// The SMA length, or nil for the raw value / quantity.
+    var smaLength: Int? {
+        switch self {
+        case .sma22: return 22
+        case .sma66: return 66
+        case .sma100: return 100
+        case .sma300: return 300
+        default: return nil
+        }
+    }
     var pine: String {
         switch self {
         case .value: return "DELIV_QTY*CLOSE_PRICE"
         case .qty: return "DELIV_QTY"
-        case .sma22: return "ta.sma(DELIV_QTY*CLOSE_PRICE, 22)"
-        case .sma66: return "ta.sma(DELIV_QTY*CLOSE_PRICE, 66)"
+        default: return "ta.sma(DELIV_QTY*CLOSE_PRICE, \(smaLength ?? 22))"
         }
     }
     var short: String {
         switch self {
         case .value: return "Deliv value ₹"
         case .qty: return "DELIV_QTY"
-        case .sma22: return "SMA22 value ₹"
-        case .sma66: return "SMA66 value ₹"
+        default: return "SMA\(smaLength ?? 22) value ₹"
         }
     }
     static var current: DeliveryMetric { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value }
@@ -458,10 +465,7 @@ struct StreakDef: Equatable {
     /// The SMA actually used (resolves "follow the signal").
     var smaUsed: Int {
         if sma > 1 { return sma }
-        switch DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") {
-        case .sma66?: return 66
-        default: return 22
-        }
+        return DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "")?.smaLength ?? 22
     }
 
     var pine: String { "ta.percentrank(ta.sma(DELIV_QTY*CLOSE_PRICE, \(smaUsed)), \(length)) \(op) \(CombiEngine.fmt(value))" }
@@ -539,7 +543,7 @@ struct DeliveryColumns {
     }
 
     /// SMA length for HI/T3: follows Delivery Analysis' Signal (66 when ta.sma(…, 66) is picked, else 22).
-    static var hiSma: Int { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") == .sma66 ? 66 : 22 }
+    static var hiSma: Int { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "")?.smaLength ?? 22 }
 
     /// ta.highest(ta.sma(x, n), 300) / t3 on the last bar of x (nil until both exist: n − 1 + 300 bars for the
     /// highest, ~6 × T3 length for T3, like Pine's na; nil when T3 ≤ 0).

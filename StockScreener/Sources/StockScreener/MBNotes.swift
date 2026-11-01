@@ -17,6 +17,16 @@ struct MBNote: Codable, Identifiable, Equatable {
     static let shared = MBNoteFocus()
     @Published var event: MBEvent?
     func set(_ e: MBEvent?) { if e?.id != event?.id { event = e } }
+
+    /// Any chart: the stock's note for that month (the multibagger move's own note when there is one).
+    func setChart(_ symbol: String, day: String?) {
+        let sym = symbol.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !sym.isEmpty else { return }
+        let d = (day?.isEmpty == false ? day! : AlertSchedule.today())
+        let month = String(d.prefix(7))
+        if let e = MultibaggerCenter.shared.events.first(where: { $0.symbol == sym && $0.month == month }) { set(e); return }
+        set(MBEvent(symbol: sym, month: month, gain: 0, peakGain: 0, baseDay: d, startDay: d, crossDay: d, peakDay: d, endDay: d))
+    }
 }
 
 @MainActor final class MBNoteStore: ObservableObject {
@@ -494,7 +504,7 @@ struct MBNoteView: View {
                     Text(e.symbol).font(.headline)
                     if let company { Text(company).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer(minLength: 4)
-                    Text("\(e.monthTitle) \(String(format: "%+.0f%%", e.gain))").font(.caption.bold()).foregroundStyle(.green)
+                    Text(e.gain == 0 ? e.monthTitle : "\(e.monthTitle) \(String(format: "%+.0f%%", e.gain))").font(.caption.bold()).foregroundStyle(e.gain == 0 ? Color.secondary : Color.green)
                 }
                 GhostTextEditor(text: $text, cursor: $cursor, setVersion: setVersion, ghost: comp.ghost, onKey: { key(key: $0, comp: comp, list: list) })
                     .frame(height: 64)
@@ -534,7 +544,7 @@ struct MBNoteView: View {
                     Button("All notes (\(store.ordered.count))") { QuickFPanel.shared.openCombos?() }.buttonStyle(.link).font(.caption2)
                 }
             } else {
-                Text("Open a multibagger in the Chart Reel (or select one in Multibaggers) — its note appears here.")
+                Text("Open any chart — Chart viewer, Chart Reel, Gainer Charts, Delivery or News — and its stock's note for that month appears here.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
