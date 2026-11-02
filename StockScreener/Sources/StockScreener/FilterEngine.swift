@@ -166,9 +166,11 @@ final class CellPainter {
         self.previous = previous
         var ignored: [String] = []
         for rule in cellRules where rule.condition.isEnabled {
-            guard let col = table.index(of: rule.condition.column), let color = rule.shade.nsColor else {
+            // the column painted: the tested one, or another (e.g. the symbol coloured by Safety)
+            let target = rule.paint.flatMap { table.index(of: $0) } ?? table.index(of: rule.condition.column)
+            guard table.index(of: rule.condition.column) != nil, let col = target, let color = rule.resolvedColor else {
                 // A "Neutral" rule still stops later rules for that column.
-                if let col = table.index(of: rule.condition.column), rule.shade == .none {
+                if table.index(of: rule.condition.column) != nil, let col = target, rule.shade == .none, rule.custom == nil {
                     let c = rule.condition
                     if let p = FilterCompiler.compile(FilterCondition(column: c.column, op: c.op, value: c.value, value2: c.value2),
                                                       table: table, issues: &ignored) {

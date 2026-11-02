@@ -908,3 +908,24 @@ final class DeliveryEMATests: XCTestCase {
         XCTAssertEqual(DeliveryMetric.ema66.pine, "ta.ema(DELIV_QTY*CLOSE_PRICE, 66)")
     }
 }
+
+final class SymbolColourTests: XCTestCase {
+    func testPaintSymbolBySafety() {
+        let t = SheetTable(headers: ["Symbol", "Safety"], rows: [
+            SheetRow(id: 0, cells: ["AAA", "500"], numbers: [nil, 500]),
+            SheetRow(id: 1, cells: ["BBB", "3000"], numbers: [nil, 3000]),
+            SheetRow(id: 2, cells: ["CCC", "9000"], numbers: [nil, 9000]),
+        ])
+        var red = CellRule(condition: Rule(column: "Safety", op: .lessThan, value: "1000"), shade: .red, paint: "Symbol")
+        red.custom = RGBA(r: 1, g: 0, b: 0, a: 0.2)
+        let orange = CellRule(condition: Rule(column: "Safety", op: .lessThan, value: "5000"), shade: .orange, paint: "Symbol")
+        let p = CellPainter([red, orange], table: t)
+        XCTAssertEqual(Double(p.color(for: t.rows[0], column: 0)!.alphaComponent), 0.2, accuracy: 1e-6)
+        XCTAssertNotNil(p.color(for: t.rows[1], column: 0))
+        XCTAssertNil(p.color(for: t.rows[2], column: 0))
+        XCTAssertNil(p.color(for: t.rows[0], column: 1), "Safety itself is not painted")
+        var a = CellRule(condition: Rule(column: "Safety", op: .greaterThan, value: "0"), shade: .green)
+        a.alpha = 0.9
+        XCTAssertEqual(Double(a.resolvedColor!.alphaComponent), 0.9, accuracy: 1e-6)
+    }
+}

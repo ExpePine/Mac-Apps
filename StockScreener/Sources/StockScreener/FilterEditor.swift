@@ -295,10 +295,80 @@ struct CellRuleRow: View {
                         .textFieldStyle(.roundedBorder)
                 }
             }
-            ShadePicker(selection: $rule.shade)
+            HStack(spacing: 8) {
+                RuleColorPicker(rule: $rule)
+                Spacer(minLength: 4)
+                Text("paint").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: Binding(get: { rule.paint ?? "" }, set: { rule.paint = $0.isEmpty ? nil : $0 })) {
+                    Text("this column").tag("")
+                    ForEach(columns.filter { $0 != rule.condition.column }, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                .help("Which column gets the colour — e.g. test Safety but colour the Symbol")
+            }
         }
         .opacity(rule.condition.isEnabled ? 1 : 0.5)
         .padding(.vertical, 4)
+    }
+}
+
+/// Preset swatches + transparency + your own colour (with opacity), in a small panel.
+struct RuleColorPicker: View {
+    @Binding var rule: CellRule
+    @State private var open = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ShadePicker(selection: Binding(get: { rule.custom == nil ? rule.shade : .none },
+                                           set: { rule.shade = $0; rule.custom = nil }))
+            Button { open.toggle() } label: {
+                HStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 4).fill(rule.swatch ?? .clear)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.3)))
+                        .frame(width: 20, height: 20)
+                    Image(systemName: "slider.horizontal.3")
+                }
+            }
+            .buttonStyle(.borderless)
+            .help("More colour options: your own colour and transparency")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Colour").font(.headline)
+                    ColorPicker("Your own colour", selection: Binding(
+                        get: { rule.custom?.color ?? rule.swatch ?? Color.green.opacity(0.4) },
+                        set: { rule.custom = RGBA($0) }), supportsOpacity: true)
+                    HStack {
+                        Text("Transparency").font(.callout)
+                        Slider(value: Binding(get: { 1 - (rule.custom?.a ?? rule.alpha ?? Double(rule.resolvedColor?.alphaComponent ?? 0.4)) },
+                                              set: { t in
+                                                  let a = max(0.03, 1 - t)
+                                                  if rule.custom != nil { rule.custom!.a = a } else { rule.alpha = a }
+                                              }), in: 0...0.97)
+                            .frame(width: 180)
+                        Text("\(Int(((1 - (rule.custom?.a ?? rule.alpha ?? Double(rule.resolvedColor?.alphaComponent ?? 0.4))) * 100).rounded()))%")
+                            .font(.caption.monospacedDigit()).frame(width: 36, alignment: .trailing)
+                    }
+                    HStack(spacing: 6) {
+                        Text("Quick").font(.caption).foregroundStyle(.secondary)
+                        ForEach([0.15, 0.3, 0.5, 0.75, 1.0], id: \.self) { a in
+                            Button("\(Int(a * 100))%") { if rule.custom != nil { rule.custom!.a = a } else { rule.alpha = a } }
+                                .controlSize(.small)
+                        }
+                        Text("opacity").font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Preview").font(.caption)
+                        Text("  RELIANCE  ").font(.callout.bold())
+                            .padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(rule.swatch ?? .clear))
+                        Spacer()
+                        Button("Back to preset") { rule.custom = nil; rule.alpha = nil }.controlSize(.small)
+                    }
+                }
+                .padding(14)
+                .frame(width: 340)
+            }
+        }
     }
 }
 

@@ -429,6 +429,32 @@ struct CellRule: Identifiable, Codable, Equatable {
     var shade: Shade = .green
     /// ✓ Only colour when it just became true: true today, not true on the previous stored day.
     var onlyNew: Bool? = nil
+    /// Paint a different column than the one tested (e.g. the symbol, by Safety). nil = the tested column.
+    var paint: String? = nil
+    /// Your own colour (with transparency), instead of the preset shade.
+    var custom: RGBA? = nil
+    /// Transparency for a preset shade (0–1); nil = the shade's own.
+    var alpha: Double? = nil
+
+    /// The colour to paint, or nil for "neutral".
+    var resolvedColor: NSColor? {
+        if let c = custom { return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a) }
+        guard let base = shade.nsColor else { return nil }
+        return alpha.map { base.withAlphaComponent($0) } ?? base
+    }
+    var swatch: Color? { resolvedColor.map { Color(nsColor: $0) } }
+}
+
+/// sRGB colour with transparency (0–1 each).
+struct RGBA: Codable, Equatable {
+    var r: Double, g: Double, b: Double, a: Double
+
+    init(r: Double, g: Double, b: Double, a: Double) { self.r = r; self.g = g; self.b = b; self.a = a }
+    init(_ c: Color) {
+        let n = NSColor(c).usingColorSpace(.sRGB) ?? .gray
+        r = Double(n.redComponent); g = Double(n.greenComponent); b = Double(n.blueComponent); a = Double(n.alphaComponent)
+    }
+    var color: Color { Color(.sRGB, red: r, green: g, blue: b, opacity: a) }
 }
 
 // MARK: - Alert settings

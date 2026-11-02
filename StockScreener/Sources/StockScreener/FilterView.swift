@@ -378,7 +378,7 @@ struct FilterSidebar: View {
 
             Section {
                 ForEach($vm.settings.cellRules) { $rule in
-                    CellRuleRow(rule: $rule, columns: vm.filterColumnIndices.map { vm.headers[$0] }) {
+                    CellRuleRow(rule: $rule, columns: Array(NSOrderedSet(array: (vm.labelIndex.map { [vm.headers[$0]] } ?? []) + vm.filterColumnIndices.map { vm.headers[$0] } + (vm.table.index(of: "Safety") != nil ? ["Safety"] : []))) as? [String] ?? []) {
                         vm.settings.cellRules.removeAll { $0.id == rule.id }
                     }
                 }
@@ -399,10 +399,21 @@ struct FilterSidebar: View {
                     .help("Adds two rules for one column: above a value = green, below = red, otherwise neutral")
                 }
                 .buttonStyle(.borderless)
+                if vm.table.index(of: "Safety") != nil, let l = vm.labelIndex {
+                    Button {
+                        let sym = vm.headers[l]
+                        vm.settings.cellRules.append(CellRule(condition: Rule(column: "Safety", op: .lessThan, value: "1000"), shade: .red, paint: sym))
+                        vm.settings.cellRules.append(CellRule(condition: Rule(column: "Safety", op: .lessThan, value: "5000"), shade: .orange, paint: sym))
+                    } label: {
+                        Label("Colour the symbol by Safety", systemImage: "shield.lefthalf.filled")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Adds two rules that test Safety (ta.sma(DELIV_QTY, 100) × 0.05) and paint the stock's symbol: below 1,000 red, below 5,000 orange — change the numbers and colours to your limits")
+                }
             } header: {
                 Text("Cell colors — per column")
             } footer: {
-                Text("Each rule colors only cells in its own column. If several rules for a column match, the first wins; anything else stays neutral.")
+                Text("Each rule colours its own column — or the column set in “paint”, e.g. the symbol coloured by Safety. If several rules for a column match, the first wins; anything else stays neutral. The slider button next to the swatches sets your own colour and transparency.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

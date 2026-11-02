@@ -291,7 +291,10 @@ struct GainersView: View {
         }
         if let c = sortColumn { rows = Sorter.sort(rows, column: c, descending: sortDescending) }
         let marked = Set(active.keys.compactMap { derived.index(of: $0) })
-        let painter: CellPainter? = vm.settings.gainersShowFilterColumns ? CellPainter(vm.settings.cellRules, table: derived) : nil
+        // Filter colours on the Filter columns (when shown), and always the rules that paint the symbol (e.g. by Safety)
+        let symName = derived.headers[vm.labelIndex ?? 0]
+        let rulesHere = vm.settings.gainersShowFilterColumns ? vm.settings.cellRules : vm.settings.cellRules.filter { $0.paint == symName }
+        let painter: CellPainter? = rulesHere.isEmpty ? nil : CellPainter(rulesHere, table: derived)
         return VStack(spacing: 0) {
             SheetTableView(headers: derived.headers, originalHeaders: derived.originalHeaders, columns: cols, rows: rows,
                            version: version &+ rows.count &+ (sortColumn ?? -1) &* 31 &+ (sortDescending ? 1 : 0),
