@@ -107,8 +107,9 @@ struct StockScreenerApp: App {
 
         Window("Scraper", id: "scraper") {
             ScraperView()
-                .frame(minWidth: 820, minHeight: 600)
         }
+        .defaultSize(width: 1100, height: 760)
+        .windowResizability(.contentMinSize)
 
         Window("Data Storage", id: "storage") {
             StorageView()

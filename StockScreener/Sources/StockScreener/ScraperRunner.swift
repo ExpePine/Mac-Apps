@@ -38,6 +38,15 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
     var ownToken = false             // use its own Keychain token instead of the shared one
     var lastAutoDay = ""
     var title: String { repo.isEmpty ? "New repository" : repo }
+
+    /// "https://github.com/owner/repo.git", "github.com/owner/repo/", "owner/repo" → "owner/repo"
+    static func clean(_ s: String) -> String {
+        var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        for p in ["https://", "http://", "www.", "github.com/"] where t.lowercased().hasPrefix(p) { t = String(t.dropFirst(p.count)) }
+        if t.hasSuffix(".git") { t = String(t.dropLast(4)) }
+        let parts = t.split(separator: "/").map(String.init)
+        return parts.count >= 2 ? parts[0] + "/" + parts[1] : t
+    }
     var tokenAccount: String { ownToken ? "github.pat.\(id.uuidString)" : ScraperCenter.keychainAccount }
 }
 
@@ -56,6 +65,7 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
     @Published var live: [UUID: [UUID: StepLive]] = [:]
     @Published var chainRunning: Set<UUID> = []
     @Published var chainStatus: [UUID: String] = [:]
+    @Published var chainGap: [UUID: (step: UUID, until: Date)] = [:]
     var chainTasks: [UUID: Task<Void, Never>] = [:]
 
     private static func load() -> [ScraperRepo] {
@@ -72,12 +82,35 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
     private func save() { UserDefaults.standard.set(try? JSONEncoder().encode(repos), forKey: "gh.repos") }
 
     func repo(_ id: UUID) -> ScraperRepo? { repos.first { $0.id == id } }
+
+    /// Repositories the shared token can see (yours and your organisations'), newest pushed first.
+    func myRepos() async -> (names: [String], error: String?) {
+        let probe = ScraperRepo(repo: "x/x")
+        var out: [String] = []
+        for page in 1...5 {
+            guard let res = try? await request(probe, "/user/repos?per_page=100&sort=pushed&page=\(page)") else { return (out, "Couldn't reach GitHub.") }
+            guard res.1 == 200 else { return (out, explain(res.1, res.0, ref: "main")) }
+            let arr = (try? JSONSerialization.jsonObject(with: res.0) as? [[String: Any]]) ?? []
+            out += arr.compactMap { $0["full_name"] as? String }
+            if arr.count < 100 { break }
+        }
+        return (out, nil)
+    }
+
+    func addRepos(_ names: [String]) -> UUID? {
+        var last: UUID?
+        for n in names.map(ScraperRepo.clean) where !n.isEmpty && !repos.contains(where: { $0.repo.lowercased() == n.lowercased() }) {
+            let r = ScraperRepo(repo: n); repos.append(r); last = r.id
+        }
+        return last
+    }
     func update(_ id: UUID, _ f: (inout ScraperRepo) -> Void) { if let i = repos.firstIndex(where: { $0.id == id }) { f(&repos[i]) } }
     func hasToken(_ r: ScraperRepo) -> Bool { !Keychain.get(r.tokenAccount).isEmpty }
 
     func request(_ r: ScraperRepo, _ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> (Data, Int) {
         let token = Keychain.get(r.tokenAccount)
         guard !token.isEmpty else { throw YahooClient.Failure(message: r.ownToken ? "Save this repository's token first." : "Save your GitHub token first.") }
+        let path = path.replacingOccurrences(of: "/repos/\(r.repo)/", with: "/repos/\(ScraperRepo.clean(r.repo))/")
         guard let url = URL(string: "https://api.github.com" + path) else { throw YahooClient.Failure(message: "Bad repository name") }
         var q = URLRequest(url: url, timeoutInterval: 25)
         q.httpMethod = method
@@ -168,37 +201,57 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
 
 struct ScraperView: View {
     @ObservedObject private var sc = ScraperCenter.shared
-    @State private var current: UUID?
+    @AppStorage("gh.tab") private var tab = 0
     @State private var sharedToken = ""
     @State private var hasShared = !Keychain.get(ScraperCenter.keychainAccount).isEmpty
 
-    @AppStorage("gh.tab") private var tab = 0
-
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                Text("Repositories").tag(0)
-                Text("Chains — run repos one after another").tag(1)
+            FlowLayout(spacing: 10, lineSpacing: 6) {
+                Picker("", selection: $tab) {
+                    Text("Repositories").tag(0)
+                    Text("Chains").tag(1)
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                Image(systemName: hasShared ? "key.fill" : "key").foregroundStyle(hasShared ? .green : .orange)
+                SecureField(hasShared ? "GitHub token saved — paste a new one to replace" : "Paste your GitHub token (classic, “repo” scope)", text: $sharedToken)
+                    .textFieldStyle(.roundedBorder).frame(width: 330)
+                Button("Save token") {
+                    Keychain.set(sharedToken.trimmingCharacters(in: .whitespacesAndNewlines), for: ScraperCenter.keychainAccount)
+                    sharedToken = ""; hasShared = !Keychain.get(ScraperCenter.keychainAccount).isEmpty
+                }
+                .disabled(sharedToken.isEmpty)
             }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 460).padding(8)
+            .controlSize(.small)
+            .padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
-            if tab == 1 { ChainsView() } else { repositories }
+            if tab == 1 { ChainsView() } else { RepositoriesView(hasShared: hasShared) }
         }
+        .frame(minWidth: 640, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
         .navigationTitle("Scraper")
     }
+}
 
-    private var repositories: some View {
+private struct RepositoriesView: View {
+    let hasShared: Bool
+    @ObservedObject private var sc = ScraperCenter.shared
+    @State private var current: UUID?
+    @State private var picking = false
+    @State private var typing = false
+    @State private var typed = ""
+
+    var body: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 List(selection: $current) {
                     ForEach(sc.repos) { r in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(r.title).fontWeight(.medium).lineLimit(1)
+                                Text(r.title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
                                 Text(r.auto ? String(format: "%d ticked · daily %02d:%02d IST", r.selected.count, r.at / 60, r.at % 60) : "\(r.selected.count) ticked")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
-                            Spacer()
+                            Spacer(minLength: 0)
                             if sc.busy.contains(r.id) { ProgressView().controlSize(.mini) }
                         }
                         .tag(r.id)
@@ -206,55 +259,101 @@ struct ScraperView: View {
                     }
                 }
                 Divider()
-                HStack {
-                    Button { add() } label: { Image(systemName: "plus") }.help("Add a repository")
-                    Button { if let c = current { remove(c) } } label: { Image(systemName: "minus") }.disabled(current == nil)
-                    Spacer()
-                    Button { Task { await sc.runAll() } } label: { Label("Run all ticked", systemImage: "play.fill") }
-                        .disabled(sc.repos.allSatisfy { $0.selected.isEmpty })
-                        .help("Every repository's ticked workflows, now")
-                }
-                .buttonStyle(.borderless).padding(8)
-            }
-            .frame(minWidth: 240, idealWidth: 270, maxWidth: 340)
-
-            VStack(alignment: .leading, spacing: 12) {
-                GroupBox("Shared GitHub token") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button { picking = true } label: { Label("Add from my GitHub…", systemImage: "plus.circle.fill") }
+                        .disabled(!hasShared)
+                        .help(hasShared ? "Pick from the repositories your token can see" : "Save your token first (top of the window)")
+                    Button { typing = true } label: { Label("Add by name or link…", systemImage: "link") }
                     HStack {
-                        SecureField(hasShared ? "Saved in the Keychain — paste a new one to replace it" : "Personal access token (classic: ghp_…)", text: $sharedToken)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Save") {
-                            Keychain.set(sharedToken.trimmingCharacters(in: .whitespacesAndNewlines), for: ScraperCenter.keychainAccount)
-                            sharedToken = ""; hasShared = !Keychain.get(ScraperCenter.keychainAccount).isEmpty
-                        }
-                        .disabled(sharedToken.isEmpty)
+                        Button { if let c = current { remove(c) } } label: { Label("Remove", systemImage: "minus") }.disabled(current == nil)
+                        Spacer()
+                        Button { Task { await sc.runAll() } } label: { Label("Run all ticked", systemImage: "play.fill") }
+                            .disabled(sc.repos.allSatisfy { $0.selected.isEmpty })
                     }
-                    .padding(4)
-                    Text("Used by every repository unless it has its own. Classic token: the “repo” scope (and “workflow”). Kept only in your Mac's Keychain.")
-                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
                 }
+                .buttonStyle(.borderless).controlSize(.small).padding(8)
+            }
+            .frame(minWidth: 200, idealWidth: 250, maxWidth: 360)
+
+            Group {
                 if let id = current, sc.repo(id) != nil {
                     RepoPanel(id: id).id(id)
                 } else {
-                    Text(sc.repos.isEmpty ? "Click + to add your first scraper repository." : "Pick a repository on the left.")
-                        .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 10) {
+                        Text(sc.repos.isEmpty ? "No repositories yet." : "Pick a repository on the left.").foregroundStyle(.secondary)
+                        if sc.repos.isEmpty {
+                            Button { picking = true } label: { Label("Add from my GitHub…", systemImage: "plus.circle.fill") }
+                                .buttonStyle(.borderedProminent).disabled(!hasShared)
+                            if !hasShared { Text("Paste and save your token at the top first.").font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(16)
-            .frame(minWidth: 620)
+            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { if current == nil { current = sc.repos.first?.id } }
+        .sheet(isPresented: $picking) { RepoPicker { names in if let id = sc.addRepos(names) { current = id } } }
+        .sheet(isPresented: $typing) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add a repository").font(.headline)
+                TextField("owner/repo or https://github.com/owner/repo", text: $typed).textFieldStyle(.roundedBorder).frame(width: 380)
+                    .onSubmit { addTyped() }
+                HStack { Spacer(); Button("Cancel") { typing = false }; Button("Add") { addTyped() }.keyboardShortcut(.defaultAction).disabled(typed.isEmpty) }
+            }
+            .padding(16)
+        }
     }
 
-    private func add() {
-        let r = ScraperRepo()
-        sc.repos.append(r)
-        current = r.id
+    private func addTyped() {
+        if let id = sc.addRepos([typed]) { current = id }
+        typed = ""; typing = false
     }
     private func remove(_ id: UUID) {
         if let r = sc.repo(id), r.ownToken { Keychain.set("", for: r.tokenAccount) }
         sc.repos.removeAll { $0.id == id }
         current = sc.repos.first?.id
+    }
+}
+
+/// Tick repositories from the ones your token can see.
+private struct RepoPicker: View {
+    let onAdd: ([String]) -> Void
+    @ObservedObject private var sc = ScraperCenter.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var names: [String] = []
+    @State private var picked = Set<String>()
+    @State private var search = ""
+    @State private var error: String?
+    @State private var loading = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Add repositories").font(.headline)
+            TextField("Search", text: $search).textFieldStyle(.roundedBorder)
+            if loading { ProgressView("Asking GitHub…").frame(maxWidth: .infinity) }
+            if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+            List(names.filter { search.isEmpty || $0.localizedCaseInsensitiveContains(search) }, id: \.self) { n in
+                let have = sc.repos.contains { $0.repo.lowercased() == n.lowercased() }
+                Toggle(isOn: Binding(get: { picked.contains(n) || have }, set: { on in if on { picked.insert(n) } else { picked.remove(n) } })) {
+                    Text(n)
+                }
+                .toggleStyle(.checkbox).disabled(have)
+            }
+            .frame(minHeight: 260)
+            HStack {
+                Text("\(picked.count) ticked").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Add") { onAdd(Array(picked).sorted()); dismiss() }.keyboardShortcut(.defaultAction).disabled(picked.isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 460, height: 460)
+        .task {
+            let r = await sc.myRepos()
+            names = r.names; error = r.error; loading = false
+        }
     }
 }
 
@@ -271,95 +370,102 @@ private struct RepoPanel: View {
 
     var body: some View {
         let wfs = sc.workflows[id] ?? []
-        VStack(alignment: .leading, spacing: 12) {
-            GroupBox("Repository") {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        TextField("owner/repo", text: bind(\.repo)).textFieldStyle(.roundedBorder).frame(width: 280)
-                        Text("branch").font(.caption)
-                        TextField("main", text: bind(\.ref)).textFieldStyle(.roundedBorder).frame(width: 90)
-                        Button { Task { await sc.loadWorkflows(id) } } label: { Label("Load workflows", systemImage: "arrow.clockwise") }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                GroupBox("Repository") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        FlowLayout(spacing: 8, lineSpacing: 6) {
+                            TextField("owner/repo", text: bind(\.repo)).textFieldStyle(.roundedBorder).frame(width: 260)
+                                .onSubmit { sc.update(id) { $0.repo = ScraperRepo.clean($0.repo) } }
+                            HStack(spacing: 4) {
+                                Text("branch").font(.caption)
+                                TextField("main", text: bind(\.ref)).textFieldStyle(.roundedBorder).frame(width: 90)
+                            }
+                            Button { sc.update(id) { $0.repo = ScraperRepo.clean($0.repo) }; Task { await sc.loadWorkflows(id) } } label: {
+                                Label("Load workflows", systemImage: "arrow.clockwise")
+                            }
                             .disabled(r.repo.isEmpty || !sc.hasToken(r))
-                        if sc.busy.contains(id) { ProgressView().controlSize(.small) }
-                    }
-                    HStack {
-                        Toggle("Use its own token", isOn: bind(\.ownToken)).toggleStyle(.checkbox)
-                        if r.ownToken {
-                            SecureField(sc.hasToken(r) ? "Saved — paste to replace" : "Token for this repository", text: $token)
-                                .textFieldStyle(.roundedBorder).frame(width: 260)
-                            Button("Save") { Keychain.set(token.trimmingCharacters(in: .whitespacesAndNewlines), for: r.tokenAccount); token = "" }
-                                .disabled(token.isEmpty)
+                            if sc.busy.contains(id) { ProgressView().controlSize(.small) }
                         }
-                    }
-                }
-                .padding(4)
-            }
-
-            GroupBox("Workflows") {
-                VStack(alignment: .leading, spacing: 6) {
-                    if wfs.isEmpty { Text("Press Load workflows.").foregroundStyle(.secondary) }
-                    ForEach(wfs) { w in
-                        HStack {
-                            Toggle(isOn: Binding(get: { r.selected.contains(w.id) }, set: { on in
-                                sc.update(id) { if on { $0.selected.append(w.id) } else { $0.selected.removeAll { $0 == w.id } } }
-                            })) { Text(w.name).fontWeight(.medium) }
-                            .toggleStyle(.checkbox)
-                            Text(w.file).font(.caption.monospaced()).foregroundStyle(.secondary)
-                            if w.state != "active" { Text(w.state).font(.caption).foregroundStyle(.orange) }
-                            Spacer()
-                            Button("Run now") { Task { await sc.run(id, [w.id]) } }.controlSize(.small).disabled(sc.busy.contains(id))
-                        }
-                    }
-                    if !wfs.isEmpty {
-                        Divider()
-                        HStack {
-                            Button { Task { await sc.run(id, r.selected) } } label: { Label("Run ticked (\(r.selected.count))", systemImage: "play.fill") }
-                                .buttonStyle(.borderedProminent).disabled(r.selected.isEmpty || sc.busy.contains(id))
-                            Spacer()
-                            Toggle("Run the ticked ones every weekday at", isOn: bind(\.auto)).toggleStyle(.checkbox)
-                            Picker("", selection: bind(\.at)) {
-                                ForEach(Self.times, id: \.self) { m in Text(String(format: "%02d:%02d IST", m / 60, m % 60)).tag(m) }
-                            }
-                            .labelsHidden().fixedSize()
-                        }
-                        Text("Starts at that time while the app is open and the Mac is awake (catches up within 3 hours). Keep the workflow's own cron as a backup, or remove it to avoid running twice.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(4)
-            }
-
-            GroupBox("Recent runs") {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack { Spacer(); Button { Task { await sc.loadRuns(id) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless) }
-                    ForEach(sc.runs[id] ?? []) { run in
-                        HStack(spacing: 8) {
-                            Circle().fill(color(run)).frame(width: 8, height: 8)
-                            Text(run.name ?? "—").lineLimit(1).frame(width: 220, alignment: .leading)
-                            Text(run.event ?? "").font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                            Text(label(run)).font(.caption).frame(width: 100, alignment: .leading)
-                            Text("started " + local(run.run_started_at ?? run.created_at)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            Spacer()
-                            if let u = run.html_url.flatMap(URL.init(string:)) {
-                                Button { NSWorkspace.shared.open(u) } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless)
+                        FlowLayout(spacing: 8, lineSpacing: 6) {
+                            Toggle("Use its own token", isOn: bind(\.ownToken)).toggleStyle(.checkbox)
+                            if r.ownToken {
+                                SecureField(sc.hasToken(r) ? "Saved — paste to replace" : "Token for this repository", text: $token)
+                                    .textFieldStyle(.roundedBorder).frame(width: 240)
+                                Button("Save") { Keychain.set(token.trimmingCharacters(in: .whitespacesAndNewlines), for: r.tokenAccount); token = "" }
+                                    .disabled(token.isEmpty)
                             }
                         }
                     }
-                    if (sc.runs[id] ?? []).isEmpty { Text("—").foregroundStyle(.secondary) }
+                    .padding(4)
                 }
-                .padding(4)
+
+                GroupBox("Workflows") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if wfs.isEmpty { Text(sc.hasToken(r) ? "Press Load workflows." : "Save a token first.").foregroundStyle(.secondary) }
+                        ForEach(wfs) { w in
+                            HStack {
+                                Toggle(isOn: Binding(get: { r.selected.contains(w.id) }, set: { on in
+                                    sc.update(id) { if on { $0.selected.append(w.id) } else { $0.selected.removeAll { $0 == w.id } } }
+                                })) { Text(w.name).fontWeight(.medium).lineLimit(1) }
+                                .toggleStyle(.checkbox)
+                                Text(w.file).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                if w.state != "active" { Text(w.state).font(.caption).foregroundStyle(.orange) }
+                                Spacer(minLength: 4)
+                                Button("Run now") { Task { await sc.run(id, [w.id]) } }.controlSize(.small).disabled(sc.busy.contains(id))
+                            }
+                        }
+                        if !wfs.isEmpty {
+                            Divider()
+                            FlowLayout(spacing: 10, lineSpacing: 6) {
+                                Button { Task { await sc.run(id, r.selected) } } label: { Label("Run ticked (\(r.selected.count))", systemImage: "play.fill") }
+                                    .buttonStyle(.borderedProminent).disabled(r.selected.isEmpty || sc.busy.contains(id))
+                                Toggle("Run the ticked ones every weekday at", isOn: bind(\.auto)).toggleStyle(.checkbox)
+                                Picker("", selection: bind(\.at)) {
+                                    ForEach(Self.times, id: \.self) { m in Text(String(format: "%02d:%02d IST", m / 60, m % 60)).tag(m) }
+                                }
+                                .labelsHidden().fixedSize()
+                            }
+                            Text("Starts at that time while the app is open and the Mac is awake (catches up within 3 hours). To run repositories one after another, use Chains.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(4)
+                }
+
+                GroupBox("Recent runs") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Spacer(); Button { Task { await sc.loadRuns(id) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless) }
+                        ForEach(sc.runs[id] ?? []) { run in
+                            HStack(spacing: 8) {
+                                Circle().fill(runColor(run)).frame(width: 8, height: 8)
+                                Text(run.name ?? "—").lineLimit(1)
+                                Text(run.event ?? "").font(.caption).foregroundStyle(.secondary)
+                                Text(runLabel(run)).font(.caption)
+                                Spacer(minLength: 4)
+                                Text(istTime(run.run_started_at ?? run.created_at)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                if let u = run.html_url.flatMap(URL.init(string:)) {
+                                    Button { NSWorkspace.shared.open(u) } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        if (sc.runs[id] ?? []).isEmpty { Text("—").foregroundStyle(.secondary) }
+                    }
+                    .padding(4)
+                }
+                if let s = sc.status[id] { Text(s).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
-            if let s = sc.status[id] { Text(s).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-            Spacer(minLength: 0)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { if (sc.workflows[id] ?? []).isEmpty, !r.repo.isEmpty, sc.hasToken(r) { Task { await sc.loadWorkflows(id) } } }
     }
+}
 
-    private func label(_ r: GHRun) -> String { r.status == "completed" ? (r.conclusion ?? "completed") : (r.status ?? "") }
-    private func color(_ r: GHRun) -> Color { r.status != "completed" ? .orange : (r.conclusion == "success" ? .green : .red) }
-    private func local(_ iso: String?) -> String {
-        guard let iso, let d = ISO8601DateFormatter().date(from: iso) else { return "—" }
-        let f = DateFormatter(); f.timeZone = ScraperCenter.ist; f.dateFormat = "d MMM HH:mm 'IST'"
-        return f.string(from: d)
-    }
+func runLabel(_ r: GHRun) -> String { r.status == "completed" ? (r.conclusion ?? "completed") : (r.status ?? "") }
+func runColor(_ r: GHRun) -> Color { r.status != "completed" ? .orange : (r.conclusion == "success" ? .green : .red) }
+func istTime(_ iso: String?) -> String {
+    guard let iso, let d = ISO8601DateFormatter().date(from: iso) else { return "—" }
+    let f = DateFormatter(); f.timeZone = ScraperCenter.ist; f.dateFormat = "d MMM HH:mm 'IST'"
+    return f.string(from: d)
 }
