@@ -11,6 +11,12 @@ struct GainersView: View {
     @State private var sortColumn: Int?
     @State private var sortDescending = true
     @State private var selection: [SheetRow] = []
+    /// Your column order and hidden columns for this table (names; "\u{1F}"-separated).
+    @AppStorage("gainers.colOrder") private var colOrderRaw = ""
+    @AppStorage("gainers.colHidden") private var colHiddenRaw = ""
+    @State private var showColumnChooser = false
+    @State private var chooserHeaders: [String] = []
+    @State private var chooserDefault: [String] = []
     @State private var version = 0
     @ObservedObject private var live = LiveQuotes.shared
     @AppStorage("live.enabled") private var liveOn = true
@@ -50,6 +56,9 @@ struct GainersView: View {
         }
         .onChange(of: live.tick) { _ in version += 1 }
         .sheet(isPresented: $showSettings) { NewsAISettings().environmentObject(vm) }
+        .sheet(isPresented: $showColumnChooser) {
+            GainersColumnChooser(all: chooserHeaders, defaults: chooserDefault, orderRaw: $colOrderRaw, hiddenRaw: $colHiddenRaw)
+        }
         .onAppear { if vm.sectorReport == nil { Task { await vm.computeSectors(notify: false) } } }
         .onChange(of: vm.sectorReport?.asOf) { _ in version += 1 }
         .onChange(of: vm.newsCache.reasons.count) { _ in version += 1 }
@@ -260,6 +269,16 @@ struct GainersView: View {
         if vm.settings.gainersShowFilterColumns {
             cols += vm.filterColumnIndices.filter { !cols.contains($0) }
         }
+        // your order first (drag headers, or the chooser), then any other default column; hidden ones left out
+        let defaultNames = cols.map { derived.headers[$0] }
+        let labelName = derived.headers[vm.labelIndex ?? 0]
+        let hidden = Set(GainersColumnChooser.split(colHiddenRaw))
+        var names: [String] = []
+        for nm in GainersColumnChooser.split(colOrderRaw) + defaultNames where !hidden.contains(nm) && derived.index(of: nm) != nil && !names.contains(nm) {
+            names.append(nm)
+        }
+        names.removeAll { $0 == labelName }
+        cols = [vm.labelIndex ?? 0] + names.compactMap { derived.index(of: $0) }
         var rows = derived.rows
         if vm.settings.gainersOnlyFilterList {
             let pass = Set(vm.filterRows.map(\.id))
@@ -295,7 +314,29 @@ struct GainersView: View {
                            pColor: { row in vm.pickColor(vm.rowKey(row), day: day) },
                            onPClick: { row in if let g = byID[row.id] { vm.cyclePick(g, day: day) } },
                            onSelectRows: { selection = $0 },
-                           rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow, queue: rows) })
+                           rowMenu: { row in vm.rowMenu(row, selection: selection, openWindow: openWindow, queue: rows) },
+                           onColumnOrder: { order in
+                               colOrderRaw = GainersColumnChooser.join(order.map { derived.headers[$0] })
+                           },
+                           onHideColumn: { i in
+                               let nm = derived.headers[i]
+                               var h = GainersColumnChooser.split(colHiddenRaw); if !h.contains(nm) { h.append(nm) }
+                               colHiddenRaw = GainersColumnChooser.join(h)
+                           },
+                           hiddenColumns: derived.headers.indices.filter { !cols.contains($0) },
+                           onShowColumn: { i in
+                               let nm = derived.headers[i]
+                               colHiddenRaw = GainersColumnChooser.join(GainersColumnChooser.split(colHiddenRaw).filter { $0 != nm })
+                               var o = GainersColumnChooser.split(colOrderRaw)
+                               if o.isEmpty { o = cols.map { derived.headers[$0] } }
+                               if !o.contains(nm) { o.append(nm) }
+                               colOrderRaw = GainersColumnChooser.join(o)
+                           },
+                           onChooseColumns: {
+                               chooserHeaders = derived.headers
+                               chooserDefault = cols.map { derived.headers[$0] }
+                               showColumnChooser = true
+                           })
             Divider()
             HStack(spacing: 10) {
                 Text("\(rows.count) of \(derived.rows.count) shown").font(.caption.bold())
@@ -475,5 +516,75 @@ struct GainerColumnMenu: View {
                     f[keyPath: key] = NumberParser.parse(t.replacingOccurrences(of: ",", with: ""))
                     filter.wrappedValue = f
                 })
+    }
+}
+
+
+/// Pick which columns the Daily Gainers table shows and drag them into your order.
+struct GainersColumnChooser: View {
+    let all: [String]
+    let defaults: [String]          // what's shown now, in order
+    @Binding var orderRaw: String
+    @Binding var hiddenRaw: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var shown: [String] = []
+    @State private var search = ""
+
+    static func split(_ s: String) -> [String] { s.isEmpty ? [] : s.components(separatedBy: "\u{1F}") }
+    static func join(_ a: [String]) -> String { a.joined(separator: "\u{1F}") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Daily Gainers columns").font(.headline)
+            Text("Tick to show · drag to reorder (the symbol stays first). You can also drag headers in the table, and right-click a header to hide it.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Shown, in order").font(.caption.bold())
+                    List {
+                        ForEach(shown, id: \.self) { nm in
+                            HStack {
+                                Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
+                                Text(nm).lineLimit(1)
+                                Spacer()
+                                if nm != defaults.first {
+                                    Button { shown.removeAll { $0 == nm } } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                        .onMove { from, to in shown.move(fromOffsets: from, toOffset: to) }
+                    }
+                    .frame(width: 280, height: 380)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Add a column").font(.caption.bold())
+                    TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 240)
+                    List(all.filter { !shown.contains($0) && (search.isEmpty || $0.localizedCaseInsensitiveContains(search)) }, id: \.self) { nm in
+                        HStack {
+                            Text(nm).lineLimit(1)
+                            Spacer()
+                            Button { shown.append(nm) } label: { Image(systemName: "plus.circle") }.buttonStyle(.borderless)
+                        }
+                    }
+                    .frame(width: 240, height: 350)
+                }
+            }
+            HStack {
+                Button("Reset to default") { orderRaw = ""; hiddenRaw = ""; dismiss() }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Apply") {
+                    orderRaw = Self.join(shown)
+                    // hide only what you took out (other columns can still appear, e.g. with "Filter columns & colours")
+                    var h = Set(Self.split(hiddenRaw)).union(defaults.filter { !shown.contains($0) })
+                    h.subtract(shown)
+                    hiddenRaw = Self.join(h.sorted())
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .onAppear { shown = defaults }
     }
 }
