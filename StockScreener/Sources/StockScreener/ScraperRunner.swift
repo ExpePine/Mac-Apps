@@ -51,6 +51,12 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
     @Published var runs: [UUID: [GHRun]] = [:]
     @Published var status: [UUID: String] = [:]
     @Published var busy: Set<UUID> = []
+    // chains (ScraperChains.swift)
+    @Published var chains: [ScraperChain] = ScraperCenter.loadChains()
+    @Published var live: [UUID: [UUID: StepLive]] = [:]
+    @Published var chainRunning: Set<UUID> = []
+    @Published var chainStatus: [UUID: String] = [:]
+    var chainTasks: [UUID: Task<Void, Never>] = [:]
 
     private static func load() -> [ScraperRepo] {
         let d = UserDefaults.standard
@@ -69,7 +75,7 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
     func update(_ id: UUID, _ f: (inout ScraperRepo) -> Void) { if let i = repos.firstIndex(where: { $0.id == id }) { f(&repos[i]) } }
     func hasToken(_ r: ScraperRepo) -> Bool { !Keychain.get(r.tokenAccount).isEmpty }
 
-    private func request(_ r: ScraperRepo, _ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> (Data, Int) {
+    func request(_ r: ScraperRepo, _ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> (Data, Int) {
         let token = Keychain.get(r.tokenAccount)
         guard !token.isEmpty else { throw YahooClient.Failure(message: r.ownToken ? "Save this repository's token first." : "Save your GitHub token first.") }
         guard let url = URL(string: "https://api.github.com" + path) else { throw YahooClient.Failure(message: "Bad repository name") }
@@ -86,7 +92,7 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
         return (data, (resp as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
-    private func explain(_ code: Int, _ data: Data, ref: String) -> String {
+    func explain(_ code: Int, _ data: Data, ref: String) -> String {
         let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String ?? ""
         switch code {
         case 401: return "GitHub says the token is wrong or expired (401)."
@@ -149,6 +155,7 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
         let c = cal.dateComponents([.weekday, .hour, .minute], from: Date())
         guard let wd = c.weekday, (2...6).contains(wd), let h = c.hour, let m = c.minute else { return }
         let now = h * 60 + m, today = AlertSchedule.today()
+        chainsIfDue(now: now, today: today)
         for r in repos where r.auto && !r.repo.isEmpty && !r.selected.isEmpty && !busy.contains(r.id)
                             && now >= r.at && now < r.at + 180 && r.lastAutoDay != today && hasToken(r) {
             update(r.id) { $0.lastAutoDay = today }
@@ -165,7 +172,22 @@ struct ScraperView: View {
     @State private var sharedToken = ""
     @State private var hasShared = !Keychain.get(ScraperCenter.keychainAccount).isEmpty
 
+    @AppStorage("gh.tab") private var tab = 0
+
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                Text("Repositories").tag(0)
+                Text("Chains — run repos one after another").tag(1)
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 460).padding(8)
+            Divider()
+            if tab == 1 { ChainsView() } else { repositories }
+        }
+        .navigationTitle("Scraper")
+    }
+
+    private var repositories: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 List(selection: $current) {
@@ -221,7 +243,6 @@ struct ScraperView: View {
             .padding(16)
             .frame(minWidth: 620)
         }
-        .navigationTitle("Scraper")
         .onAppear { if current == nil { current = sc.repos.first?.id } }
     }
 
