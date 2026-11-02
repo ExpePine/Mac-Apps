@@ -25,6 +25,7 @@ enum AppWindows {
             AppWindow(title: "Changes", id: "changes", icon: "rectangle.grid.2x2", shortcut: "⇧⌘8", note: "what changed since yesterday"),
             AppWindow(title: "Symbols", id: "symbols", icon: "plus.rectangle.on.rectangle", shortcut: "⌥⌘Y", note: "add / hide symbols"),
             AppWindow(title: "Watchlists", id: "watch", icon: "star", shortcut: "", note: ""),
+            AppWindow(title: "Scraper (GitHub)", id: "scraper", icon: "play.rectangle.on.rectangle", shortcut: "", note: "run your TradingView scraper workflows"),
             AppWindow(title: "Data Storage", id: "storage", icon: "internaldrive", shortcut: "", note: "what the app stores, and how big"),
         ]),
         AppWindowGroup(name: "Market & gainers", icon: "flame", windows: [

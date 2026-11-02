@@ -105,6 +105,11 @@ struct StockScreenerApp: App {
         .keyboardShortcut("r", modifiers: [.command, .option])
 
 
+        Window("Scraper", id: "scraper") {
+            ScraperView()
+                .frame(minWidth: 820, minHeight: 600)
+        }
+
         Window("Data Storage", id: "storage") {
             StorageView()
                 .frame(minWidth: 760, minHeight: 480)
