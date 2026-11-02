@@ -295,16 +295,19 @@ struct CellRuleRow: View {
                         .textFieldStyle(.roundedBorder)
                 }
             }
-            HStack(spacing: 8) {
-                RuleColorPicker(rule: $rule)
-                Spacer(minLength: 4)
-                Text("paint").font(.caption).foregroundStyle(.secondary)
-                Picker("", selection: Binding(get: { rule.paint ?? "" }, set: { rule.paint = $0.isEmpty ? nil : $0 })) {
-                    Text("this column").tag("")
-                    ForEach(columns.filter { $0 != rule.condition.column }, id: \.self) { Text($0).tag($0) }
+            RuleColorPicker(rule: $rule)
+            let others = columns.filter { $0 != rule.condition.column }
+            if !others.isEmpty || rule.paint != nil {
+                HStack(spacing: 6) {
+                    Text("Paint").font(.caption).foregroundStyle(.secondary)
+                    Picker("", selection: Binding(get: { rule.paint ?? "" }, set: { rule.paint = $0.isEmpty ? nil : $0 })) {
+                        Text("this column").tag("")
+                        ForEach(others, id: \.self) { Text($0).tag($0) }
+                        if let p = rule.paint, !others.contains(p) { Text(p).tag(p) }
+                    }
+                    .labelsHidden().fixedSize()
+                    .help("Which column gets the colour — e.g. test Safety but colour the Symbol")
                 }
-                .labelsHidden().fixedSize()
-                .help("Which column gets the colour — e.g. test Safety but colour the Symbol")
             }
         }
         .opacity(rule.condition.isEnabled ? 1 : 0.5)
@@ -398,10 +401,6 @@ struct ShadePicker: View {
                 .onTapGesture { selection = shade }
                 .help(shade.name)
             }
-            Text(selection.name)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 4)
         }
         .padding(.vertical, 2)
     }

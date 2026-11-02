@@ -112,13 +112,14 @@ struct ColumnMenuView: View {
             .buttonStyle(.borderless)
 
             ForEach(colorRuleIDs, id: \.self) { id in
-                CellRuleRow(rule: colorBinding(id), columns: [name]) {
+                CellRuleRow(rule: colorBinding(id), columns: [name] + (vm.labelIndex.map { [vm.headers[$0]] } ?? []).filter { $0 != name }) {
                     vm.settings.cellRules.removeAll { $0.id == id }
                 }
             }
         }
         .padding(14)
         .frame(width: 440)
+        .background(Color(nsColor: .windowBackgroundColor))     // solid: the coloured column must not show through
     }
 
     private func sortButton(descending: Bool) -> some View {
