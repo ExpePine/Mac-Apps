@@ -36,6 +36,11 @@ struct GainerChartsView: View {
     private var gcMode: GCMode { GCMode(rawValue: mode) ?? .daily }
     private var perStock: Int { vm.chartCount >= 2 ? 2 : 1 }
     private var day: String { vm.currentGainerDay }
+    @AppStorage(ChartCentre.kindKey) private var centreKind = ""
+    @AppStorage(ChartCentre.columnKey) private var centreColumn = ""
+    @AppStorage(ChartCentre.mbKey) private var centreMB = ""
+    /// The day this stock's charts centre on: the app-wide Centre choice, else the gainer day.
+    private func goTo(_ it: Item) -> String? { _ = centreKind; _ = centreColumn; _ = centreMB; return vm.centreDay(it.symbol, row: it.row, fallback: day) }
 
     // MARK: Lists
 
@@ -92,7 +97,7 @@ struct GainerChartsView: View {
                 VSplitView {
                     chartPane(cur, chart).frame(minHeight: 260)
                     if showDelivery {
-                        DeliveryMiniChart(symbol: cur.symbol, lw: lw, syncNote: sync ? syncNote : nil, focus: day)
+                        DeliveryMiniChart(symbol: cur.symbol, lw: lw, syncNote: sync ? syncNote : nil, focus: goTo(cur))
                             .frame(minHeight: 110, idealHeight: 220)
                     }
                 }
@@ -109,10 +114,11 @@ struct GainerChartsView: View {
             }
         }
         .navigationTitle(cur.map { "Gainer Charts — \($0.symbol) · Chart \(chart + 1)" } ?? "Gainer Charts")
-        .task(id: cur?.symbol) { if let c = cur { MBNoteFocus.shared.setChart(c.symbol, day: day) } }
+        .task(id: cur?.symbol) { if let c = cur { MBNoteFocus.shared.setChart(c.symbol, day: goTo(c)) } }
         .onAppear { vm.refreshChartLinksIfStale(); restart() }
         .task { await LiveQuotes.shared.keepLive(vm) }
         .onChange(of: mode) { _ in restart() }
+        .onChange(of: "\(centreKind)|\(centreColumn)|\(centreMB)") { _ in preload(pos, items) }
         .onChange(of: dailyMin) { _ in restart() }
         .onChange(of: monthlyMin) { _ in restart() }
         .onChange(of: monthWindow) { _ in restart() }
@@ -184,6 +190,7 @@ struct GainerChartsView: View {
             Text("\(count) stock\(count == 1 ? "" : "s") · \(count * perStock) charts").font(.caption.bold()).fixedSize()
             Toggle("Delivery chart", isOn: $showDelivery).toggleStyle(.checkbox).fixedSize()
             QuickFButton()
+            ChartCentreMenu()
             Toggle("🔗 Sync dates", isOn: $sync).toggleStyle(.checkbox).fixedSize()
                 .help("Keep the delivery chart on the same dates as the TradingView chart (and back)")
             Menu {
@@ -227,7 +234,7 @@ struct GainerChartsView: View {
     private func chartPane(_ it: Item, _ c: Int) -> some View {
         Group {
             if let u = vm.chartURL(it.symbol, column: min(c, vm.chartCount - 1)) {
-                ReelWebView(web: pool.view(for: u, slot: c, goTo: day))
+                ReelWebView(web: pool.view(for: u, slot: c, goTo: goTo(it)))
                     .overlay(alignment: .topTrailing) { zoomBar(c) }
             } else {
                 Text("No chart link for \(it.symbol)").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -325,7 +332,7 @@ struct GainerChartsView: View {
         let s = p / perStock
         var urls: [(URL, Int, String?)] = []
         for j in [s, s + 1, s + 2, s - 1] where list.indices.contains(j) {
-            for c in 0..<perStock { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, day)) } }
+            for c in 0..<perStock { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, goTo(list[j]))) } }
         }
         pool.preload(urls, keep: perStock * 4)
     }
@@ -335,7 +342,7 @@ struct GainerChartsView: View {
         guard !list.isEmpty else { return nil }
         let p = min(pos, list.count * perStock - 1)
         let c = p % perStock
-        return vm.chartURL(list[p / perStock].symbol, column: min(c, vm.chartCount - 1)).map { pool.view(for: $0, slot: c, goTo: day) }
+        return vm.chartURL(list[p / perStock].symbol, column: min(c, vm.chartCount - 1)).map { pool.view(for: $0, slot: c, goTo: goTo(list[p / perStock])) }
     }
 
     /// TradingView → delivery chart: follow the visible dates of the chart on screen.

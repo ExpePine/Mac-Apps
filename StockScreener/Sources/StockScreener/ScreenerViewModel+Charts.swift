@@ -104,10 +104,13 @@ extension ScreenerViewModel {
     }
 
     /// Opens a stock's chart (in the app's chart window, or the browser). `queue` = the list for ◀ ▶.
-    func openChart(_ symbol: String, queue: [String] = [], goTo: String? = nil, openWindow: OpenWindowAction) {
+    /// `goTo` is a fallback day (e.g. the gainer day); the app-wide Centre choice decides unless `exact` (Studies, scans).
+    func openChart(_ symbol: String, queue: [String] = [], goTo: String? = nil, exact: Bool = false, openWindow: OpenWindowAction) {
         let sym = symbol.trimmingCharacters(in: .whitespaces).uppercased()
         guard !sym.isEmpty else { return }
-        chartGoTo = goTo
+        chartSoftGoTo = goTo
+        chartExactGoTo = exact
+        chartGoTo = exact ? goTo : centreDay(sym, fallback: goTo)
         if !queue.isEmpty { chartQueue = queue.map { $0.uppercased() } } else if !chartQueue.contains(sym) { chartQueue = [sym] }
         if settings.chartOpenInApp {
             chartSymbol = sym

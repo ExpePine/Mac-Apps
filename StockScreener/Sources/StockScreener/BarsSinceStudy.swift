@@ -306,11 +306,11 @@ struct StudiesView: View {
             }
             .contextMenu(forSelectionType: String.self) { ids in
                 if let id = ids.first, let n = r.now.first(where: { $0.id == id }) {
-                    Button("Chart at \(n.lastDay)") { vm.openChart(n.sym, goTo: n.lastDay, openWindow: openWindow) }
+                    Button("Chart at \(n.lastDay)") { vm.openChart(n.sym, goTo: n.lastDay, exact: true, openWindow: openWindow) }
                     Button("Chart Reel from \(n.sym)") { reel(r.now.map { ($0.sym, "BS \($0.barsSince)", $0.lastDay) }, start: n.sym) }
                 }
             } primaryAction: { ids in
-                if let id = ids.first, let n = r.now.first(where: { $0.id == id }) { vm.openChart(n.sym, goTo: n.lastDay, openWindow: openWindow) }
+                if let id = ids.first, let n = r.now.first(where: { $0.id == id }) { vm.openChart(n.sym, goTo: n.lastDay, exact: true, openWindow: openWindow) }
             }
         }
     }
@@ -336,10 +336,10 @@ struct StudiesView: View {
             }
             .contextMenu(forSelectionType: String.self) { ids in
                 if let id = ids.first, let e = ev.first(where: { $0.id == id }) {
-                    Button("Chart at \(e.day)") { vm.openChart(e.sym, goTo: e.day, openWindow: openWindow) }
+                    Button("Chart at \(e.day)") { vm.openChart(e.sym, goTo: e.day, exact: true, openWindow: openWindow) }
                 }
             } primaryAction: { ids in
-                if let id = ids.first, let e = ev.first(where: { $0.id == id }) { vm.openChart(e.sym, goTo: e.day, openWindow: openWindow) }
+                if let id = ids.first, let e = ev.first(where: { $0.id == id }) { vm.openChart(e.sym, goTo: e.day, exact: true, openWindow: openWindow) }
             }
         }
     }

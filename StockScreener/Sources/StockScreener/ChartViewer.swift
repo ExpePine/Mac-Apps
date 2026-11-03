@@ -24,6 +24,9 @@ struct ChartViewer: View {
     private let syncTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     private var symbol: String { vm.chartSymbol ?? "" }
+    @AppStorage(ChartCentre.kindKey) private var centreKind = ""
+    @AppStorage(ChartCentre.columnKey) private var centreColumn = ""
+    @AppStorage(ChartCentre.mbKey) private var centreMB = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,6 +87,7 @@ struct ChartViewer: View {
         .onAppear { load(); vm.refreshChartLinksIfStale() }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
         .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0 }
+        .onChange(of: "\(centreKind)|\(centreColumn)|\(centreMB)") { _ in recentre() }
         .onReceive(syncTimer) { _ in pollTVRange(); pollCross() }
         .onChange(of: mini.crossDay) { d in if let d { crossDay = d } }
         .onChange(of: symbol) { _ in crossDay = nil; crossFails = 0 }
@@ -117,6 +121,7 @@ struct ChartViewer: View {
                 Text("\(p + 1) / \(vm.chartQueue.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             QuickFButton()
+            ChartCentreMenu()
             SymbolField(vm: vm, placeholder: "Symbol", text: $typed) {
                 let s = SymbolBook.clean(typed)
                 if !s.isEmpty { vm.chartSymbol = s }
@@ -213,8 +218,19 @@ struct ChartViewer: View {
         web.use(account: acct)
         web.signingIn = false
         web.view.stopLoading()
+        if !vm.chartExactGoTo { vm.chartGoTo = vm.centreDay(symbol, fallback: vm.chartSoftGoTo) }
         web.view.load(URLRequest(url: url))
         centreOnGoTo()
+    }
+
+    /// The app-wide Centre choice changed: re-centre this chart without reloading it.
+    private func recentre() {
+        guard !symbol.isEmpty else { return }
+        vm.chartExactGoTo = false
+        vm.chartGoTo = vm.centreDay(symbol, fallback: vm.chartSoftGoTo)
+        if let day = vm.chartGoTo ?? ColumnCentre.calendar(vm).last(where: { $0 <= vm.displayedDayKey }) {
+            ReelPool.helper.centre(web.view, date: day, tries: 4)
+        }
     }
 
     /// Opened from Daily Gainers: once TradingView has loaded, centre it on the gainer's day (the current bar).

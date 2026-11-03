@@ -44,6 +44,8 @@ struct ChartReelView: View {
     @AppStorage("reel.mbMonth") private var mbMonth = ""
     @AppStorage("reel.mbScope") private var mbScope = "Sheet stocks"
     @AppStorage("mb.center") private var mbCenter = MBCenter.start.rawValue
+    @AppStorage(ChartCentre.kindKey) private var centreKind = ""
+    @AppStorage(ChartCentre.columnKey) private var centreColumn = ""
     @ObservedObject private var mbc = MultibaggerCenter.shared
     @ObservedObject private var mbf = MBFilterCenter.shared
     @AppStorage("mb.fOn") private var fOn = false
@@ -112,6 +114,13 @@ struct ChartReelView: View {
                 ReelItem(symbol: e.symbol, note: String(format: "%+.0f%% · ", e.gain) + e.monthTitle, row: rowOf[e.symbol],
                          goTo: e.day(for: center), key: e.id)
             }
+        }
+        // the app-wide Centre choice, for sources without a centre of their own
+        let src = ReelSource(rawValue: source) ?? .gainers
+        if src == .gainers || src == .filter || src == .all || (src == .column && centreMode == "") {
+            _ = centreKind; _ = centreColumn
+            let resolve = vm.centreResolver()
+            out = out.map { var x = $0; x.goTo = resolve(x.symbol, x.row, x.goTo); return x }
         }
         var seen = Set<String>()
         out = out.filter { !$0.symbol.isEmpty && seen.insert($0.key ?? $0.symbol).inserted }
@@ -228,6 +237,7 @@ struct ChartReelView: View {
         }
         .onChange(of: mbf.matched) { _ in if fOn { restart() } }
         .onChange(of: mbCenter) { _ in restart() }
+        .onChange(of: "\(centreKind)|\(centreColumn)") { _ in refresh += 1; let l = items; show(min(shown, max(0, l.count - 1)), l) }
         .onChange(of: mbc.events.count) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
         .onChange(of: layout) { _ in phase = 0; show(shown, items) }
@@ -303,6 +313,7 @@ struct ChartReelView: View {
         FlowLayout(spacing: 8, lineSpacing: 6) {
             Button { expanded = true } label: { Label("Expand charts", systemImage: "arrow.up.left.and.arrow.down.right") }
                 .help("Charts only — hide these bars, the list strip and the slider (⇧⌘X; Esc to come back)")
+            ChartCentreMenu()
             Picker("", selection: $source) {
                 ForEach(ReelSource.allCases) { Text($0.rawValue).tag($0.rawValue) }
             }
@@ -391,12 +402,12 @@ struct ChartReelView: View {
             }
             Toggle("and my Filter", isOn: $alsoFilter).toggleStyle(.checkbox)
             Picker("", selection: $centreMode) {
-                Text("Centre: latest bar").tag("")
+                Text("Centre: app default").tag("")
                 Text("Centre: value = days ago").tag("days")
                 Text("Centre: day it started").tag("since")
             }
             .labelsHidden().fixedSize()
-            .help("Value = days ago: a column like D_Trigger = 3 centres the chart 3 trading days back (0 = the data day), sorted 0 → n. Day it started: how many stored days in a row the row has matched, centred on the first of them.")
+            .help("App default = the Centre menu (last bar, a column, or a multibagger move). Value = days ago: a column like D_Trigger = 3 centres the chart 3 trading days back (0 = the data day), sorted 0 → n. Day it started: how many stored days in a row the row has matched, centred on the first of them.")
             if centreMode == "since", let st = sinceStatus { Text(st).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
         }
         .task(id: "\(centreMode)|\(column)|\(op)|\(value)|\(alsoFilter)|\(vm.filterVersion)") { await computeSince() }
