@@ -130,12 +130,56 @@ struct WatchItem: Codable, Identifiable, Equatable {
     var addedPrice: Double?
     var priceSource = ""                 // "Yahoo" or the sheet column it came from
     var note = ""
+    var source = ""                      // where it was added from: "Daily gainers 2026-11-03", "Filter", "Chart viewer"…
+    var tags: [String] = []
+    var target: Double?                  // ₹ price target
+    var stop: Double?                    // ₹ stop loss
+    var exitDay: String?                 // marked exited: return is frozen at this close
+    var exitPrice: Double?
+
+    var exited: Bool { exitDay != nil }
+
+    init(symbol: String, addedDay: String, addedPrice: Double?, priceSource: String = "", source: String = "") {
+        self.symbol = symbol; self.addedDay = addedDay; self.addedPrice = addedPrice; self.priceSource = priceSource; self.source = source
+    }
+    private enum K: String, CodingKey { case id, symbol, addedAt, addedDay, addedPrice, priceSource, note, source, tags, target, stop, exitDay, exitPrice }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        symbol = try c.decode(String.self, forKey: .symbol)
+        addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date()
+        addedDay = try c.decodeIfPresent(String.self, forKey: .addedDay) ?? ""
+        addedPrice = try c.decodeIfPresent(Double.self, forKey: .addedPrice)
+        priceSource = try c.decodeIfPresent(String.self, forKey: .priceSource) ?? ""
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        target = try c.decodeIfPresent(Double.self, forKey: .target)
+        stop = try c.decodeIfPresent(Double.self, forKey: .stop)
+        exitDay = try c.decodeIfPresent(String.self, forKey: .exitDay)
+        exitPrice = try c.decodeIfPresent(Double.self, forKey: .exitPrice)
+    }
 }
 
 struct Watchlist: Codable, Identifiable, Equatable {
     var id = UUID()
     var name: String
     var items: [WatchItem] = []
+    var note = ""
+    var created = Date()
+    var color = ""                       // "", "red", "orange", "yellow", "green", "blue", "purple"
+
+    init(name: String) { self.name = name }
+    private enum K: String, CodingKey { case id, name, items, note, created, color }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Watchlist"
+        items = try c.decodeIfPresent([WatchItem].self, forKey: .items) ?? []
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? (items.map(\.addedAt).min() ?? Date())
+        color = try c.decodeIfPresent(String.self, forKey: .color) ?? ""
+    }
 }
 
 enum WatchlistStore {
@@ -155,39 +199,62 @@ enum WatchlistStore {
     }
 }
 
-/// Returns for one watchlist item, from daily closes.
+/// Returns for one watchlist item, from daily closes. An exited item is measured up to its exit close.
 struct WatchReturns {
     var now: Double?
     var nowDay: String?
-    var sinceAdded: Double?              // %
+    var sinceAdded: Double?              // % (to exit, if exited)
     var day1: Double?
     var day5: Double?
     var month1: Double?                  // 21 trading days
-    var maxSinceAdded: Double?           // best close since added, %
+    var maxSinceAdded: Double?           // best close since added, % (MFE)
+    var worstSinceAdded: Double?         // worst close since added, % (MAE)
     var fromPeak: Double?                // now vs best close since added, %
     var benchmark: Double?               // Nifty 50 over the same period, %
     var tradingDays: Int?
+    var fwd5: Double?                    // 5 / 10 / 22 trading days after it was added
+    var fwd10: Double?
+    var fwd22: Double?
+    var daysTo10: Int?                   // first close ≥ +10 % (trading days after adding)
+    var daysToMinus10: Int?              // first close ≤ −10 %
+    var targetHit: Bool = false
+    var stopHit: Bool = false
 
     static func compute(_ item: WatchItem, series: PriceSeries?, benchmark: PriceSeries?) -> WatchReturns {
         var r = WatchReturns()
-        guard let s = series, let last = s.closes.last, let lastDay = s.lastDay else { return r }
-        r.now = last
-        r.nowDay = lastDay
+        guard let s = series, !s.closes.isEmpty else { return r }
+        let endIdx = item.exitDay.flatMap { s.index(onOrBefore: $0) } ?? (s.closes.count - 1)
+        let last = item.exitPrice ?? s.closes[endIdx]
+        r.now = s.closes.last
+        r.nowDay = s.lastDay
         let n = s.closes.count
-        func back(_ k: Int) -> Double? { n > k && s.closes[n - 1 - k] > 0 ? (last / s.closes[n - 1 - k] - 1) * 100 : nil }
+        func back(_ k: Int) -> Double? { n > k && s.closes[n - 1 - k] > 0 ? (s.closes[n - 1] / s.closes[n - 1 - k] - 1) * 100 : nil }
         r.day1 = back(1); r.day5 = back(5); r.month1 = back(21)
-        let start = item.addedPrice ?? s.index(onOrBefore: item.addedDay).map { s.closes[$0] }
+        let ai = s.index(onOrBefore: item.addedDay)
+        let start = item.addedPrice ?? ai.map { s.closes[$0] }
         if let start, start > 0 {
             r.sinceAdded = (last / start - 1) * 100
-            if let i = s.index(onOrBefore: item.addedDay) {
-                r.tradingDays = n - 1 - i
-                let peak = s.closes[i...].max() ?? last
+            if let i = ai, i <= endIdx {
+                r.tradingDays = endIdx - i
+                let window = s.closes[i...endIdx]
+                let peak = window.max() ?? last, low = window.min() ?? last
                 r.maxSinceAdded = (peak / start - 1) * 100
+                r.worstSinceAdded = (low / start - 1) * 100
                 r.fromPeak = (last / peak - 1) * 100
+                func fwd(_ k: Int) -> Double? { i + k < n ? (s.closes[i + k] / start - 1) * 100 : nil }
+                r.fwd5 = fwd(5); r.fwd10 = fwd(10); r.fwd22 = fwd(22)
+                for k in (i + 1)..<max(i + 1, endIdx + 1) {
+                    let g = (s.closes[k] / start - 1) * 100
+                    if r.daysTo10 == nil && g >= 10 { r.daysTo10 = k - i }
+                    if r.daysToMinus10 == nil && g <= -10 { r.daysToMinus10 = k - i }
+                    if let t = item.target, s.closes[k] >= t { r.targetHit = true }
+                    if let st = item.stop, s.closes[k] <= st { r.stopHit = true }
+                }
             }
         }
-        if let b = benchmark, let bl = b.closes.last, let j = b.index(onOrBefore: item.addedDay), b.closes[j] > 0 {
-            r.benchmark = (bl / b.closes[j] - 1) * 100
+        if let b = benchmark, let j = b.index(onOrBefore: item.addedDay), b.closes[j] > 0 {
+            let bEnd = item.exitDay.flatMap { b.index(onOrBefore: $0) } ?? (b.closes.count - 1)
+            r.benchmark = (b.closes[bEnd] / b.closes[j] - 1) * 100
         }
         return r
     }

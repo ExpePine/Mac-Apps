@@ -101,6 +101,9 @@ struct MultibaggerView: View {
                     .help("The date the Chart Reel jumps both TradingView charts to (TradingView's Go to date)")
                 SymbolField(vm: vm, placeholder: "Search", text: $search).frame(width: 120)
                 QuickFButton()
+                AddToWatchlistButton(groups: [("Selected", scoped.first { $0.id == selection }.map { [$0.symbol] } ?? []),
+                                              ("All shown", Array(NSOrderedSet(array: shown.map(\.symbol))) as? [String] ?? [])],
+                                     source: "Multibaggers")
                 Button { showF.toggle() } label: { Image(systemName: "slider.horizontal.3") }
                     .help("Full F panel: pick values from the selected stock, AND / OR editor, saved combinations")
                     .popover(isPresented: $showF, arrowEdge: .bottom) { MBFPanel(event: scoped.first { $0.id == selection }, on: $fOn).environmentObject(vm) }

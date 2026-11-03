@@ -326,6 +326,7 @@ struct EventScanView: View {
                 if let h = r.hits[c.id] { Button("Chart Reel at \(c.title) (\(h.day))") { openReel(shown, start: r.symbol, centre: c.id) } }
             }
             Button("Open in Chart viewer") { vm.openChart(r.symbol, queue: shown.map(\.symbol), openWindow: openWindow) }
+            WatchlistSubmenu(symbols: [r.symbol], source: "Event scan")
             Button("Copy \(r.symbol)") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(r.symbol, forType: .string) }
         }
     }

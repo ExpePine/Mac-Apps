@@ -217,6 +217,7 @@ struct DeliveryView: View {
             .contextMenu(forSelectionType: String.self) { ids in
                 if let s = ids.first {
                     Button("Open TradingView chart") { vm.openChart(s, queue: shownRows.map(\.symbol), openWindow: openWindow) }
+                    WatchlistSubmenu(symbols: Array(ids), source: "Delivery")
                     Button("Copy symbols") {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(shownRows.map(\.symbol).joined(separator: ", "), forType: .string)
                     }

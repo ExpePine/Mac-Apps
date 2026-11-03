@@ -465,6 +465,7 @@ struct ChartReelView: View {
         HStack(spacing: 10) {
             if let it {
                 Text(it.symbol).font(.title3.bold())
+                AddToWatchlistButton(symbol: it.symbol, day: it.gainer != nil ? it.day : nil, source: "Chart Reel · \((ReelSource(rawValue: source) ?? .gainers).rawValue)")
                 if !it.note.isEmpty {
                     Text(it.note).font(.headline.monospacedDigit())
                         .foregroundStyle(it.note.hasPrefix("+") ? Color.green : (it.note.hasPrefix("-") ? Color.red : Color.primary))

@@ -37,7 +37,7 @@ struct StockScreenerApp: App {
         Window("Watchlists", id: "watch") {
             WatchlistView()
                 .environmentObject(vm)
-                .frame(minWidth: 980, minHeight: 520)
+                .frame(minWidth: 900, minHeight: 560)
         }
         .keyboardShortcut("5", modifiers: [.command, .shift])
 
@@ -92,7 +92,7 @@ struct StockScreenerApp: App {
         Window("My Picks", id: "picks") {
             MyPicksView()
                 .environmentObject(vm)
-                .frame(minWidth: 980, minHeight: 520)
+                .frame(minWidth: 900, minHeight: 560)
         }
         .keyboardShortcut("p", modifiers: [.command, .option])
 
@@ -185,7 +185,7 @@ struct StockScreenerApp: App {
         Window("Symbols", id: "symbols") {
             SymbolsView()
                 .environmentObject(vm)
-                .frame(minWidth: 980, minHeight: 520)
+                .frame(minWidth: 900, minHeight: 560)
         }
         .keyboardShortcut("y", modifiers: [.command, .option])
         .commands { ToolsCommands() }

@@ -129,6 +129,7 @@ struct ChartViewer: View {
             }
             .frame(width: 150)
             Text(symbol).font(.headline)
+            if !symbol.isEmpty { AddToWatchlistButton(symbol: symbol, day: vm.chartContext == .gainers ? vm.chartSoftGoTo : nil, source: "Chart viewer") }
             Picker("", selection: Binding(get: { min(vm.settings.chartLinkColumn, vm.chartCount - 1) },
                                           set: { vm.settings.chartLinkColumn = $0 })) {
                 ForEach(0..<vm.chartCount, id: \.self) { i in

@@ -37,43 +37,39 @@ extension ScreenerViewModel {
 
     /// Adds stocks (rows of the Data / Filter table) to a watchlist. Already-listed symbols are skipped.
     @discardableResult
-    func addToWatchlist(_ rows: [SheetRow], listID: UUID? = nil) -> Int {
-        let close = sheetCloseColumn
-        let day = HistoryStore.dayKey(dataDay(of: table))
-        let entries: [(String, Double?, String)] = rows.map { row in
-            let sym = rowKey(row).uppercased()
-            if let y = priceBook.series(for: sym), let i = y.index(onOrBefore: day) { return (sym, y.closes[i], "Yahoo close \(y.days[i])") }
-            if let c = close, let v = row.number(c) { return (sym, v, headers[c]) }
-            return (sym, nil, "")
-        }
-        return addSymbols(entries, listID: listID, day: day)
+    func addToWatchlist(_ rows: [SheetRow], listID: UUID? = nil, source: String = "Filter") -> Int {
+        addToWatchlist(symbols: rows.map { rowKey($0) }, listID: listID, day: nil, source: source)
     }
 
     /// Adds plain symbols (pasted text). Prices come from Yahoo when available.
     @discardableResult
     func addSymbols(_ symbols: [String], listID: UUID? = nil) -> Int {
-        let day = HistoryStore.dayKey(Date())
+        addToWatchlist(symbols: symbols, listID: listID, day: nil, source: "Pasted")
+    }
+
+    /// Adds symbols with the close on `day` (default: the data day) as the starting price — Yahoo first, else the sheet's close.
+    @discardableResult
+    func addToWatchlist(symbols: [String], listID: UUID?, day: String?, source: String) -> Int {
+        let d = day ?? HistoryStore.dayKey(dataDay(of: table))
         let byName = Dictionary(table.rows.map { (rowKey($0).uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
         let close = sheetCloseColumn
         let entries: [(String, Double?, String)] = symbols.map { raw in
-            let sym = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-                .replacingOccurrences(of: "NSE:", with: "")
-            if let y = priceBook.series(for: sym), let last = y.closes.last { return (sym, last, "Yahoo close \(y.lastDay ?? "")") }
+            let sym = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().replacingOccurrences(of: "NSE:", with: "")
+            if let y = priceBook.series(for: sym), let i = y.index(onOrBefore: d) { return (sym, y.closes[i], "Yahoo close \(y.days[i])") }
             if let row = byName[sym], let c = close, let v = row.number(c) { return (sym, v, headers[c]) }
             return (sym, nil, "")
         }
-        return addSymbols(entries, listID: listID, day: day)
+        return addEntries(entries, listID: listID, day: d, source: source)
     }
 
-    private func addSymbols(_ entries: [(String, Double?, String)], listID: UUID?, day: String) -> Int {
+    private func addEntries(_ entries: [(String, Double?, String)], listID: UUID?, day: String, source: String) -> Int {
         guard let li = listID.flatMap({ id in watchlists.firstIndex { $0.id == id } }) ?? currentWatchlistIndex else { return 0 }
         var list = watchlists[li]
-        let existing = Set(list.items.map { $0.symbol.uppercased() })
+        var seen = Set(list.items.filter { !$0.exited }.map { $0.symbol.uppercased() })
         var added = 0
-        var seen = existing
-        for (sym, price, source) in entries where !sym.isEmpty && !seen.contains(sym) {
+        for (sym, price, ps) in entries where !sym.isEmpty && !seen.contains(sym) {
             seen.insert(sym)
-            list.items.append(WatchItem(symbol: sym, addedDay: day, addedPrice: price, priceSource: source))
+            list.items.append(WatchItem(symbol: sym, addedDay: day, addedPrice: price, priceSource: ps, source: source))
             added += 1
         }
         watchlists[li] = list
@@ -81,10 +77,23 @@ extension ScreenerViewModel {
         return added
     }
 
-    func newWatchlist(named name: String) {
+    /// Watchlists holding `symbol` (not exited).
+    func watchlistsHolding(_ symbol: String) -> [Watchlist] {
+        let s = symbol.uppercased()
+        return watchlists.filter { $0.items.contains { $0.symbol.uppercased() == s && !$0.exited } }
+    }
+
+    func removeFromWatchlist(_ symbol: String, listID: UUID) {
+        guard let li = watchlists.firstIndex(where: { $0.id == listID }) else { return }
+        watchlists[li].items.removeAll { $0.symbol.uppercased() == symbol.uppercased() && !$0.exited }
+    }
+
+    @discardableResult
+    func newWatchlist(named name: String) -> UUID {
         let list = Watchlist(name: name.isEmpty ? "Watchlist \(watchlists.count + 1)" : name)
         watchlists.append(list)
         selectedWatchlistID = list.id
+        return list.id
     }
 
     /// Daily closes for every watchlist symbol + the Nifty 50 index (^NSEI); merged into the cached prices.
@@ -133,7 +142,7 @@ extension ScreenerViewModel {
         var items: [(String, () -> Void)] = [("Open chart of \(sym)", { [weak self] in self?.openChart(sym, queue: queueSymbols, openWindow: openWindow) }), ("-", {})]
         for list in watchlists {
             let title = targets.count > 1 ? "Add \(targets.count) stocks to “\(list.name)”" : "Add \(sym) to “\(list.name)”"
-            items.append((title, { [weak self] in self?.addToWatchlist(targets, listID: list.id) }))
+            items.append((title, { [weak self] in self?.addToWatchlist(targets, listID: list.id, source: "Right-click") }))
         }
         items.append(("-", {}))
         items.append(("Screenshots of \(sym)…", { [weak self] in

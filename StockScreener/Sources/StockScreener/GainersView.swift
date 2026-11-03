@@ -180,6 +180,8 @@ struct GainersView: View {
                 .tint(.orange)
                 .disabled(selection.isEmpty)
                 .help("Mark the selected stocks as an OK selection (orange P)")
+            AddToWatchlistButton(groups: [("Selected", selection.map { vm.rowKey($0) }), ("All gainers on \(day)", gainers.map(\.symbol))],
+                                 day: day, source: "Daily gainers \(day)")
             Button { openWindow(id: "picks") } label: { Label("My Picks", systemImage: "star.square.on.square") }
                 .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { UserDefaults.standard.set(ReelSource.gainers.rawValue, forKey: "reel.source"); openWindow(id: "reel") } label: { Label("Chart Reel", systemImage: "film.stack") }

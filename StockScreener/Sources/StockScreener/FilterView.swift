@@ -204,7 +204,8 @@ struct FilterView: View {
                     }
                     .help("\(vm.unseenRegimeCount) new sector regime change(s) (⇧⌘0)")
                 }
-                WatchlistMenu()
+                AddToWatchlistButton(groups: [("Selected", vm.filterSelection.map { vm.rowKey($0) }), ("All shown", vm.filterRows.map { vm.rowKey($0) })],
+                                     source: "Filter")
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()

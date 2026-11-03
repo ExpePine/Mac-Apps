@@ -211,6 +211,7 @@ struct GainerChartsView: View {
         HStack(spacing: 10) {
             Text("#\(rank + 1)").font(.headline.monospacedDigit()).foregroundStyle(.secondary)
             Text(it.symbol).font(.title3.bold())
+            AddToWatchlistButton(symbol: it.symbol, day: gcMode == .daily ? day : nil, source: "Gainer Charts \(day)")
             Text(String(format: "%+.1f%%", it.change)).font(.headline.monospacedDigit()).foregroundStyle(.green)
             if let r = it.row, let n = vm.companyNameIndex { Text(r.text(n)).foregroundStyle(.secondary).lineLimit(1) }
             if let r = it.row, let s = vm.sectorColumnIndex { Text(r.text(s)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
