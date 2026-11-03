@@ -245,8 +245,8 @@ struct WatchReturns {
                 r.fwd5 = fwd(5); r.fwd10 = fwd(10); r.fwd22 = fwd(22)
                 for k in (i + 1)..<max(i + 1, endIdx + 1) {
                     let g = (s.closes[k] / start - 1) * 100
-                    if r.daysTo10 == nil && g >= 10 { r.daysTo10 = k - i }
-                    if r.daysToMinus10 == nil && g <= -10 { r.daysToMinus10 = k - i }
+                    if r.daysTo10 == nil && g >= 10 - 1e-9 { r.daysTo10 = k - i }
+                    if r.daysToMinus10 == nil && g <= -10 + 1e-9 { r.daysToMinus10 = k - i }
                     if let t = item.target, s.closes[k] >= t { r.targetHit = true }
                     if let st = item.stop, s.closes[k] <= st { r.stopHit = true }
                 }
