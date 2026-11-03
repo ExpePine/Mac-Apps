@@ -14,7 +14,7 @@ enum ChartCentre {
     static let kindKey = "centre.kind", columnKey = "centre.column", mbKey = "mb.center"
     static var kind: ChartCentreKind { ChartCentreKind(rawValue: UserDefaults.standard.string(forKey: kindKey) ?? "") ?? .last }
     static var mbCenter: MBCenter { MBCenter(rawValue: UserDefaults.standard.string(forKey: mbKey) ?? "") ?? .start }
-    static func column(_ vm: ScreenerViewModel) -> String {
+    @MainActor static func column(_ vm: ScreenerViewModel) -> String {
         let c = UserDefaults.standard.string(forKey: columnKey) ?? ""
         return c.isEmpty ? vm.settings.triggerColumn : c
     }
