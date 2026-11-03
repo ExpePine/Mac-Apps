@@ -72,7 +72,7 @@ struct FilterView: View {
                                        vm.selectStock(from: row)
                                        if let row { ChartPeek.shared.preload(vm.rowKey(row), vm: vm) }
                                    },
-                                   onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, openWindow: openWindow) },
+                                   onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: vm.filterRows.map { vm.rowKey($0) }, context: .filter, openWindow: openWindow) },
                                    onHoverChart: ChartPeek.enabled ? { row, chart in
                                        ChartPeek.shared.preload(vm.rowKey(row), vm: vm)
                                        ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm)        // blue dot = Chart 1, orange = Chart 2

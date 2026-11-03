@@ -44,8 +44,17 @@ struct ChartReelView: View {
     @AppStorage("reel.mbMonth") private var mbMonth = ""
     @AppStorage("reel.mbScope") private var mbScope = "Sheet stocks"
     @AppStorage("mb.center") private var mbCenter = MBCenter.start.rawValue
-    @AppStorage(ChartCentre.kindKey) private var centreKind = ""
-    @AppStorage(ChartCentre.columnKey) private var centreColumn = ""
+    @State private var centreSig = ""
+    /// Which Centre choice this reel follows (each place keeps its own); nil = the source has its own dates.
+    private var centreContext: ChartContext? {
+        switch ReelSource(rawValue: source) ?? .gainers {
+        case .gainers: return .gainers
+        case .filter, .all: return .filter
+        case .column: return centreMode == "" ? .filter : nil
+        case .multibaggers: return .multibaggers
+        case .scan: return nil
+        }
+    }
     @ObservedObject private var mbc = MultibaggerCenter.shared
     @ObservedObject private var mbf = MBFilterCenter.shared
     @AppStorage("mb.fOn") private var fOn = false
@@ -115,12 +124,20 @@ struct ChartReelView: View {
                          goTo: e.day(for: center), key: e.id)
             }
         }
-        // the app-wide Centre choice, for sources without a centre of their own
-        let src = ReelSource(rawValue: source) ?? .gainers
-        if src == .gainers || src == .filter || src == .all || (src == .column && centreMode == "") {
-            _ = centreKind; _ = centreColumn
-            let resolve = vm.centreResolver()
-            out = out.map { var x = $0; x.goTo = resolve(x.symbol, x.row, x.goTo); return x }
+        // this place's Centre choice (Daily gainers / Filter / Multibaggers — each its own)
+        _ = centreSig
+        if let ctx = centreContext {
+            let src = ReelSource(rawValue: source) ?? .gainers
+            if src == .multibaggers {
+                // each move's own month when centring on the move; otherwise last bar / the column
+                if ChartCentre.kind(.multibaggers) != .mb {
+                    let resolve = vm.centreResolver(ctx)
+                    out = out.map { var x = $0; x.goTo = resolve(x.symbol, x.row, nil); return x }
+                }
+            } else {
+                let resolve = vm.centreResolver(ctx)
+                out = out.map { var x = $0; x.goTo = resolve(x.symbol, x.row, src == .gainers ? x.goTo : nil); return x }
+            }
         }
         var seen = Set<String>()
         out = out.filter { !$0.symbol.isEmpty && seen.insert($0.key ?? $0.symbol).inserted }
@@ -237,7 +254,10 @@ struct ChartReelView: View {
         }
         .onChange(of: mbf.matched) { _ in if fOn { restart() } }
         .onChange(of: mbCenter) { _ in restart() }
-        .onChange(of: "\(centreKind)|\(centreColumn)") { _ in refresh += 1; let l = items; show(min(shown, max(0, l.count - 1)), l) }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
+            let s = centreContext.map { ChartCentre.title($0, vm) } ?? ""
+            if s != centreSig { centreSig = s; refresh += 1; let l = items; show(min(shown, max(0, l.count - 1)), l) }
+        }
         .onChange(of: mbc.events.count) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
         .onChange(of: layout) { _ in phase = 0; show(shown, items) }
@@ -313,7 +333,7 @@ struct ChartReelView: View {
         FlowLayout(spacing: 8, lineSpacing: 6) {
             Button { expanded = true } label: { Label("Expand charts", systemImage: "arrow.up.left.and.arrow.down.right") }
                 .help("Charts only — hide these bars, the list strip and the slider (⇧⌘X; Esc to come back)")
-            ChartCentreMenu()
+            if let ctx = centreContext { ChartCentreMenu(context: ctx).id(ctx) }
             Picker("", selection: $source) {
                 ForEach(ReelSource.allCases) { Text($0.rawValue).tag($0.rawValue) }
             }
@@ -476,7 +496,7 @@ struct ChartReelView: View {
                     Toggle("🔗 Sync", isOn: $syncDelivery).toggleStyle(.button)
                         .help("Keep the delivery chart on the same dates as Chart 1 — and move Chart 1 when you pan / zoom the delivery chart")
                 }
-                Button { vm.openChart(it.symbol, queue: items.map(\.symbol), openWindow: openWindow) } label: { Label("Chart viewer", systemImage: "arrow.up.forward.app") }
+                Button { vm.openChart(it.symbol, queue: items.map(\.symbol), goTo: it.goTo, exact: centreContext == nil || (centreContext == .multibaggers && ChartCentre.kind(.multibaggers) == .mb), context: centreContext ?? .other, openWindow: openWindow) } label: { Label("Chart viewer", systemImage: "arrow.up.forward.app") }
                     .help("Open this stock in the Chart viewer (snapshots, annotate, sign in)")
             }
             Text("\(shown + 1) / \(count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)

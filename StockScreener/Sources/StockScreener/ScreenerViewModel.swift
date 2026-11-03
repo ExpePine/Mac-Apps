@@ -140,6 +140,7 @@ final class ScreenerViewModel: ObservableObject {
     /// Date the Chart viewer centres TradingView (and the delivery chart) on after loading — e.g. a gainer's day.
     @Published var chartGoTo: String?
     var chartSoftGoTo: String?
+    @Published var chartContext: ChartContext = .other
     var chartExactGoTo = false
     @Published var chartQueue: [String] = []        // the list the chart was opened from (for ◀ ▶)
     @Published var chartStatus: String?

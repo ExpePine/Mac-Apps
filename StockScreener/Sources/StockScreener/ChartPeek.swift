@@ -37,7 +37,7 @@ import WebKit
         let w = DispatchWorkItem { [weak self] in
             guard let self else { return }
             var urls: [(URL, Int, String?)] = []
-            for c in 0..<min(2, vm.chartCount) { if let u = vm.chartURL(symbol, column: c) { urls.append((u, c, vm.centreDay(symbol))) } }
+            for c in 0..<min(2, vm.chartCount) { if let u = vm.chartURL(symbol, column: c) { urls.append((u, c, vm.centreDay(symbol, .filter))) } }
             self.pool.preload(urls, keep: 6)
         }
         preloadWork = w
@@ -47,7 +47,7 @@ import WebKit
     func show(_ symbol: String, chart: Int, vm: ScreenerViewModel) {
         let c = min(chart, max(0, vm.chartCount - 1))
         guard let url = vm.chartURL(symbol, column: c) else { NSSound.beep(); return }
-        let web = pool.view(for: url, slot: chart, goTo: vm.centreDay(symbol))
+        let web = pool.view(for: url, slot: chart, goTo: vm.centreDay(symbol, .filter))
         let size = Self.frameSize()
         // near the mouse, kept on screen
         let m = NSEvent.mouseLocation
