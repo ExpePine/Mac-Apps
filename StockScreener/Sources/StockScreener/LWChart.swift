@@ -353,8 +353,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       sma22=chart.addLineSeries({priceScaleId:'deliv',color:'#00BCD4',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       t3s=chart.addLineSeries({priceScaleId:'deliv',color:'#26a69a',lineWidth:2,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       high=chart.addLineSeries({priceScaleId:'deliv',color:'#2962FF',lineWidth:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
+      // only YOUR pans / zooms move TradingView — not the chart's own data loads, fits or range buttons
+      window._userAt=0;
+      var mark=function(e){ if(e.type!=='mousemove' || e.buttons) window._userAt=Date.now(); };
+      ['pointerdown','mousedown','wheel','touchstart','touchmove','mousemove'].forEach(function(t){ document.addEventListener(t, mark, {capture:true, passive:true}); });
       chart.timeScale().subscribeVisibleTimeRangeChange(function(r){
         if(!r || window._quiet) return;
+        if(Date.now()-window._userAt > 1500) return;
         clearTimeout(window._rt);
         window._rt=setTimeout(function(){
           if(!(window.webkit && window.webkit.messageHandlers.range)) return;
