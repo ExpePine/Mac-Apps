@@ -48,6 +48,7 @@ import WebKit
         let c = min(chart, max(0, vm.chartCount - 1))
         guard let url = vm.chartURL(symbol, column: c) else { NSSound.beep(); return }
         let web = pool.view(for: url, slot: chart, goTo: vm.centreDay(symbol, .filter))
+        ImpressionStore.shared.begin(symbol, place: "Peek")
         let size = Self.frameSize()
         // near the mouse, kept on screen
         let m = NSEvent.mouseLocation
@@ -102,6 +103,7 @@ import WebKit
     func close() {
         timer?.invalidate()
         panel?.orderOut(nil)
+        ImpressionStore.shared.end("Peek")
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
@@ -111,7 +113,7 @@ import WebKit
         UserDefaults.standard.set("Custom", forKey: "peek.size")
     }
 
-    func windowWillClose(_ notification: Notification) { timer?.invalidate() }
+    func windowWillClose(_ notification: Notification) { timer?.invalidate(); ImpressionStore.shared.end("Peek") }
 }
 
 /// Filter toolbar menu: peek on / off, how long, how big, what double left-click does.

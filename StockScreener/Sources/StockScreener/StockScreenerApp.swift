@@ -111,6 +111,13 @@ struct StockScreenerApp: App {
         .defaultSize(width: 1100, height: 760)
         .windowResizability(.contentMinSize)
 
+        Window("Chart Impressions", id: "impressions") {
+            ImpressionsView()
+                .environmentObject(vm)
+                .frame(minWidth: 820, minHeight: 560)
+        }
+        .keyboardShortcut("i", modifiers: [.command, .option])
+
         Window("Data Storage", id: "storage") {
             StorageView()
                 .frame(minWidth: 760, minHeight: 480)

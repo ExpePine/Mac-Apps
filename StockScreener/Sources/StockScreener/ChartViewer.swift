@@ -82,9 +82,10 @@ struct ChartViewer: View {
         }
         .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
         .task(id: symbol + "|" + (vm.chartGoTo ?? "")) { if !symbol.isEmpty { MBNoteFocus.shared.setChart(symbol, day: vm.chartGoTo) } }
-        .onAppear { load(); vm.refreshChartLinksIfStale() }
+        .onAppear { load(); vm.refreshChartLinksIfStale(); ImpressionStore.shared.begin(symbol, place: "Chart viewer") }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
-        .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0 }
+        .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0; ImpressionStore.shared.begin(symbol, place: "Chart viewer") }
+        .onDisappear { ImpressionStore.shared.end("Chart viewer") }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let s = ChartCentre.title(vm.chartContext, vm)
             if !centreSig.isEmpty && s != centreSig { centreSig = s; recentre() }

@@ -38,6 +38,7 @@ enum AppWindows {
         ]),
         AppWindowGroup(name: "Charts", icon: "chart.xyaxis.line", windows: [
             AppWindow(title: "Chart viewer", id: "chart", icon: "chart.xyaxis.line", shortcut: "⇧⌘K", note: ""),
+            AppWindow(title: "Chart Impressions", id: "impressions", icon: "eye", shortcut: "⌥⌘I", note: "charts viewed, time spent, vs gainers"),
             AppWindow(title: "Chart Reel", id: "reel", icon: "film.stack", shortcut: "⌥⌘R", note: "flick through charts"),
             AppWindow(title: "Gainer Charts", id: "gainerCharts", icon: "rectangle.stack", shortcut: "⌥⌘G", note: "Chart 1 → Chart 2 per gainer"),
             AppWindow(title: "News & Deals", id: "newschart", icon: "newspaper", shortcut: "⌥⌘N", note: "news letters and bulk deals"),

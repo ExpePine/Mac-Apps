@@ -248,7 +248,9 @@ struct ChartReelView: View {
         .onChange(of: sortMode) { _ in restart() }
         .onChange(of: mbMonth) { _ in restart() }
         .onChange(of: fOn) { _ in restart() }
+        .onDisappear { ImpressionStore.shared.end("Chart Reel") }
         .task(id: current?.key ?? current?.symbol) {
+            ImpressionStore.shared.begin(current?.symbol ?? "", place: "Chart Reel")
             if ReelSource(rawValue: source) == .multibaggers { MBNoteFocus.shared.set(currentEvent) }
             else if let c = current { MBNoteFocus.shared.setChart(c.symbol, day: c.goTo ?? c.day) }
         }

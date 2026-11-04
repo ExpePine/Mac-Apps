@@ -112,7 +112,11 @@ struct GainerChartsView: View {
             }
         }
         .navigationTitle(cur.map { "Gainer Charts — \($0.symbol) · Chart \(chart + 1)" } ?? "Gainer Charts")
-        .task(id: cur?.symbol) { if let c = cur { MBNoteFocus.shared.setChart(c.symbol, day: goTo(c)) } }
+        .task(id: cur?.symbol) {
+            ImpressionStore.shared.begin(cur?.symbol ?? "", place: "Gainer Charts")
+            if let c = cur { MBNoteFocus.shared.setChart(c.symbol, day: goTo(c)) }
+        }
+        .onDisappear { ImpressionStore.shared.end("Gainer Charts") }
         .onAppear { centreSig = ChartCentre.title(.gainers, vm); vm.refreshChartLinksIfStale(); restart() }
         .task { await LiveQuotes.shared.keepLive(vm) }
         .onChange(of: mode) { _ in restart() }

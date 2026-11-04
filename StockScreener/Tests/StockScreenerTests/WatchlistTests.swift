@@ -48,3 +48,30 @@ final class WatchlistTests: XCTestCase {
         XCTAssertEqual(c[2].drawdown, (1.0 / 1.05 - 1) * 100, accuracy: 1e-9)
     }
 }
+
+final class ImpressionTests: XCTestCase {
+    func testSpearmanPerfectAndReverse() {
+        XCTAssertEqual(ImpressionReport.spearman([1, 2, 3, 4], [10, 20, 30, 40])!, 1, accuracy: 1e-9)
+        XCTAssertEqual(ImpressionReport.spearman([1, 2, 3, 4], [4, 3, 2, 1])!, -1, accuracy: 1e-9)
+    }
+
+    func testReportCountsViewsTimeAndGainers() {
+        var book = PriceBook()
+        let days = (1...10).map { String(format: "2026-01-%02d", $0) }
+        book.series["A"] = PriceSeries(days: days, closes: [100, 110, 110, 110, 110, 110, 110, 110, 110, 110])   // +10% on 01-02
+        book.series["B"] = PriceSeries(days: days, closes: [100, 100, 100, 100, 100, 100, 100, 100, 100, 100])
+        let d = Date()
+        let v = [ChartImpression(symbol: "A", start: d, seconds: 30, place: "Chart viewer", day: "2026-01-02"),
+                 ChartImpression(symbol: "A", start: d, seconds: 90, place: "Chart Reel", day: "2026-01-02"),
+                 ChartImpression(symbol: "B", start: d, seconds: 5, place: "Peek", day: "2026-01-02")]
+        let r = ImpressionReport.build(v, book: book, threshold: 5, monthly: false)
+        XCTAssertEqual(r.views, 3)
+        XCTAssertEqual(r.seconds, 125, accuracy: 1e-9)
+        XCTAssertEqual(r.stocks.first?.symbol, "A")
+        XCTAssertEqual(r.stocks.first?.views, 2)
+        XCTAssertEqual(r.lookedPairs, 2)
+        XCTAssertEqual(r.lookedGainers, 1)
+        XCTAssertEqual(r.periods.first?.marketGainers, 1)
+        XCTAssertEqual(r.periods.first?.gainersSeen, 1)
+    }
+}
