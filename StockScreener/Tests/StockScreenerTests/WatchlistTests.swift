@@ -93,7 +93,7 @@ final class EarningsTests: XCTestCase {
     }
 }
 
-final class EarningsSummaryTests: XCTestCase {
+@MainActor final class EarningsSummaryTests: XCTestCase {
     func testPicksTheResultsFilingNotTheNotice() {
         let f = URL(string: "https://nsearchives.nseindia.com/corporate/x.pdf")
         let d = { (s: String) in EarningsSummaryCenter.parseDate(s)! }
