@@ -57,6 +57,13 @@ enum NSEDealsClient {
 
     /// Any NSE JSON API call, with the same cookies / browser-like headers (warms up on `referer` first).
     static func json(_ url: URL, referer: String) async throws -> Any {
+        let data = try await raw(url, referer: referer, json: true)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) else { throw Failure(message: "NSE sent no JSON (blocked?)") }
+        return obj
+    }
+
+    /// Any NSE file or API response as bytes (PDFs on nsearchives too), with NSE's cookies.
+    static func raw(_ url: URL, referer: String, json: Bool = false) async throws -> Data {
         if Date().timeIntervalSince(warmedAt) > 600 {
             for u in ["https://www.nseindia.com/", referer] {
                 if let w = URL(string: u) { _ = try? await session.data(for: request(w, json: false)) }
@@ -64,7 +71,7 @@ enum NSEDealsClient {
             warmedAt = Date()
         }
         func call() async throws -> (Data, Int) {
-            var r = request(url, json: true)
+            var r = request(url, json: json)
             r.setValue(referer, forHTTPHeaderField: "Referer")
             let (d, resp) = try await session.data(for: r)
             return (d, (resp as? HTTPURLResponse)?.statusCode ?? 0)
@@ -77,8 +84,7 @@ enum NSEDealsClient {
             (data, status) = try await call()
         }
         guard (200..<300).contains(status) else { throw Failure(message: "NSE HTTP \(status)") }
-        guard let obj = try? JSONSerialization.jsonObject(with: data) else { throw Failure(message: "NSE sent no JSON (blocked?)") }
-        return obj
+        return data
     }
 
     /// Deals between two days (inclusive), from NSE's history API.

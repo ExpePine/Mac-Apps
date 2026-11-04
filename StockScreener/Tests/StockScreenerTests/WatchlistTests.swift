@@ -92,3 +92,23 @@ final class EarningsTests: XCTestCase {
         XCTAssertEqual(EarningsMath.pick(ev, on: "2026-11-14")?.days, 0)
     }
 }
+
+final class EarningsSummaryTests: XCTestCase {
+    func testPicksTheResultsFilingNotTheNotice() {
+        let f = URL(string: "https://nsearchives.nseindia.com/corporate/x.pdf")
+        let d = { (s: String) in EarningsSummaryCenter.parseDate(s)! }
+        let ann = [
+            NSEAnnouncement(date: d("2026-10-20 10:00:00"), desc: "Board Meeting Intimation", text: "Board meeting will be held to consider financial results", file: f),
+            NSEAnnouncement(date: d("2026-11-03 18:00:00"), desc: "Outcome of Board Meeting", text: "Approved the unaudited financial results for the quarter ended Sep 30", file: f),
+            NSEAnnouncement(date: d("2026-11-05 09:00:00"), desc: "Analysts/Institutional Investor Meet/Con. Call Updates", text: "Transcript of the earnings call", file: f),
+        ]
+        XCTAssertEqual(EarningsSummaryCenter.pickResults(ann)?.desc, "Outcome of Board Meeting")
+        XCTAssertTrue(EarningsSummaryCenter.has(ann[2], ["transcript"]))
+    }
+
+    func testParseAnnouncementRow() {
+        let a = EarningsSummaryCenter.parse(["sort_date": "2026-11-03 18:00:00", "desc": "Financial Results", "attchmntText": "Results", "attchmntFile": "https://nsearchives.nseindia.com/corporate/a.pdf"])
+        XCTAssertEqual(a?.desc, "Financial Results")
+        XCTAssertNotNil(a?.file)
+    }
+}

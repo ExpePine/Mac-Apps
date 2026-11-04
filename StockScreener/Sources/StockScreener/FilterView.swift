@@ -206,6 +206,7 @@ struct FilterView: View {
                 }
                 AddToWatchlistButton(groups: [("Selected", vm.filterSelection.map { vm.rowKey($0) }), ("All shown", vm.filterRows.map { vm.rowKey($0) })],
                                      source: "Filter")
+                if let first = vm.filterSelection.first { EarningsSummaryButton(symbol: vm.rowKey(first), compact: false) }
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()

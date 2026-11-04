@@ -426,6 +426,7 @@ struct WatchlistView: View {
         let picked = rows.filter { ids.contains($0.id) }
         if let first = picked.first {
             Button("Open chart of \(first.symbol)") { vm.openChart(first.symbol, queue: rows.map(\.symbol), openWindow: openWindow) }
+            Button("Earnings summary of \(first.symbol)") { EarningsSummaryCenter.shared.request(first.symbol, model: vm.settings.groqModel); openWindow(id: "earnsum") }
             Button("Chart Reel of \(picked.count == 1 ? "this list" : "\(picked.count) stocks")") { openReel(picked.count == 1 ? rows : picked) }
             Divider()
         }

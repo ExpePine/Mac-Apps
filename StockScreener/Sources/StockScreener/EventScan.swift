@@ -327,6 +327,7 @@ struct EventScanView: View {
             }
             Button("Open in Chart viewer") { vm.openChart(r.symbol, queue: shown.map(\.symbol), openWindow: openWindow) }
             WatchlistSubmenu(symbols: [r.symbol], source: "Event scan")
+            Button("Earnings summary of \(r.symbol)") { EarningsSummaryCenter.shared.request(r.symbol, model: vm.settings.groqModel); openWindow(id: "earnsum") }
             Button("Copy \(r.symbol)") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(r.symbol, forType: .string) }
         }
     }

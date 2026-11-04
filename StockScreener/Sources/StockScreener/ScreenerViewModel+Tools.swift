@@ -139,7 +139,11 @@ extension ScreenerViewModel {
         let sym = rowKey(row)
         let targets = selection.contains(where: { $0.id == row.id }) && selection.count > 1 ? selection : [row]
         let queueSymbols = queue.map { rowKey($0) }
-        var items: [(String, () -> Void)] = [("Open chart of \(sym)", { [weak self] in self?.openChart(sym, queue: queueSymbols, openWindow: openWindow) }), ("-", {})]
+        var items: [(String, () -> Void)] = [("Open chart of \(sym)", { [weak self] in self?.openChart(sym, queue: queueSymbols, openWindow: openWindow) }),
+                                             ("Earnings summary of \(sym)", { [weak self] in
+                                                 EarningsSummaryCenter.shared.request(sym, model: self?.settings.groqModel ?? "")
+                                                 openWindow(id: "earnsum")
+                                             }), ("-", {})]
         for list in watchlists {
             let title = targets.count > 1 ? "Add \(targets.count) stocks to “\(list.name)”" : "Add \(sym) to “\(list.name)”"
             items.append((title, { [weak self] in self?.addToWatchlist(targets, listID: list.id, source: "Right-click") }))
