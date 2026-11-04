@@ -45,6 +45,10 @@ struct ColumnMenuView: View {
             }
             .controlSize(.small)
 
+            if ["REV_YOY", "PAT_YOY", "REV_QOQ", "PAT_QOQ", "EARNINGS"].contains(where: { name.hasPrefix($0) }) {
+                GrowthDaysPicker(compact: true)
+            }
+
             Divider()
 
             // Conditions on this column

@@ -38,6 +38,16 @@ struct ResultsGrowth: Codable {
     var model = ""
 
     var auto: Bool { UserDefaults.standard.object(forKey: "growth.auto") as? Bool ?? true }
+    /// Which EARNINGS values start a fetch (days since results), e.g. [1] or [0, 1, 2]. Default 0…3.
+    nonisolated static var days: Set<Int> {
+        let s = UserDefaults.standard.string(forKey: "growth.days") ?? "0,1,2,3"
+        return Set(s.split(separator: ",").compactMap { Int($0) })
+    }
+    func setDays(_ d: Set<Int>) {
+        UserDefaults.standard.set(d.sorted().map(String.init).joined(separator: ","), forKey: "growth.days")
+        objectWillChange.send()
+        onReload?()                     // re-check the Filter now
+    }
     private var tried: [String: (count: Int, at: Date)] = [:]   // "SYM|earnDate" → attempts (filing may not be up yet)
     private var running = false
 
@@ -183,7 +193,35 @@ struct ResultsGrowthSettingsRow: View {
                 Text("\(c.bySymbol.count) stocks").font(.caption).foregroundStyle(.secondary)
                 if c.currentSymbol != nil { ProgressView().controlSize(.small) }
             }
+            if auto { GrowthDaysPicker() }
             if let s = c.status { Text(s).font(.caption).foregroundStyle(.orange).lineLimit(2) }
         }
+    }
+}
+
+/// Pick which EARNINGS values start the REV_YOY / PAT_YOY fetch: EARNINGS = 1, or 0, 1, 2 …
+struct GrowthDaysPicker: View {
+    @ObservedObject private var c = ResultsGrowthCenter.shared
+    var compact = false
+    var body: some View {
+        let on = ResultsGrowthCenter.days
+        HStack(spacing: 6) {
+            Text(compact ? "Fetch when EARNINGS =" : "Fetch for stocks with EARNINGS =").font(.caption)
+            ForEach(0...7, id: \.self) { d in
+                Toggle(isOn: Binding(get: { on.contains(d) }, set: { v in
+                    var x = on; if v { x.insert(d) } else { x.remove(d) }
+                    c.setDays(x)
+                })) { Text("\(d)").monospacedDigit() }
+                .toggleStyle(.button).controlSize(.small)
+            }
+            Menu("Presets") {
+                Button("Only 1 (the day after results)") { c.setDays([1]) }
+                Button("0, 1, 2") { c.setDays([0, 1, 2]) }
+                Button("0 – 3 (covers weekends)") { c.setDays([0, 1, 2, 3]) }
+                Button("0 – 7") { c.setDays(Set(0...7)) }
+            }
+            .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
+        }
+        .help("0 = results today, 1 = yesterday … Stocks whose EARNINGS is one of the ticked values get REV_YOY / PAT_YOY fetched automatically.")
     }
 }

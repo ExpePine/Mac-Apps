@@ -492,10 +492,11 @@ final class ScreenerViewModel: ObservableObject {
         func name(_ n: String) -> String { t.index(of: n) == nil ? n : n + " (NSE)" }
         let gNames = ["REV_YOY", "PAT_YOY", "REV_QOQ", "PAT_QOQ"].map(name)
         var due: [(symbol: String, earnDate: String)] = []
+        let growthDays = ResultsGrowthCenter.days
         let rows = t.rows.map { row -> SheetRow in
             let sym = row.text(label).trimmingCharacters(in: .whitespaces).uppercased()
             let v = ec.value(sym, on: day)
-            if let v, (0...3).contains(v.days), !gc.has(sym, since: v.date) { due.append((sym, v.date)) }
+            if let v, growthDays.contains(v.days), !gc.has(sym, since: v.date) { due.append((sym, v.date)) }
             // growth from the latest results (kept until the next ones)
             let g = gc.bySymbol[sym]
             let gv: [Double?] = [g?.revYoY, g?.patYoY, g?.revQoQ, g?.patQoQ]
