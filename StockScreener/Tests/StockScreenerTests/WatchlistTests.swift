@@ -134,3 +134,25 @@ final class ResultsGrowthTests: XCTestCase {
         XCTAssertEqual(g.patQoQ!, 20, accuracy: 1e-9)
     }
 }
+
+final class NSEResultsTests: XCTestCase {
+    func testParseAndCompute() throws {
+        let json = """
+        {"resCmpData":[
+          {"re_from_date":"01-JUL-2026","re_to_date":"30-SEP-2026","re_net_sale":"1,200.5","re_pro_loss_aft_tax":"150","re_con_type":"Consolidated"},
+          {"re_from_date":"01-APR-2026","re_to_date":"30-JUN-2026","re_net_sale":"1,100","re_pro_loss_aft_tax":"120","re_con_type":"Consolidated"},
+          {"re_from_date":"01-JUL-2025","re_to_date":"30-SEP-2025","re_net_sale":"1,000.5","re_pro_loss_aft_tax":"(50)","re_con_type":"Consolidated"},
+          {"re_from_date":"01-JUL-2026","re_to_date":"30-SEP-2026","re_net_sale":"900","re_pro_loss_aft_tax":"90","re_con_type":"Standalone"}
+        ]}
+        """
+        let obj = try JSONSerialization.jsonObject(with: Data(json.utf8))
+        let q = NSEResults.parse(obj)
+        XCTAssertEqual(q.count, 4)
+        let g = try XCTUnwrap(NSEResults.compute("X", q))
+        XCTAssertEqual(g.resultsDay, "2026-09-30")
+        XCTAssertEqual(g.revYoY!, (1200.5 / 1000.5 - 1) * 100, accuracy: 1e-9)
+        XCTAssertEqual(g.revQoQ!, (1200.5 / 1100 - 1) * 100, accuracy: 1e-9)
+        XCTAssertNil(g.patYoY)                                 // year-ago was a loss
+        XCTAssertEqual(g.patQoQ!, 25, accuracy: 1e-9)
+    }
+}
