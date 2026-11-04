@@ -55,6 +55,32 @@ enum NSEDealsClient {
 
     private static let api: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "dd-MM-yyyy"; return f }()
 
+    /// Any NSE JSON API call, with the same cookies / browser-like headers (warms up on `referer` first).
+    static func json(_ url: URL, referer: String) async throws -> Any {
+        if Date().timeIntervalSince(warmedAt) > 600 {
+            for u in ["https://www.nseindia.com/", referer] {
+                if let w = URL(string: u) { _ = try? await session.data(for: request(w, json: false)) }
+            }
+            warmedAt = Date()
+        }
+        func call() async throws -> (Data, Int) {
+            var r = request(url, json: true)
+            r.setValue(referer, forHTTPHeaderField: "Referer")
+            let (d, resp) = try await session.data(for: r)
+            return (d, (resp as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        var (data, status) = try await call()
+        if status == 401 || status == 403 {
+            warmedAt = .distantPast
+            if let w = URL(string: referer) { _ = try? await session.data(for: request(w, json: false)) }
+            warmedAt = Date()
+            (data, status) = try await call()
+        }
+        guard (200..<300).contains(status) else { throw Failure(message: "NSE HTTP \(status)") }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) else { throw Failure(message: "NSE sent no JSON (blocked?)") }
+        return obj
+    }
+
     /// Deals between two days (inclusive), from NSE's history API.
     static func history(kind: String, from: Date, to: Date) async throws -> [BulkDeal] {
         await warmUp()

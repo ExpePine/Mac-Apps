@@ -270,6 +270,13 @@ final class ScreenerViewModel: ObservableObject {
             UserDefaults.standard.set(true, forKey: "cols.added10")
             for n in ["T3F", "T3S"] where !settings.filterColumns.contains(n) { settings.filterColumns.append(n) }
         }
+        // NSE results dates → EARNINGS / EARN_DATE columns (downloaded once a day)
+        if !settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "cols.addedEarnings") {
+            UserDefaults.standard.set(true, forKey: "cols.addedEarnings")
+            if !settings.filterColumns.contains("EARNINGS") { settings.filterColumns.append("EARNINGS") }
+        }
+        EarningsCenter.shared.onReload = { [weak self] in self?.setTableKeepingRaw() }
+        EarningsCenter.shared.refreshIfDue()
         // 5-minute data → MOR / DAY columns
         Intraday5mCenter.shared.onReload = { [weak self] in
             guard let self else { return }
@@ -293,6 +300,7 @@ final class ScreenerViewModel: ObservableObject {
                 }
                 DeliveryCenter.shared.autoUpdateIfDue()          // NSE delivery data: new days, once an hour
                 ScraperCenter.shared.runIfDue()                  // GitHub scraper at your set time (Scraper window)
+                EarningsCenter.shared.refreshIfDue()             // NSE results dates, once a day
                 if self.hasData { await self.runEndOfDayAlertsIfDue() }   // the day's alerts, once, after the close
                 Intraday5mCenter.allSheetSymbols = self.allSymbols
                 if self.hasData, Self.fiveMinuteDue() { Intraday5mCenter.shared.update(self.allSymbols) }   // 5-min bars, once a day
@@ -467,6 +475,22 @@ final class ScreenerViewModel: ObservableObject {
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
+    /// EARNINGS = days from the results board meeting (NSE) to the data day: −10 = results in 10 days,
+    /// +10 = results were 10 days ago (the next announced meeting if there is one, else the latest). EARN_DATE = its date.
+    private func withEarningsColumns(_ t: SheetTable) -> SheetTable {
+        guard let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let ec = EarningsCenter.shared
+        let day = HistoryStore.dayKey(dataDay(of: t))
+        let eName = t.index(of: "EARNINGS") == nil ? "EARNINGS" : "EARNINGS (NSE)"
+        let dName = t.index(of: "EARN_DATE") == nil ? "EARN_DATE" : "EARN_DATE (NSE)"
+        let rows = t.rows.map { row -> SheetRow in
+            let v = ec.value(row.text(label).trimmingCharacters(in: .whitespaces), on: day)
+            return SheetRow(id: row.id, cells: row.cells + [v.map { String($0.days) } ?? "", v?.date ?? ""],
+                            numbers: row.numbers + [v.map { Double($0.days) }, nil])
+        }
+        return SheetTable(headers: t.headers + [eName, dName], rows: rows, originalHeaders: t.originalHeaders + [eName, dName])
+    }
+
     /// 5-minute bars: right away the first time (60-day backfill), then once a day after 15:40 IST.
     static func fiveMinuteDue() -> Bool {
         let last = Intraday5mCenter.lastUpdateDay
@@ -545,7 +569,7 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = withScores(withPriceT3Columns(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases))))))
+        let newTable = withScores(withEarningsColumns(withPriceT3Columns(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))))))
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = makePainter(newTable)

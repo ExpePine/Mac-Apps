@@ -75,3 +75,20 @@ final class ImpressionTests: XCTestCase {
         XCTAssertEqual(r.periods.first?.gainersSeen, 1)
     }
 }
+
+final class EarningsTests: XCTestCase {
+    func testParseKeepsOnlyResults() {
+        let a = EarningsMath.parse(["symbol": "TCS", "date": "12-Nov-2026", "purpose": "Financial Results/Dividend"])
+        XCTAssertEqual(a?.day, "2026-11-12")
+        XCTAssertNil(EarningsMath.parse(["symbol": "TCS", "date": "12-Nov-2026", "purpose": "Fund Raising"]))
+        let b = EarningsMath.parse(["bm_symbol": "infy", "bm_date": "05-11-2026", "bm_purpose": "To consider quarterly results"])
+        XCTAssertEqual(b?.symbol, "INFY"); XCTAssertEqual(b?.day, "2026-11-05")
+    }
+
+    func testPickSignedDays() {
+        let ev = [EarningsEvent(symbol: "X", day: "2026-08-10", purpose: "Results"), EarningsEvent(symbol: "X", day: "2026-11-14", purpose: "Results")]
+        XCTAssertEqual(EarningsMath.pick(ev, on: "2026-11-04")?.days, -10)     // 10 days to go
+        XCTAssertEqual(EarningsMath.pick(ev, on: "2026-11-24")?.days, 10)      // 10 days past
+        XCTAssertEqual(EarningsMath.pick(ev, on: "2026-11-14")?.days, 0)
+    }
+}
