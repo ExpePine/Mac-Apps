@@ -276,6 +276,11 @@ final class ScreenerViewModel: ObservableObject {
             if !settings.filterColumns.contains("EARNINGS") { settings.filterColumns.append("EARNINGS") }
         }
         EarningsCenter.shared.onReload = { [weak self] in self?.setTableKeepingRaw() }
+        ResultsGrowthCenter.shared.onReload = { [weak self] in self?.setTableKeepingRaw() }
+        if !settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "cols.addedGrowth") {
+            UserDefaults.standard.set(true, forKey: "cols.addedGrowth")
+            for n in ["REV_YOY", "PAT_YOY"] where !settings.filterColumns.contains(n) { settings.filterColumns.append(n) }
+        }
         EarningsCenter.shared.refreshIfDue()
         // 5-minute data → MOR / DAY columns
         Intraday5mCenter.shared.onReload = { [weak self] in
@@ -483,12 +488,26 @@ final class ScreenerViewModel: ObservableObject {
         let day = HistoryStore.dayKey(dataDay(of: t))
         let eName = t.index(of: "EARNINGS") == nil ? "EARNINGS" : "EARNINGS (NSE)"
         let dName = t.index(of: "EARN_DATE") == nil ? "EARN_DATE" : "EARN_DATE (NSE)"
+        let gc = ResultsGrowthCenter.shared
+        func name(_ n: String) -> String { t.index(of: n) == nil ? n : n + " (NSE)" }
+        let gNames = ["REV_YOY", "PAT_YOY", "REV_QOQ", "PAT_QOQ"].map(name)
+        var due: [(symbol: String, earnDate: String)] = []
         let rows = t.rows.map { row -> SheetRow in
-            let v = ec.value(row.text(label).trimmingCharacters(in: .whitespaces), on: day)
-            return SheetRow(id: row.id, cells: row.cells + [v.map { String($0.days) } ?? "", v?.date ?? ""],
-                            numbers: row.numbers + [v.map { Double($0.days) }, nil])
+            let sym = row.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+            let v = ec.value(sym, on: day)
+            if let v, (0...3).contains(v.days), !gc.has(sym, since: v.date) { due.append((sym, v.date)) }
+            // growth from the latest results (kept until the next ones)
+            let g = gc.bySymbol[sym]
+            let gv: [Double?] = [g?.revYoY, g?.patYoY, g?.revQoQ, g?.patQoQ]
+            return SheetRow(id: row.id, cells: row.cells + [v.map { String($0.days) } ?? "", v?.date ?? ""] + gv.map { $0.map { String(format: "%.1f", $0) } ?? "" },
+                            numbers: row.numbers + [v.map { Double($0.days) }, nil] + gv)
         }
-        return SheetTable(headers: t.headers + [eName, dName], rows: rows, originalHeaders: t.originalHeaders + [eName, dName])
+        if !due.isEmpty {
+            let m = settings.groqModel
+            DispatchQueue.main.async { ResultsGrowthCenter.shared.consider(due, model: m) }
+        }
+        let extra = [eName, dName] + gNames
+        return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
     /// 5-minute bars: right away the first time (60-day backfill), then once a day after 15:40 IST.

@@ -123,3 +123,14 @@ final class EarningsTests: XCTestCase {
         XCTAssertTrue(f.contains("Net profit"))
     }
 }
+
+final class ResultsGrowthTests: XCTestCase {
+    func testGrowthMath() {
+        let g = ResultsGrowth(symbol: "X", resultsDay: "2026-11-03", period: "", basis: "consolidated", unit: "₹ crore",
+                              rev: [120, 100, 110], pat: [12, -5, 10], made: Date())
+        XCTAssertEqual(g.revYoY!, 20, accuracy: 1e-9)
+        XCTAssertEqual(g.revQoQ!, 120.0 / 110 * 100 - 100, accuracy: 1e-9)
+        XCTAssertNil(g.patYoY)                    // from a loss: no %
+        XCTAssertEqual(g.patQoQ!, 20, accuracy: 1e-9)
+    }
+}

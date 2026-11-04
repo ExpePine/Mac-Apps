@@ -143,6 +143,10 @@ extension ScreenerViewModel {
                                              ("Earnings summary of \(sym)", { [weak self] in
                                                  EarningsSummaryCenter.shared.request(sym, model: self?.settings.groqModel ?? "")
                                                  openWindow(id: "earnsum")
+                                             }),
+                                             ("Fill revenue / profit growth (REV_YOY, PAT_YOY) for \(targets.count > 1 ? "\(targets.count) stocks" : sym)", { [weak self] in
+                                                 guard let self else { return }
+                                                 ResultsGrowthCenter.shared.request(targets.map { self.rowKey($0) }, model: self.settings.groqModel)
                                              }), ("-", {})]
         for list in watchlists {
             let title = targets.count > 1 ? "Add \(targets.count) stocks to “\(list.name)”" : "Add \(sym) to “\(list.name)”"

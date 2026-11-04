@@ -170,6 +170,8 @@ enum GroqClient {
         return ((json?["data"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String }.sorted()
     }
 
+    struct RateLimited: LocalizedError { var errorDescription: String? { "Groq rate limit — try again in a minute" } }
+
     /// Groq's "request too large" (HTTP 413, tokens-per-minute cap): the limit and what was asked for.
     struct TooLarge: LocalizedError {
         let limit: Int, requested: Int, message: String
@@ -193,7 +195,7 @@ enum GroqClient {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 429 { throw Failure(message: "Groq rate limit — try again in a minute") }
+        if status == 429 { throw RateLimited() }
         if status == 413 {
             let t = String(data: data, encoding: .utf8) ?? ""
             func num(_ key: String) -> Int? {

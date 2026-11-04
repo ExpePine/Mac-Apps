@@ -172,6 +172,7 @@ struct SettingsHubView: View {
                         Button("Update 5-min now") { Intraday5mCenter.shared.update(Intraday5mCenter.allSheetSymbols, force: true) }
                     }
                     EarningsSettingsRow()
+                    ResultsGrowthSettingsRow()
                     HStack {
                         Text("Delivery signal, JUMP, scope:").font(.callout)
                         Spacer()
