@@ -112,3 +112,14 @@ final class EarningsTests: XCTestCase {
         XCTAssertNotNil(a?.file)
     }
 }
+
+@MainActor final class EarningsFocusTests: XCTestCase {
+    func testFocusKeepsNumberLinesWithinLimit() {
+        let filler = String(repeating: "Lorem ipsum notes about the company and its auditors.\n", count: 200)
+        let text = filler + "Revenue from operations 1,234.5 1,100.2\nNet profit for the period 210.4 190.1\n" + filler
+        let f = EarningsSummaryCenter.focus(text, limit: 400)
+        XCTAssertLessThanOrEqual(f.count, 400)
+        XCTAssertTrue(f.contains("Revenue from operations"))
+        XCTAssertTrue(f.contains("Net profit"))
+    }
+}

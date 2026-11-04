@@ -170,7 +170,13 @@ enum GroqClient {
         return ((json?["data"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String }.sorted()
     }
 
-    static func chat(model: String, system: String, user: String, json: Bool) async throws -> String {
+    /// Groq's "request too large" (HTTP 413, tokens-per-minute cap): the limit and what was asked for.
+    struct TooLarge: LocalizedError {
+        let limit: Int, requested: Int, message: String
+        var errorDescription: String? { message }
+    }
+
+    static func chat(model: String, system: String, user: String, json: Bool, maxTokens: Int? = nil) async throws -> String {
         guard !apiKey.isEmpty else { throw Failure(message: "Add your Groq API key first") }
         guard let url = URL(string: base + "/chat/completions") else { throw Failure(message: "Bad URL") }
         var req = URLRequest(url: url, timeoutInterval: 60)
@@ -183,10 +189,20 @@ enum GroqClient {
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         if json { body["response_format"] = ["type": "json_object"] }
+        if let maxTokens { body["max_tokens"] = maxTokens }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if status == 429 { throw Failure(message: "Groq rate limit — try again in a minute") }
+        if status == 413 {
+            let t = String(data: data, encoding: .utf8) ?? ""
+            func num(_ key: String) -> Int? {
+                guard let r = t.range(of: key + #"\s*\d+"#, options: .regularExpression) else { return nil }
+                return Int(t[r].filter(\.isNumber))
+            }
+            throw TooLarge(limit: num("Limit") ?? 0, requested: num("Requested") ?? 0,
+                           message: "Groq: request too large for this model's per-minute limit")
+        }
         guard (200..<300).contains(status) else {
             throw Failure(message: "Groq HTTP \(status): \(String(data: data, encoding: .utf8)?.prefix(300) ?? "")")
         }

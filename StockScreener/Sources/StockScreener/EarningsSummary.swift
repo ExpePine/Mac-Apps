@@ -84,22 +84,45 @@ struct EarningsSummary: Codable, Identifiable {
         let deck = after.first { Self.has($0, ["investor presentation", "earnings presentation", "analyst presentation"]) && $0.file != nil }
 
         working[sym] = "Reading the results filing…"
-        let rText = try await Self.pdfText(results.file, limit: 28_000)
-        var tText = ""
-        if let t = transcript { working[sym] = "Reading the earnings-call transcript…"; tText = (try? await Self.pdfText(t.file, limit: 16_000)) ?? "" }
-        var pText = ""
-        if tText.isEmpty, let d = deck { working[sym] = "Reading the investor presentation…"; pText = (try? await Self.pdfText(d.file, limit: 10_000)) ?? "" }
+        let rFull = try await Self.pdfText(results.file, limit: 120_000)
+        var tFull = ""
+        if let t = transcript { working[sym] = "Reading the earnings-call transcript…"; tFull = (try? await Self.pdfText(t.file, limit: 80_000)) ?? "" }
+        var pFull = ""
+        if tFull.isEmpty, let d = deck { working[sym] = "Reading the investor presentation…"; pFull = (try? await Self.pdfText(d.file, limit: 40_000)) ?? "" }
+        // Free Groq keys allow ~8,000 tokens per request (prompt + answer), so send only the lines that matter:
+        // the results' key lines, and the opening of the call (management's remarks). Shrinks again if Groq says so.
+        var budget = 15_000
+        var rText = "", tText = "", pText = ""
+        func cut() {
+            let hasCall = !tFull.isEmpty || !pFull.isEmpty
+            rText = Self.focus(rFull, limit: hasCall ? budget * 6 / 10 : budget)
+            tText = Self.opening(tFull, limit: budget * 4 / 10)
+            pText = Self.focus(pFull, limit: budget * 4 / 10)
+        }
+        cut()
         guard !rText.isEmpty || !tText.isEmpty else {
             throw GroqClient.Failure(message: "The results PDF has no readable text (probably a scanned image) — open it from NSE instead")
         }
 
         working[sym] = "Summarising with Groq…"
         let df = DateFormatter(); df.dateFormat = "d MMM yyyy"
-        var user = "Company: \(sym) (NSE)\nResults filed on NSE: \(df.string(from: results.date)) — \(results.desc)\n\n"
-        user += "=== RESULTS FILING TEXT ===\n" + (rText.isEmpty ? "(not readable)" : rText) + "\n"
-        if !tText.isEmpty { user += "\n=== EARNINGS CALL TRANSCRIPT (may be cut) ===\n" + tText + "\n" }
-        if !pText.isEmpty { user += "\n=== INVESTOR PRESENTATION (may be cut) ===\n" + pText + "\n" }
-        let text = try await GroqClient.chat(model: model, system: Self.system, user: user, json: false)
+        var text = ""
+        for attempt in 0..<4 {
+            var user = "Company: \(sym) (NSE)\nResults filed on NSE: \(df.string(from: results.date)) — \(results.desc)\n\n"
+            user += "=== RESULTS FILING (key lines) ===\n" + (rText.isEmpty ? "(not readable)" : rText) + "\n"
+            if !tText.isEmpty { user += "\n=== EARNINGS CALL TRANSCRIPT (opening remarks, cut) ===\n" + tText + "\n" }
+            if !pText.isEmpty { user += "\n=== INVESTOR PRESENTATION (key lines, cut) ===\n" + pText + "\n" }
+            do {
+                text = try await GroqClient.chat(model: model, system: Self.system, user: user, json: false, maxTokens: 1_600)
+                break
+            } catch let e as GroqClient.TooLarge {
+                guard attempt < 3 else { throw GroqClient.Failure(message: "Still too large for your Groq plan's per-request limit (\(e.limit) tokens) — pick a model with a higher limit in News & AI settings") }
+                let factor = e.requested > 0 && e.limit > 0 ? Double(e.limit - 1_800) / Double(e.requested - 1_600) * 0.85 : 0.6
+                budget = max(2_500, Int(Double(budget) * min(0.85, max(0.3, factor))))
+                cut()
+                working[sym] = "Shortening for Groq's limit (try \(attempt + 2))…"
+            }
+        }
         var note = ""
         if transcript == nil { note = "No earnings-call transcript filed yet" + (deck == nil ? "" : " — used the investor presentation") }
         return EarningsSummary(symbol: sym, text: text.trimmingCharacters(in: .whitespacesAndNewlines), filed: results.date,
@@ -181,6 +204,38 @@ struct EarningsSummary: Codable, Identifiable {
         let newest = best.max { $0.0.date < $1.0.date }!
         let strongest = best.filter { $0.1 == top }.max { $0.0.date < $1.0.date }!
         return newest.0.date.timeIntervalSince(strongest.0.date) > 30 * 86_400 ? newest.0 : strongest.0
+    }
+
+    private static let keyWords = ["revenue", "income from operations", "total income", "other income", "expenses", "ebitda", "operating profit",
+                                   "profit before", "profit after", "net profit", "profit for the", "tax", "exceptional", "earnings per share", "eps",
+                                   "segment", "dividend", "quarter ended", "half year ended", "year ended", "consolidated", "standalone",
+                                   "margin", "order book", "borrowings", "finance cost", "depreciation", "employee", "material", "loss"]
+
+    /// The lines of a results filing that carry the numbers (statement rows, headings), in order, up to `limit` characters.
+    static func focus(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let lines = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var out = "", seen = Set<String>()
+        for l in lines {
+            let low = l.lowercased()
+            guard keyWords.contains(where: { low.contains($0) }), !seen.contains(low) else { continue }
+            seen.insert(low)
+            if out.count + l.count + 1 > limit { break }
+            out += l + "\n"
+        }
+        if out.count < limit / 2 { out += String(text.prefix(limit - out.count)) }
+        return out
+    }
+
+    /// The start of a call transcript after its cover page / disclaimer — management's opening remarks.
+    static func opening(_ text: String, limit: Int) -> String {
+        guard !text.isEmpty else { return "" }
+        let low = text.lowercased()
+        var start = text.startIndex
+        for marker in ["moderator:", "good morning", "good afternoon", "good evening", "ladies and gentlemen"] {
+            if let r = low.range(of: marker) { start = text.index(text.startIndex, offsetBy: low.distance(from: low.startIndex, to: r.lowerBound)); break }
+        }
+        return String(text[start...].prefix(limit))
     }
 
     static func pdfText(_ url: URL?, limit: Int) async throws -> String {
