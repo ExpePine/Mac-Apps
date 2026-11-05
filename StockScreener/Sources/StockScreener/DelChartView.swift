@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import WebKit
 
 // MARK: - DEL chart: the whole market's delivered value per day
 //
@@ -60,10 +61,56 @@ struct DelChartView: View {
     @State private var data: [DelMarketDay] = []
     @State private var busy = false
     @State private var hover: String?
+    @AppStorage("delchart.tv") private var showTV = true
+    @AppStorage("delchart.sync") private var sync = true
+    @StateObject private var pool = ReelPool()
+    @State private var tvRange: (from: Date, to: Date)?
+    @State private var pushedAt = Date.distantPast
+    @State private var syncNote: String?
+    private let syncTimer = Timer.publish(every: 0.6, on: .main, in: .common).autoconnect()
+
+    /// The NIFTY 50 chart in your own TradingView layout (Chart 1's link with ?symbol=NSE%3ANIFTY).
+    private var niftyURL: URL? {
+        guard let any = vm.allSymbols.first, let u = vm.chartURL(any, column: 0)?.absoluteString else { return nil }
+        var base = u.components(separatedBy: "?").first ?? u
+        if !base.hasSuffix("/") { base += "/" }
+        return URL(string: base + "?symbol=NSE%3ANIFTY")
+    }
+    private func tvWeb() -> WKWebView? { niftyURL.map { pool.view(for: $0, slot: 0) } }
+
+    /// TradingView → these charts: follow its visible dates.
+    private func pollTV() {
+        guard showTV, sync, Date().timeIntervalSince(pushedAt) > 1.2, let w = tvWeb(), OnScreen.visible(w), !w.isLoading else { return }
+        TVRange.run(w, TVRange.getBody) { r in
+            let p = r.split(separator: ",").compactMap { Int($0) }
+            guard p.count >= 2, p[1] > p[0] else { syncNote = r.hasPrefix("noapi") ? "TradingView doesn't expose its chart here — the range buttons still move it" : nil; return }
+            syncNote = nil
+            let f = Date(timeIntervalSince1970: Double(p[0])), t = Date(timeIntervalSince1970: Double(p[1]))
+            if tvRange.map({ abs($0.from.timeIntervalSince(f)) > 3600 || abs($0.to.timeIntervalSince(t)) > 3600 }) ?? true { tvRange = (f, t) }
+        }
+    }
+
+    /// These charts' range buttons → TradingView.
+    private func pushRange() {
+        guard showTV, sync, let w = tvWeb(), let a = rangeDays.first, let b = rangeDays.last else { return }
+        pushedAt = Date()
+        tvRange = nil
+        TVRange.run(w, TVRange.setBody(from: Int(a.date.timeIntervalSince1970), to: Int(b.date.timeIntervalSince1970) + 86_399)) { _ in }
+    }
 
     private struct P: Identifiable { let id: String; let date: Date; let v: Double; let series: String }
 
+    /// What's drawn: TradingView's visible dates when synced, else the range buttons.
     private var shown: [DelMarketDay] {
+        if sync, showTV, let r = tvRange {
+            let f = r.from.addingTimeInterval(-86_400), t = r.to.addingTimeInterval(86_400)
+            let s = data.filter { $0.date >= f && $0.date <= t }
+            if s.count >= 2 { return s }
+        }
+        return rangeDays
+    }
+
+    private var rangeDays: [DelMarketDay] {
         let n: Int
         switch range { case "1M": n = 22; case "3M": n = 66; case "6M": n = 132; case "1Y": n = 250; case "2Y": n = 500; default: n = .max }
         return n == .max ? data : Array(data.suffix(n))
@@ -81,6 +128,12 @@ struct DelChartView: View {
                 Toggle("Delivery %", isOn: $showPct).toggleStyle(.button)
                 Toggle("Nifty 50", isOn: $showNifty).toggleStyle(.button)
                 Toggle("22-day average", isOn: $showSMA).toggleStyle(.button)
+                Toggle("NIFTY chart (TradingView)", isOn: $showTV).toggleStyle(.button)
+                if showTV {
+                    Toggle(isOn: $sync) { Image(systemName: "link") }.toggleStyle(.button)
+                        .help("Keep these charts on TradingView's dates (pan / zoom TradingView; the range buttons move it too)")
+                }
+                if let n = syncNote { Text(n).font(.caption2).foregroundStyle(.orange).lineLimit(1) }
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Text("\(dc.storedDays.count) NSE days stored").font(.caption).foregroundStyle(.secondary)
@@ -94,10 +147,19 @@ struct DelChartView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if showTV, let u = niftyURL {
+                VSplitView {
+                    ReelWebView(web: pool.view(for: u, slot: 0)).frame(minHeight: 220, idealHeight: 340)
+                    ScrollView { content.padding(12) }.frame(minHeight: 200)
+                }
             } else {
                 ScrollView { content.padding(12) }
             }
         }
+        .onReceive(syncTimer) { _ in pollTV() }
+        .onChange(of: range) { _ in pushRange() }
+        .onChange(of: sync) { on in if on { pushRange() } else { tvRange = nil } }
+        .onDisappear { pool.releaseAll() }
         .task(id: "\(dc.revision)|\(scope)|\(vm.filterVersion)") { await recompute() }
         .onAppear { dc.loadIfNeeded() }
     }
@@ -142,6 +204,7 @@ struct DelChartView: View {
                 .chartForegroundStyleScale(["Delivered (DEL × CLOSE)": Color.blue, "Traded (VOL × CLOSE)": Color.orange,
                                             "Delivered, 22-day avg": Color.blue.opacity(0.5), "Traded, 22-day avg": Color.orange.opacity(0.5)])
                 .chartOverlay { proxy in hoverLayer(proxy, s) }
+                .chartXScale(domain: xDomain(s))
                 .frame(height: 260)
             }
 
@@ -153,6 +216,7 @@ struct DelChartView: View {
                     }
                     .chartYScale(domain: .automatic(includesZero: false))
                     .chartOverlay { proxy in hoverLayer(proxy, s) }
+                    .chartXScale(domain: xDomain(s))
                     .frame(height: 130)
                 }
             }
@@ -165,6 +229,7 @@ struct DelChartView: View {
                         Chart(np) { p in LineMark(x: .value("Day", p.date), y: .value("Nifty", p.v)).foregroundStyle(Color.green) }
                             .chartYScale(domain: .automatic(includesZero: false))
                             .chartOverlay { proxy in hoverLayer(proxy, s) }
+                            .chartXScale(domain: xDomain(s))
                             .frame(height: 130)
                     }
                 }
@@ -192,6 +257,13 @@ struct DelChartView: View {
                 }
             }
         }
+    }
+
+    /// Same dates on every panel (TradingView's when synced) so they line up.
+    private func xDomain(_ s: [DelMarketDay]) -> ClosedRange<Date> {
+        if sync, showTV, let r = tvRange, r.to > r.from { return r.from...r.to }
+        let a = s.first?.date ?? Date(), b = s.last?.date ?? Date()
+        return a...(b > a ? b : a.addingTimeInterval(86_400))
     }
 
     private func hoverLayer(_ proxy: ChartProxy, _ s: [DelMarketDay]) -> some View {

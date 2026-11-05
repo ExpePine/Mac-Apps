@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// Live Yahoo prices for Daily Gainers: while NSE is open, re-reads today's price for every sheet stock
 /// (plus NIFTY 50 / SENSEX) about once a minute and merges it into the price book as today's bar — so the
@@ -45,7 +46,8 @@ import Foundation
                 await sweep(vm)
                 first = false
             }
-            let wait = Self.marketOpen() ? Self.interval : 300
+            // in the background: every 5 minutes is plenty (the windows aren't being looked at)
+            let wait = Self.marketOpen() ? (NSApp.isActive ? Self.interval : max(Self.interval, 300)) : 300
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         }
     }
@@ -65,7 +67,9 @@ import Foundation
         guard symbols.count > 2 else { lastError = "Import the sheet first — its stock list is what gets tracked."; return }
         updating = true
         progress = (0, symbols.count)
-        let (fresh, failed) = await YahooClient.fetchAll(symbols, range: "5d", width: 10) { [weak self] d, t in self?.progress = (d, t) }
+        let (fresh, failed) = await YahooClient.fetchAll(symbols, range: "5d", width: 10) { [weak self] d, t in
+            if d == t || d % 50 == 0 { self?.progress = (d, t) }     // not 2,000 redraws per sweep
+        }
         updating = false
         guard !fresh.series.isEmpty else {
             lastError = "Yahoo returned no prices (\(failed.count) failed) — it may be rate-limiting; retrying next minute."
