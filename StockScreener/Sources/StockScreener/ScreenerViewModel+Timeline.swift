@@ -166,7 +166,7 @@ extension ScreenerViewModel {
             timelineCache[day] = aligned
             timelineCacheOrder.removeAll { $0 == day }
             timelineCacheOrder.append(day)
-            while timelineCacheOrder.count > 8 {           // keep memory bounded
+            while timelineCacheOrder.count > 3 {           // keep memory bounded (each day is a full copy of the sheet)
                 timelineCache[timelineCacheOrder.removeFirst()] = nil
             }
         }

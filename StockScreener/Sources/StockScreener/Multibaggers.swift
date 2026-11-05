@@ -101,6 +101,12 @@ enum MBEngine {
 
     nonisolated private static var url: URL { AppFolders.base.appendingPathComponent("multibagger_prices.json.lzfse") }
 
+    /// Frees the 5-year price history (it loads again the next time something needs it).
+    func unload() {
+        guard loaded, !isFetching else { return }
+        book = PriceBook(); events = []; loaded = false
+    }
+
     func loadIfNeeded() {
         guard !loaded else { return }
         loaded = true

@@ -92,6 +92,7 @@ enum StorageScan {
 }
 
 struct StorageView: View {
+    @EnvironmentObject var vm: ScreenerViewModel
     @State private var root: StorageItem?
     @State private var scanning = false
 
@@ -107,6 +108,8 @@ struct StorageView: View {
                 Spacer()
                 if scanning { ProgressView().controlSize(.small) }
                 Button("Refresh") { scan() }.disabled(scanning)
+                Button("Free memory") { MemoryRelief.run(vm) }
+                    .help("Releases caches the app can rebuild: past days kept for the timeline, preloaded chart pages, the 5-year multibagger prices (reload when needed)")
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([AppFolders.base]) }
             }
             .controlSize(.small)

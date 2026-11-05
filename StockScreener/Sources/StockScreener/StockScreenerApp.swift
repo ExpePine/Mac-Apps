@@ -132,7 +132,7 @@ struct StockScreenerApp: App {
         .keyboardShortcut("i", modifiers: [.command, .option])
 
         Window("Data Storage", id: "storage") {
-            StorageView()
+            StorageView().environmentObject(vm)
                 .frame(minWidth: 760, minHeight: 480)
         }
 

@@ -233,14 +233,17 @@ struct ChartReelView: View {
         .onAppear {
             if column.isEmpty { column = vm.settings.triggerColumn }
             vm.refreshChartLinksIfStale()
-            mbc.loadIfNeeded()
+            if ReelSource(rawValue: source) == .multibaggers { mbc.loadIfNeeded() }      // 5 years of prices — only when needed
             let start = UserDefaults.standard.string(forKey: "reel.mbStart") ?? ""
             UserDefaults.standard.set("", forKey: "reel.mbStart")
             let i = start.isEmpty ? 0 : (list.firstIndex { $0.key == start } ?? 0)
             index = Double(i)
             show(i, list)
         }
-        .onChange(of: source) { _ in restart() }
+        .onChange(of: source) { s in
+            if ReelSource(rawValue: s) == .multibaggers { mbc.loadIfNeeded() }
+            restart()
+        }
         .onChange(of: column) { _ in restart() }
         .onChange(of: op) { _ in restart() }
         .onChange(of: value) { _ in restart() }
@@ -1069,6 +1072,21 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
     private func touch(_ key: String) {
         order.removeAll { $0 == key }
         order.append(key)
+    }
+
+    static let freeMemory = Notification.Name("StockScreener.freeMemory")
+
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(releaseHidden), name: Self.freeMemory, object: nil)
+    }
+
+    /// Drops every preloaded chart page that isn't on screen.
+    @objc func releaseHidden() {
+        for (k, v) in views where v.superview == nil {
+            v.stopLoading(); views[k] = nil; slots[k] = nil; gotos[k] = nil
+            order.removeAll { $0 == k }
+        }
     }
 
     private func trim() {
