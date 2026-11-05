@@ -38,7 +38,7 @@ import WebKit
             guard let self else { return }
             var urls: [(URL, Int, String?)] = []
             for c in 0..<min(2, vm.chartCount) { if let u = vm.chartURL(symbol, column: c) { urls.append((u, c, vm.centreDay(symbol, .filter))) } }
-            self.pool.preload(urls, keep: 6)
+            self.pool.preload(urls, keep: 2)
         }
         preloadWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: w)

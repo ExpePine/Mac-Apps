@@ -116,7 +116,7 @@ struct GainerChartsView: View {
             ImpressionStore.shared.begin(cur?.symbol ?? "", place: "Gainer Charts")
             if let c = cur { MBNoteFocus.shared.setChart(c.symbol, day: goTo(c)) }
         }
-        .onDisappear { ImpressionStore.shared.end("Gainer Charts") }
+        .onDisappear { ImpressionStore.shared.end("Gainer Charts"); pool.releaseAll() }
         .onAppear { centreSig = ChartCentre.title(.gainers, vm); vm.refreshChartLinksIfStale(); restart() }
         .task { await LiveQuotes.shared.keepLive(vm) }
         .onChange(of: mode) { _ in restart() }
@@ -341,7 +341,7 @@ struct GainerChartsView: View {
         for j in [s, s + 1, s + 2, s - 1] where list.indices.contains(j) {
             for c in 0..<perStock { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, goTo(list[j]))) } }
         }
-        pool.preload(urls, keep: perStock * 4)
+        pool.preload(urls, keep: perStock * 3)
     }
 
     private func currentWeb() -> WKWebView? {

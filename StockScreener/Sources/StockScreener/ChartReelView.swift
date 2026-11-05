@@ -251,7 +251,7 @@ struct ChartReelView: View {
         .onChange(of: sortMode) { _ in restart() }
         .onChange(of: mbMonth) { _ in restart() }
         .onChange(of: fOn) { _ in restart() }
-        .onDisappear { ImpressionStore.shared.end("Chart Reel") }
+        .onDisappear { ImpressionStore.shared.end("Chart Reel"); pool.releaseAll() }
         .task(id: current?.key ?? current?.symbol) {
             ImpressionStore.shared.begin(current?.symbol ?? "", place: "Chart Reel")
             if ReelSource(rawValue: source) == .multibaggers { MBNoteFocus.shared.set(currentEvent) }
@@ -722,7 +722,7 @@ struct ChartReelView: View {
         for j in [i, i + 1, i + 2, i + 3, i - 1] where list.indices.contains(j) {
             for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
         }
-        pool.preload(urls, keep: cols.count * 5)
+        pool.preload(urls, keep: cols.count * 3)
     }
 }
 
@@ -1079,6 +1079,12 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
     override init() {
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(releaseHidden), name: Self.freeMemory, object: nil)
+    }
+
+    /// Drops every page (the window is closing).
+    func releaseAll() {
+        views.values.forEach { $0.stopLoading(); $0.removeFromSuperview() }
+        views = [:]; slots = [:]; gotos = [:]; order = []
     }
 
     /// Drops every preloaded chart page that isn't on screen.
