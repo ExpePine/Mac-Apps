@@ -539,7 +539,7 @@ struct DeliveryColumns {
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
-    var delSmaC: Double? = nil   // DELSMAC = ta.highest(DELSMA / DELSMA[1], 300) / (DELSMA / DELSMA[1])
+    var delSmaC: Double? = nil   // DELSMAC = today's % change in the selected signal ÷ its ta.highest(%, 300)
     var delsmaDays: Int? = nil   // DAYS_DELSMA = ta.barssince(DELSMA > threshold) (0 = true today, nil = never / not enough data)
     let day: String          // the stock's latest NSE day
 
@@ -564,7 +564,7 @@ struct DeliveryColumns {
                                streak: StreakDef.current.streak(m, at: i),
                                t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)),
                                hiT3: hiOverT3(m, t3Source: T3Def.current.source(s, upTo: i)),
-                               delSmaC: delSmaC(m, at: i, smaLength: hiSma),
+                               delSmaC: delSmaC(s, at: i),
                                delsmaDays: DelsmaDaysDef.current.days(m, at: i, smaLength: hiSma), day: latestDay)
     }
 
@@ -589,26 +589,31 @@ struct DeliveryColumns {
         return percentRank(valid, length: length, at: valid.count - 1)
     }
 
-    /// DELSMAC on bar i: r = DELSMA / DELSMA[1] (DELSMA = ta.percentrank(ta.sma(x, n), 300));
-    /// ta.highest(r, 300) / r. 1 = today's jump in DELSMA is the biggest in 300 bars; bigger = smaller than the best.
-    /// Pine rules: r is na when DELSMA[1] = 0; the result is na when r is 0 / na, or (with "full" history on, as Pine)
-    /// until 300 values of r exist — that needs about n − 1 + 300 + 300 stored days.
-    static func delSmaC(_ x: [Double], at i: Int, smaLength n: Int = 22, length: Int = 300) -> Double? {
-        guard i < x.count, i >= n - 1 + length + 1 else { return nil }
-        let sm = DeliverySignal.avg(Array(x[...i]), n, ema: DeliveryMetric.signalIsEMA)
-        let valid = Array(sm[(n - 1)...])
-        let end = valid.count - 1
-        let first = max(length, end - length)            // DELSMA exists from index `length`
-        guard end - first >= 1 else { return nil }
-        var pr: [Double?] = []
-        for k in first...end { pr.append(percentRank(valid, length: length, at: k)) }
-        var r: [Double?] = []
-        for k in 1..<pr.count {
-            if let a = pr[k], let b = pr[k - 1], b != 0 { r.append(a / b) } else { r.append(nil) }
+    /// DELSMAC on bar i — the selected Delivery signal series S (Delivery Analysis: DELIV_QTY×CLOSE, DELIV_QTY,
+    /// or its SMA / EMA 22…300):
+    ///   chg = (S / S[1] − 1) × 100            (today's % change)
+    ///   DELSMAC = chg / ta.highest(chg, 300)  (1 = the biggest % rise in 300 days; 0.5 = half of it; negative = it fell)
+    /// Pine rules: na until the average exists and 300 changes are there (with "full" history on); na when the
+    /// 300-day highest change isn't above 0.
+    static func delSmaC(_ s: DeliverySeries, at i: Int, metric k: DeliveryMetric = .current, length: Int = 300) -> Double? {
+        guard i < s.qty.count, i > 0 else { return nil }
+        let raw: [Double] = k == .qty ? Array(s.qty[...i]) : Array(s.metric(value: true)[...i])
+        var start = 0
+        var x = raw
+        if let n = k.smaLength {
+            guard raw.count >= n + 1 else { return nil }
+            x = DeliverySignal.avg(raw, n, ema: k.isEMA)
+            start = n - 1                                     // the average is na before this bar
         }
-        if full && r.count < length { return nil }
-        guard let now = r.last ?? nil, now != 0, let hi = r.suffix(length).compactMap({ $0 }).max() else { return nil }
-        return hi / now
+        let end = x.count - 1
+        let from = max(start + 1, end - length + 1)           // the last `length` changes
+        guard end >= from else { return nil }
+        if full && end - from + 1 < length { return nil }
+        var chg: [Double] = []
+        chg.reserveCapacity(end - from + 1)
+        for j in from...end where x[j - 1] > 0 { chg.append((x[j] / x[j - 1] - 1) * 100) }
+        guard x[end - 1] > 0, let now = chg.last, let hi = chg.max(), hi > 0 else { return nil }
+        return now / hi
     }
 
     /// Binary search in sorted day keys.

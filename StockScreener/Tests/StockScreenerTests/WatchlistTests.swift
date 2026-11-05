@@ -158,25 +158,17 @@ final class NSEResultsTests: XCTestCase {
 }
 
 final class DelSmaCTests: XCTestCase {
-    func testMatchesNaiveDefinition() throws {
-        var x: [Double] = []
-        for k in 0..<700 {
-            let t = Double(k)
-            let a: Double = 30 * sin(t * 0.11)
-            let b: Double = 20 * sin(t * 0.53)
-            x.append(100 + a + b + t * 0.05)
-        }
-        let n = 22, L = 300
-        let got = try XCTUnwrap(DeliveryColumns.delSmaC(x, at: x.count - 1, smaLength: n, length: L))
-        // naive: SMA → percentrank series → ratio series → highest(300) / last
-        var sma = [Double?](repeating: nil, count: x.count)
-        for i in (n - 1)..<x.count { sma[i] = x[(i - n + 1)...i].reduce(0, +) / Double(n) }
-        let valid = sma.compactMap { $0 }
-        func pr(_ i: Int) -> Double { Double(((i - L)..<i).filter { valid[$0] <= valid[i] }.count) / Double(L) * 100 }
-        let end = valid.count - 1
-        var r: [Double?] = []
-        for k in (end - L + 1)...end { let b = pr(k - 1); r.append(b == 0 ? nil : pr(k) / b) }
-        let want = r.compactMap { $0 }.max()! / r.last!!
-        XCTAssertEqual(got, want, accuracy: 1e-9)
+    func testChangeNormalisedByItsHighest() throws {
+        // raw series (DELIV_QTY×CLOSE with close = 1): steady +1% a day, one +5% day, then today +2.5%
+        var q: [Double] = [100]
+        for k in 1..<400 { q.append(q[k - 1] * (k == 200 ? 1.05 : 1.01)) }
+        q.append(q.last! * 1.025)
+        let days = q.indices.map { String(format: "D%04d", $0) }
+        let s = DeliverySeries(days: days, qty: q, per: q.map { _ in 50 }, close: q.map { _ in 1 })
+        let v = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: q.count - 1, metric: .value, length: 300))
+        XCTAssertEqual(v, 2.5 / 5.0, accuracy: 1e-9)
+        // selected average: EMA 22 of it — must still be ≤ 1 and positive
+        let e = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: q.count - 1, metric: .ema22, length: 300))
+        XCTAssertGreaterThan(e, 0); XCTAssertLessThanOrEqual(e, 1)
     }
 }
