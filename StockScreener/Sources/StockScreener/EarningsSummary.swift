@@ -113,7 +113,8 @@ struct EarningsSummary: Codable, Identifiable {
             if !tText.isEmpty { user += "\n=== EARNINGS CALL TRANSCRIPT (opening remarks, cut) ===\n" + tText + "\n" }
             if !pText.isEmpty { user += "\n=== INVESTOR PRESENTATION (key lines, cut) ===\n" + pText + "\n" }
             do {
-                text = try await GroqClient.chat(model: model, system: Self.system, user: user, json: false, maxTokens: 1_600)
+                LLMPool.shared.mainGroqModel = model
+                text = try await LLMPool.shared.chatAny(system: Self.system, user: user, maxTokens: 1_600)
                 break
             } catch let e as GroqClient.TooLarge {
                 guard attempt < 3 else { throw GroqClient.Failure(message: "Still too large for your Groq plan's per-request limit (\(e.limit) tokens) — pick a model with a higher limit in News & AI settings") }

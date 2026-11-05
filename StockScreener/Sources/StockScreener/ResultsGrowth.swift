@@ -93,7 +93,7 @@ struct ResultsGrowth: Codable {
     }
 
     /// Groq is only a fallback for stocks whose numbers NSE's comparison data doesn't have.
-    var groqFallback: Bool { UserDefaults.standard.object(forKey: "growth.groqFallback") as? Bool ?? false }
+    var groqFallback: Bool { UserDefaults.standard.object(forKey: "growth.groqFallback") as? Bool ?? true }
     @Published private(set) var lastNSEReply = ""
     private var groqQueue: [String] = []
 
@@ -126,34 +126,52 @@ struct ResultsGrowth: Codable {
                         // results just announced but NSE's table still ends at the older quarter → try again in a few hours
                         if !earn.isEmpty && !has(s, since: earn) { markTried(s, earn, "NSE hasn't added the latest quarter yet — will retry") }
                     case .failure(let e):
-                        if groqFallback && !GroqClient.apiKey.isEmpty { groqQueue.append(s) } else { markTried(s, earn, e.localizedDescription) }
+                        LLMPool.shared.mainGroqModel = model
+                        if groqFallback && !LLMPool.shared.usable.isEmpty { groqQueue.append(s) } else { markTried(s, earn, e.localizedDescription) }
                     }
                 }
                 save(); onReload?()
             }
-            // 2) Groq reads the filing (slow on a free key) — only if you turned it on
-            while !groqQueue.isEmpty {
-                let s = groqQueue.removeFirst()
-                currentSymbol = s
-                status = "Groq reading \(s)'s filing… (\(groqQueue.count) waiting)"
-                let earn = EarningsCenter.shared.value(s, on: EarningsMath.iso.string(from: Date()))?.date ?? ""
-                do {
-                    let g = try await Self.extract(s, notBefore: earn.isEmpty ? nil : Self.shift(earn, days: -2), model: model)
-                    bySymbol[s] = g; save(); onReload?()
-                } catch is GroqClient.RateLimited {
-                    groqQueue.insert(s, at: 0)
-                    status = "Groq per-minute limit — waiting a minute…"
-                    try? await Task.sleep(nanoseconds: 65_000_000_000)
-                    continue
-                } catch {
-                    markTried(s, earn, error.localizedDescription)
+            // 2) AI reads the filing — shared out between every free AI key you added (Settings → Free AI keys)
+            LLMPool.shared.mainGroqModel = model
+            let workers = LLMPool.shared.usable
+            if !groqQueue.isEmpty && !workers.isEmpty {
+                status = "AI reading \(groqQueue.count) filings with \(workers.count) key\(workers.count == 1 ? "" : "s")…"
+                await withTaskGroup(of: Void.self) { g in
+                    for e in workers { g.addTask { @MainActor in await self.work(e) } }
                 }
-                if !groqQueue.isEmpty { try? await Task.sleep(nanoseconds: 25_000_000_000) }
             }
             currentSymbol = nil
-            if status?.hasPrefix("NSE numbers") == true || status?.hasPrefix("Groq reading") == true { status = nil }
+            if status?.hasPrefix("NSE numbers") == true || status?.hasPrefix("AI reading") == true { status = nil }
             running = false
             if !queue.isEmpty { pump() }
+        }
+    }
+
+    /// One AI key working through the shared queue at its own pace.
+    private func work(_ e: LLMEndpoint) async {
+        let pool = LLMPool.shared
+        while !groqQueue.isEmpty {
+            let s = groqQueue.removeFirst()
+            let earn = EarningsCenter.shared.value(s, on: EarningsMath.iso.string(from: Date()))?.date ?? ""
+            pool.note(e, "reading \(s)…")
+            do {
+                let g = try await Self.extract(s, notBefore: earn.isEmpty ? nil : Self.shift(earn, days: -2)) { sys, user, mt in
+                    try await pool.chat(e, system: sys, user: user, maxTokens: mt)
+                }
+                bySymbol[s] = g; save(); onReload?()
+                pool.note(e, "ok \(s)")
+                status = "AI reading filings… \(groqQueue.count) left"
+            } catch is GroqClient.RateLimited {
+                groqQueue.append(s)                         // another key may take it
+                pool.note(e, "rate limit — resting a minute")
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                continue
+            } catch {
+                markTried(s, earn, "\(e.name): " + error.localizedDescription)
+                pool.note(e, error.localizedDescription)
+            }
+            if e.gap > 0 { try? await Task.sleep(nanoseconds: UInt64(e.gap * 1_000_000_000)) }
         }
     }
 
@@ -178,11 +196,12 @@ struct ResultsGrowth: Codable {
     not half-year, nine-month or full-year columns. \
     revenue = "Revenue from operations" (not total income). net_profit = net profit / profit for the period after tax \
     (use "attributable to owners" if given). Numbers as plain numbers (no commas), losses negative, null if not in the text. \
-    Reply as JSON: {"period": "quarter ended …", "basis": "consolidated" or "standalone", "unit": "as written, e.g. ₹ crore", \
+    Reply with ONLY this JSON, no other text: {"period": "quarter ended …", "basis": "consolidated" or "standalone", "unit": "as written, e.g. ₹ crore", \
     "revenue": {"current": n, "year_ago": n, "prev_quarter": n}, "net_profit": {"current": n, "year_ago": n, "prev_quarter": n}}
     """
 
-    static func extract(_ sym: String, notBefore: String?, model: String) async throws -> ResultsGrowth {
+    static func extract(_ sym: String, notBefore: String?,
+                        send: (String, String, Int) async throws -> String) async throws -> ResultsGrowth {
         let ann = try await EarningsSummaryCenter.announcements(sym)
         var pool = ann
         if let nb = notBefore { pool = ann.filter { EarningsMath.iso.string(from: $0.date) >= nb } }
@@ -195,7 +214,7 @@ struct ResultsGrowth: Codable {
         var reply = ""
         for attempt in 0..<4 {
             let user = "Company: \(sym)\n=== RESULTS FILING (key lines) ===\n" + EarningsSummaryCenter.focus(full, limit: budget)
-            do { reply = try await GroqClient.chat(model: model, system: system, user: user, json: true, maxTokens: 900); break }
+            do { reply = try await send(system, user, 1_500); break }
             catch let e as GroqClient.TooLarge {
                 guard attempt < 3 else { throw e }
                 let f = e.requested > 0 && e.limit > 0 ? Double(e.limit - 1_100) / Double(e.requested - 900) * 0.85 : 0.6
@@ -216,7 +235,7 @@ struct ResultsGrowth: Codable {
         }
         let g = ResultsGrowth(symbol: sym, resultsDay: EarningsMath.iso.string(from: r.date), period: o["period"] as? String ?? "",
                               basis: o["basis"] as? String ?? "", unit: o["unit"] as? String ?? "",
-                              rev: nums("revenue"), pat: nums("net_profit"), made: Date(), source: "Groq")
+                              rev: nums("revenue"), pat: nums("net_profit"), made: Date(), source: "AI")
         guard g.rev[0] != nil || g.pat[0] != nil else { throw GroqClient.Failure(message: "couldn't find revenue / profit in the filing") }
         return g
     }
@@ -232,7 +251,7 @@ struct ResultsGrowthSettingsRow: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var c = ResultsGrowthCenter.shared
     @AppStorage("growth.auto") private var auto = true
-    @AppStorage("growth.groqFallback") private var groqFallback = false
+    @AppStorage("growth.groqFallback") private var groqFallback = true
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
@@ -245,7 +264,7 @@ struct ResultsGrowthSettingsRow: View {
             HStack(spacing: 10) {
                 Button("Fill all Filter stocks now") { c.fillMissing(vm.filterRows.map { vm.rowKey($0) }) }
                     .help("Every stock in your Filter without numbers yet — from NSE, about a second each")
-                Toggle("If NSE has no numbers, let Groq read the filing (slow on a free key)", isOn: $groqFallback).toggleStyle(.checkbox)
+                Toggle("If NSE has no numbers, let AI read the filing (your free AI keys)", isOn: $groqFallback).toggleStyle(.checkbox)
                 if !c.lastNSEReply.isEmpty {
                     Button("Copy last NSE reply") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(c.lastNSEReply, forType: .string) }
                         .help("For fixing the column if NSE changes its data")

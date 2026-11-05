@@ -147,6 +147,7 @@ struct SettingsHubView: View {
     @AppStorage("hub.peek") private var peek = false
     @AppStorage("hub.alerts") private var alerts = false
     @AppStorage("hub.data") private var data = false
+    @AppStorage("hub.aiKeys") private var aiKeys = false
     @AppStorage("hub.windows") private var windows = false
     @AppStorage("alerts.endOfDay") private var endOfDay = true
     @AppStorage("alerts.at") private var alertAt = 15 * 60 + 45
@@ -198,6 +199,8 @@ struct SettingsHubView: View {
                         Button("Alert Tracker") { openWindow(id: "tracker") }
                     }
                 }
+
+                group("Free AI keys — several providers at once", "key", $aiKeys) { LLMPoolSettings() }
 
                 group("Data, sources & keys", "externaldrive", $data) {
                     row("Google Sheet link, refresh, open at login", "Edit…") { sheet = .sheet }
