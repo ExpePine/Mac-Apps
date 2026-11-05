@@ -120,7 +120,7 @@ enum DemoShots {
         case "06-alerts": return AnyView(AlertsBrowserView().environmentObject(vm))
         case "07-notes": return AnyView(MBNoteView().environmentObject(vm))
         case "08-settings": return AnyView(SettingsHubView().environmentObject(vm))
-        case "09-storage": return AnyView(StorageView())
+        case "09-storage": return AnyView(StorageView().environmentObject(vm))
         default: return AnyView(ImportView().environmentObject(vm))
         }
     }
