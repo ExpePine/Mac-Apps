@@ -82,7 +82,7 @@ struct LLMPreset: Identifiable {
         req.setValue("Bearer \(k)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var body: [String: Any] = [
-            "model": e.model, "temperature": 0.1, "max_tokens": maxTokens,
+            "model": e.model.hasPrefix("models/") ? String(e.model.dropFirst(7)) : e.model, "temperature": 0.1, "max_tokens": maxTokens,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         if e.model.contains("gpt-oss") { body["reasoning_effort"] = "low" }      // leave the token budget for the answer
@@ -90,7 +90,8 @@ struct LLMPreset: Identifiable {
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let text = String(data: data, encoding: .utf8) ?? ""
-        if status == 429 { throw GroqClient.RateLimited() }
+        // 429 = too many requests; 500/502/503/504 = the provider is busy or overloaded right now — both: rest and retry
+        if status == 429 || [500, 502, 503, 504].contains(status) { throw GroqClient.RateLimited() }
         let low = text.lowercased()
         if status == 413 || (status == 400 && (low.contains("context length") || low.contains("too large") || low.contains("maximum context") || low.contains("reduce the length"))) {
             func num(_ key: String) -> Int? {
@@ -140,6 +141,8 @@ struct LLMPreset: Identifiable {
             do {
                 let r = try await chat(e, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 20)
                 note(e, "✓ works (\(r.prefix(12)))")
+            } catch is GroqClient.RateLimited {
+                note(e, "✗ busy right now (rate limit or the provider is overloaded) — try Test again in a minute, or pick another model")
             } catch {
                 // 404 is usually a model name the provider no longer has: pick a current text model and try again
                 if error.localizedDescription.contains("HTTP 404"), let list = try? await models(e), let m = Self.bestModel(list, now: e.model) {
