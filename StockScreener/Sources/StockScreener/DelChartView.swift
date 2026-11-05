@@ -339,6 +339,9 @@ struct DelMarketChips: View {
         let tint: Color = ch == nil ? .secondary : (up ? .green : .red)
         let spark = Array(v.suffix(22))
         let day = c.days.last?.day ?? ""
+        let chText: String = ch.map { String(format: "%+.1f%%", $0) } ?? "—"
+        let avgText: String = vsAvg.map { String(format: ", vs its 22-day average %+.1f%%", $0) } ?? ""
+        let tip: String = "\(name) for all NSE stocks on \(day): vs the previous NSE day \(chText)\(avgText). Click for the DEL chart."
         return Button { openWindow(id: "delchart") } label: {
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -362,7 +365,6 @@ struct DelMarketChips: View {
             .background(RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.1)))
         }
         .buttonStyle(.plain)
-        .help("\(name) for all NSE stocks on \(day): vs the previous NSE day " + (ch.map { String(format: "%+.1f%%", $0) } ?? "—")
-              + (vsAvg.map { String(format: ", vs its 22-day average %+.1f%%", $0) } ?? "") + ". Click for the DEL chart.")
+        .help(tip)
     }
 }
