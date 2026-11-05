@@ -49,12 +49,15 @@ struct EarningsEvent: Codable, Hashable {
     func refreshIfDue() {
         guard !busy else { return }
         if let f = fetchedAt, Calendar.current.isDateInToday(f) { return }
+        if Date().timeIntervalSince(lastAttempt) < 3600 { return }     // after a failure: once an hour, not every 20 s
         refresh()
     }
+    private var lastAttempt = Date.distantPast
 
     func refresh() {
         guard !busy else { return }
         busy = true
+        lastAttempt = Date()
         status = "Downloading results dates from NSE…"
         Task {
             let res = await Self.download()

@@ -50,9 +50,7 @@ struct WatchlistView: View {
 
     // MARK: Data
 
-    private var rowBySymbol: [String: SheetRow] {
-        Dictionary(vm.table.rows.map { (vm.rowKey($0).uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
-    }
+    private var rowBySymbol: [String: SheetRow] { vm.rowMap() }
 
     func rows(for list: Watchlist) -> [WatchRow] {
         let byS = rowBySymbol, sc = vm.sectorColumnIndex

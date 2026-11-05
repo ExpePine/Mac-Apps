@@ -672,19 +672,33 @@ struct DeliveryColumns {
     }
 
     /// Recompute the Filter columns (e.g. after changing how JUMP is calculated).
-    func refreshColumns() { colCache = nil; onReload?() }
+    func refreshColumns() { colCache = nil; computingKey = nil; onReload?() }
 
     /// The stored NSE day the Filter columns use for a data day (the same day, or the last one before it).
     func nseDay(asOf: String) -> String? { book.days.last(where: { $0 <= asOf }) }
 
     /// DLVR / Safety / DQ_PRANK for every stock on the NSE day matching `asOf` (cached per data revision and day).
+    /// Worked out in the background (it's heavy: DELSMA, DELSMAC, T3… for every stock); until it's ready the Filter
+    /// keeps the previous values for that day (or shows the columns blank), then refreshes once.
     func columns(asOf: String) -> [String: DeliveryColumns] {
         let day = nseDay(asOf: asOf) ?? ""
         if let c = colCache, c.rev == revision, c.day == day { return c.cols }
-        let cols = DeliveryColumns.all(book, asOf: asOf)
-        colCache = (revision, day, cols)
-        return cols
+        let key = "\(revision)|\(day)"
+        if computingKey != key {
+            computingKey = key
+            let b = book, rev = revision
+            Task {
+                let cols = await Task.detached(priority: .userInitiated) { DeliveryColumns.all(b, asOf: asOf) }.value
+                guard self.revision == rev, self.computingKey == key else { return }
+                self.colCache = (rev, day, cols)
+                self.computingKey = nil
+                self.onReload?()
+            }
+        }
+        if let c = colCache, c.day == day { return c.cols }       // older data for the same day, meanwhile
+        return [:]
     }
+    private var computingKey: String?
 
     /// Fetches NSE's trading calendar (Yahoo ^NSEI daily bars, 5 years) and keeps it on disk.
     func refreshCalendar() async {
@@ -740,9 +754,10 @@ struct DeliveryColumns {
             self.book = b
             self.storedDays = days
             self.columns = cols
-            self.colCache = nil
             self.isLoading = false
             self.revision += 1
+            // the latest day was just worked out in the background — keep it, so the Filter doesn't redo it on the main thread
+            self.colCache = (self.revision, b.days.last ?? "", cols)
             self.onReload?()
             // once per session: find days missing against the trading calendar and fetch them
             if !self.repairedThisSession, !days.isEmpty, !DemoShots.active {

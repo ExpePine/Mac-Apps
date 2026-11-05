@@ -39,7 +39,7 @@ final class ScreenerViewModel: ObservableObject {
     }
 
     // Data
-    @Published private(set) var table = SheetTable()
+    @Published private(set) var table = SheetTable() { didSet { rowMapCache = nil } }
     private var rawTable = SheetTable()          // as downloaded, before your column names
     @Published private(set) var isLoading = false
     @Published private(set) var freshness: FreshnessState
@@ -139,6 +139,8 @@ final class ScreenerViewModel: ObservableObject {
     @Published var chartSymbol: String?
     /// Date the Chart viewer centres TradingView (and the delivery chart) on after loading — e.g. a gainer's day.
     @Published var chartGoTo: String?
+    var rebuildWork: DispatchWorkItem?
+    var rowMapCache: (key: String, map: [String: SheetRow])?
     var chartSoftGoTo: String?
     @Published var chartContext: ChartContext = .other
     var chartExactGoTo = false
@@ -263,7 +265,7 @@ final class ScreenerViewModel: ObservableObject {
                 UserDefaults.standard.set(true, forKey: "deliv.colsAdded7")
                 if !self.settings.filterColumns.contains("HI/T3") { self.settings.filterColumns.append("HI/T3") }
             }
-            self.setTableKeepingRaw()
+            self.scheduleTableRebuild()
         }
         // New columns appear in the Filter once (MOR / DAY from 5-min data, T3 fast / slow on prices)
         if !settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "cols.added9") {
@@ -279,8 +281,8 @@ final class ScreenerViewModel: ObservableObject {
             UserDefaults.standard.set(true, forKey: "cols.addedEarnings")
             if !settings.filterColumns.contains("EARNINGS") { settings.filterColumns.append("EARNINGS") }
         }
-        EarningsCenter.shared.onReload = { [weak self] in self?.setTableKeepingRaw() }
-        ResultsGrowthCenter.shared.onReload = { [weak self] in self?.setTableKeepingRaw() }
+        EarningsCenter.shared.onReload = { [weak self] in self?.scheduleTableRebuild() }
+        ResultsGrowthCenter.shared.onReload = { [weak self] in self?.scheduleTableRebuild() }
         if !settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "cols.addedGrowth") {
             UserDefaults.standard.set(true, forKey: "cols.addedGrowth")
             for n in ["REV_YOY", "PAT_YOY"] where !settings.filterColumns.contains(n) { settings.filterColumns.append(n) }
@@ -447,6 +449,25 @@ final class ScreenerViewModel: ObservableObject {
 
     /// Rebuilds the table from the last download (e.g. after new NN scores).
     func setTableKeepingRaw() { setTable(rawTable) }
+
+    /// Background jobs (NSE delivery, results dates, growth numbers) finish in bursts — rebuild the table once
+    /// per burst instead of after every stock.
+    func scheduleTableRebuild() {
+        rebuildWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.setTableKeepingRaw() }
+        rebuildWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: w)
+    }
+
+    /// Today's rows by symbol (upper-cased), built once per table.
+    func rowMap() -> [String: SheetRow] {
+        let key = "t"                                   // cleared whenever `table` changes
+        if let c = rowMapCache, c.key == key { return c.map }
+        guard let label = labelIndex else { return [:] }
+        let m = Dictionary(table.rows.map { ($0.text(label).trimmingCharacters(in: .whitespaces).uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        rowMapCache = (key, m)
+        return m
+    }
 
     /// Demo screenshots only (see DemoShots).
     func applyDemoTable(_ t: SheetTable) { setTable(t) }

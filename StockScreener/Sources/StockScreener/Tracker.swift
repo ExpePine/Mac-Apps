@@ -108,9 +108,7 @@ enum TrackerStore {
 extension ScreenerViewModel {
     /// Today's row for a symbol.
     func row(for symbol: String) -> SheetRow? {
-        guard let label = labelIndex else { return nil }
-        let s = symbol.uppercased()
-        return table.rows.first { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() == s }
+        rowMap()[symbol.trimmingCharacters(in: .whitespaces).uppercased()]
     }
 }
 
