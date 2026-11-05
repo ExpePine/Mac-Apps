@@ -159,9 +159,7 @@ final class NSEResultsTests: XCTestCase {
 
 final class DelSmaCTests: XCTestCase {
     func testMatchesNaiveDefinition() throws {
-        var x: [Double] = []
-        var v = 100.0
-        for k in 0..<700 { v = max(1, v * (1 + sin(Double(k) * 0.37) * 0.08)); x.append(v) }
+        let x: [Double] = (0..<700).map { k in 100 + 30 * sin(Double(k) * 0.11) + 20 * sin(Double(k) * 0.53) + Double(k) * 0.05 }
         let n = 22, L = 300
         let got = try XCTUnwrap(DeliveryColumns.delSmaC(x, at: x.count - 1, smaLength: n, length: L))
         // naive: SMA → percentrank series → ratio series → highest(300) / last
