@@ -265,8 +265,11 @@ struct DeliveryView: View {
                         }
                     }
                 }
-                Text("Orange bands + ▲DQ = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated") · bars at the bottom = \(metricName) · blue = the rolling highest")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                HStack(spacing: 8) {
+                    if let sym = selected, let s = dc.book.series[SymbolBook.clean(sym)] { DelsmacBadge(series: s) }
+                    Text("Orange bands + ▲DQ = ta.highest(\(metricName), \(length)) \(onlyRises ? "made a new high" : "updated") · bars at the bottom = \(metricName) · blue = the rolling highest")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
             } else {
                 Text("Select a stock to see its candles with delivery highs marked.").foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -472,7 +475,9 @@ struct DeliveryMiniChart: View {
                     let ago = dc.book.days.count - 1 - (dc.book.days.firstIndex(of: s.days[last]) ?? dc.book.days.count - 1)
                     Text("last \(length)-day high: \(s.days[last]) (\(ago == 0 ? "today" : "\(ago)d ago")) · \(sig.count) in history")
                         .font(.caption).foregroundStyle(.orange)
-                } else if s == nil {
+                }
+                if let s { DelsmacBadge(series: s) }
+                if s == nil {
                     Text(dc.storedDays.isEmpty ? "No NSE delivery data yet — open Delivery Analysis (⌥⌘D) to download it." : "No NSE delivery data for \(symbol).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -891,5 +896,23 @@ struct PriceT3Settings: View {
             Text("factor").font(.caption)
             TextField("", value: v.factor, format: .number).frame(width: 52).textFieldStyle(.roundedBorder)
         }
+    }
+}
+
+
+/// "DELSMAC 0.85" for a delivery chart's title — the Filter's DELSMAC (today's % change in the Delivery Analysis
+/// signal ÷ its 300-day highest % change), on the stock's latest NSE day.
+struct DelsmacBadge: View {
+    let series: DeliverySeries
+    @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
+    var body: some View {
+        let k = DeliveryMetric(rawValue: metricRaw) ?? .value
+        let v = DeliveryColumns.delSmaC(series, at: series.qty.count - 1, metric: k)
+        Text("DELSMAC " + (v.map { String(format: "%.2f", $0) } ?? "—"))
+            .font(.caption.monospacedDigit().bold())
+            .foregroundStyle(v == nil ? Color.secondary : (v! >= 0.8 ? Color.green : (v! < 0 ? Color.red : Color.primary)))
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(Color.secondary.opacity(0.15), in: Capsule())
+            .help("DELSMAC = today's % change in \(k.pine) ÷ its highest % change in 300 days (1 = the biggest rise in 300 days) — as the Filter column, on \(series.days.last ?? "the latest day")")
     }
 }
