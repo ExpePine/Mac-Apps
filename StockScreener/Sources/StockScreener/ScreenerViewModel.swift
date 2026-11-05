@@ -298,6 +298,7 @@ final class ScreenerViewModel: ObservableObject {
             self.setTableKeepingRaw()
         }
         DeliveryCenter.shared.loadIfNeeded()
+        MemoryRelief.install(self)
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             if let self { AutoPredictCenter.shared.runIfDue(self) }
         }

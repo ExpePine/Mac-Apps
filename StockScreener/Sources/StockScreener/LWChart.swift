@@ -256,6 +256,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         let ucc = WKUserContentController()
         cfg.userContentController = ucc
         view = WKWebView(frame: .zero, configuration: cfg)
+        PageCounter.track(view)
         super.init()
         ucc.add(WeakHandler(self), name: "range")
         ucc.add(WeakHandler(self), name: "hover")

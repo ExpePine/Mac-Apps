@@ -355,6 +355,7 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         config.websiteDataStore = TVAccounts.store(a)
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         let v = WKWebView(frame: .zero, configuration: config)
+        PageCounter.track(v)
         v.allowsBackForwardNavigationGestures = true
         v.customUserAgent = Self.userAgent
         v.uiDelegate = self

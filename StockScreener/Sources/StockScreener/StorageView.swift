@@ -114,6 +114,7 @@ struct StorageView: View {
             }
             .controlSize(.small)
             .padding(12)
+            MemoryPanel().padding(.bottom, 8)
             Divider()
             if let r = root {
                 List {
