@@ -85,7 +85,9 @@ struct LLMPreset: Identifiable {
             "model": e.model.hasPrefix("models/") ? String(e.model.dropFirst(7)) : e.model, "temperature": 0.1, "max_tokens": maxTokens,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
-        if e.model.contains("gpt-oss") { body["reasoning_effort"] = "low" }      // leave the token budget for the answer
+        // "thinking" models spend the token budget thinking first — ask them to keep it short so there's room for the answer
+        let lm = e.model.lowercased()
+        if lm.contains("gpt-oss") || lm.contains("gemini") { body["reasoning_effort"] = "low" }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -102,8 +104,12 @@ struct LLMPreset: Identifiable {
         }
         guard (200..<300).contains(status) else { throw GroqClient.Failure(message: "\(e.name) HTTP \(status): \(text.prefix(200))") }
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let msg = ((obj?["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String
-        guard let m = msg, !m.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw GroqClient.Failure(message: "\(e.name): empty answer") }
+        let choice = (obj?["choices"] as? [[String: Any]])?.first
+        let msg = (choice?["message"] as? [String: Any])?["content"] as? String
+        guard let m = msg, !m.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let why = (choice?["finish_reason"] as? String) == "length" ? " — the model used all its tokens thinking" : ""
+            throw GroqClient.Failure(message: "\(e.name): empty answer\(why)")
+        }
         return m
     }
 
@@ -139,7 +145,7 @@ struct LLMPreset: Identifiable {
         testing.insert(e.id)
         Task {
             do {
-                let r = try await chat(e, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 20)
+                let r = try await chat(e, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 400)
                 note(e, "✓ works (\(r.prefix(12)))")
             } catch is GroqClient.RateLimited {
                 note(e, "✗ busy right now (rate limit or the provider is overloaded) — try Test again in a minute, or pick another model")
@@ -149,7 +155,7 @@ struct LLMPreset: Identifiable {
                     if let i = endpoints.firstIndex(where: { $0.id == e.id }) { endpoints[i].model = m }
                     var e2 = e; e2.model = m
                     do {
-                        let r = try await chat(e2, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 20)
+                        let r = try await chat(e2, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 400)
                         note(e, "✓ works with \(m) (the old model wasn't found) (\(r.prefix(12)))")
                     } catch { note(e, "✗ " + error.localizedDescription) }
                 } else {
