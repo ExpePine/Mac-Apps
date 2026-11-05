@@ -111,6 +111,12 @@ struct StockScreenerApp: App {
         .defaultSize(width: 1100, height: 760)
         .windowResizability(.contentMinSize)
 
+        Window("DEL chart", id: "delchart") {
+            DelChartView()
+                .environmentObject(vm)
+                .frame(minWidth: 760, minHeight: 520)
+        }
+
         Window("Earnings Summary", id: "earnsum") {
             EarningsSummaryView()
                 .environmentObject(vm)

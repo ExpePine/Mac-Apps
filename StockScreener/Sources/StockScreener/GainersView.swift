@@ -186,6 +186,8 @@ struct GainersView: View {
                 .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { UserDefaults.standard.set(ReelSource.gainers.rawValue, forKey: "reel.source"); openWindow(id: "reel") } label: { Label("Chart Reel", systemImage: "film.stack") }
                 .help("Flick through these gainers' charts with a slider (⌥⌘R)")
+            Button { openWindow(id: "delchart") } label: { Label("DEL chart", systemImage: "chart.bar.xaxis") }
+                .help("The whole market's delivered value per day (Σ DELIV_QTY × CLOSE), with traded value, delivery % and Nifty 50")
             OpenMenu()
             Button { vm.explainIndices(day: day); vm.explainGainers(gainers, day: day) } label: { Label("Why? (news + Groq)", systemImage: "sparkles") }
                 .disabled(vm.isExplaining)
