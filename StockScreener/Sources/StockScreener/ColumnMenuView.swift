@@ -20,6 +20,8 @@ struct ColumnMenuView: View {
 
     /// Set by the Filter window: this panel lives in an AppKit popover, where SwiftUI's openWindow may not reach the app.
     @MainActor static var openReel: (() -> Void)?
+    /// Chart Reel of the Filter's stocks in the order shown (set by the Filter window).
+    @MainActor static var reelInOrder: (() -> Void)?
 
     private var name: String { column < vm.headers.count ? vm.headers[column] : "" }
 
@@ -38,6 +40,8 @@ struct ColumnMenuView: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "film.stack").foregroundStyle(.secondary)
+                Button("Charts in this order") { ColumnMenuView.reelInOrder?() }
+                    .help("Chart Reel of the stocks shown, in the Filter's current order — sort with the buttons above first")
                 Button("Charts: value = days ago (0 → n)") { reel("days") }
                     .help("Chart Reel of this Filter's stocks with a value in \(name), sorted 0 → n, each centred \(name) trading days back")
                 Button("Charts: since it started") { reel("since") }

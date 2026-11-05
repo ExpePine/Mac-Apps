@@ -274,7 +274,7 @@ struct ChartReelView: View {
                 UserDefaults.standard.set("", forKey: "reel.mbStart")
                 refresh += 1
                 let list = items
-                let i = key.isEmpty ? 0 : (list.firstIndex { $0.key == key } ?? 0)
+                let i = key.isEmpty ? 0 : (list.firstIndex { $0.key == key || $0.symbol == key } ?? 0)
                 phase = 0
                 index = Double(i)
                 show(i, list)

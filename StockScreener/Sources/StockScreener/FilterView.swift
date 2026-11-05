@@ -17,8 +17,10 @@ struct FilterView: View {
 
     private var isCollapsed: Bool { visibility == .detailOnly }
 
-    private func openReel(_ source: ReelSource, value: String? = nil, column: String? = nil, op: String = "=", sequence: Bool = false, centre: String = "") {
+    private func openReel(_ source: ReelSource, value: String? = nil, column: String? = nil, op: String = "=", sequence: Bool = false, centre: String = "",
+                          startAt: String = "") {
         let d = UserDefaults.standard
+        if source == .filter { d.set("List order", forKey: "reel.sort") }                // exactly the Filter's current order
         d.set(centre, forKey: "reel.centre")
         d.set(source.rawValue, forKey: "reel.source")
         if let value {
@@ -27,8 +29,13 @@ struct FilterView: View {
             d.set(value, forKey: "reel.value")
         }
         if sequence { d.set(ReelLayout.sequence.rawValue, forKey: "reel.layout") }      // Chart 1 → Chart 2, then next stock
-        d.set(UUID().uuidString + "|", forKey: "reel.jump")                               // restart an open reel
+        d.set(UUID().uuidString + "|" + startAt, forKey: "reel.jump")                     // restart an open reel (at a stock)
         openWindow(id: "reel")
+    }
+
+    /// Chart Reel of the Filter's stocks in the order shown, starting at the selected row (if any).
+    func reelInThisOrder() {
+        openReel(.filter, startAt: vm.filterSelection.first.map { vm.rowKey($0) } ?? "")
     }
 
     var body: some View {
@@ -125,6 +132,7 @@ struct FilterView: View {
         .onAppear {
             visibility = conditionsVisible ? .all : .detailOnly
             ColumnMenuView.openReel = { openWindow(id: "reel") }
+            ColumnMenuView.reelInOrder = { reelInThisOrder() }
             flashedDay = nil
             flashIfNewDay()
             refreshDayChange()
@@ -166,8 +174,10 @@ struct FilterView: View {
                         .background(RoundedRectangle(cornerRadius: 5).fill(vm.tgMode ? Color.green : Color.green.opacity(0.12)))
                 }
                 .help("Top Gainers: only stocks up more than \(String(format: "%g", vm.settings.tgThreshold))% that day (same filters and colors). Uses Yahoo prices, else the sheet's change% column.")
+                Button { reelInThisOrder() } label: { Label("Charts in this order", systemImage: "play.rectangle") }
+                    .help("Chart Reel of the stocks shown here, in this exact order (sorted by \(vm.settings.filterSortColumn) \(vm.settings.filterSortDescending ? "▼" : "▲")), starting at the selected row")
                 Menu {
-                    Button("This Filter's stocks") { openReel(.filter) }
+                    Button("This Filter's stocks — in the current order") { reelInThisOrder() }
                     Button("\(vm.settings.triggerColumn) = 1") { openReel(.column, value: "1") }
                     Button("\(vm.settings.triggerColumn) = 0") { openReel(.column, value: "0") }
                     Button("Daily gainers") { openReel(.gainers) }
