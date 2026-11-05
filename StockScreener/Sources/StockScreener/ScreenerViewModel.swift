@@ -312,6 +312,7 @@ final class ScreenerViewModel: ObservableObject {
                 }
                 DeliveryCenter.shared.autoUpdateIfDue()          // NSE delivery data: new days, once an hour
                 ScraperCenter.shared.runIfDue()                  // GitHub scraper at your set time (Scraper window)
+                ScraperHealth.shared.checkIfDue()                // after 18:00 IST: did every scraper workflow run?
                 EarningsCenter.shared.refreshIfDue()             // NSE results dates, once a day
                 if self.hasData { await self.runEndOfDayAlertsIfDue() }   // the day's alerts, once, after the close
                 Intraday5mCenter.allSheetSymbols = self.allSymbols

@@ -26,6 +26,7 @@ struct GainersView: View {
         let day = vm.currentGainerDay
         let gainers = vm.gainers(on: day)
         VStack(spacing: 0) {
+            ScraperHealthBanner()
             indexStrip
             Divider()
             MarketStrip()

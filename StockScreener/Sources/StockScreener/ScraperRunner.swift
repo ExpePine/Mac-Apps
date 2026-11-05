@@ -224,9 +224,12 @@ struct ScraperView: View {
             }
             .controlSize(.small)
             .padding(.horizontal, 12).padding(.vertical, 8)
+            ScraperHealthSettings().controlSize(.small).padding(.horizontal, 12).padding(.bottom, 6)
+            ScraperHealthBanner()
             Divider()
             if tab == 1 { ChainsView() } else { RepositoriesView(hasShared: hasShared) }
         }
+        .onReceive(ScraperHealth.shared.$focusRepo) { r in if r != nil { tab = 0 } }
         .frame(minWidth: 640, maxWidth: .infinity, minHeight: 440, maxHeight: .infinity)
         .navigationTitle("Scraper")
     }
@@ -236,6 +239,7 @@ private struct RepositoriesView: View {
     let hasShared: Bool
     @ObservedObject private var sc = ScraperCenter.shared
     @State private var current: UUID?
+    @ObservedObject private var health = ScraperHealth.shared
     @State private var picking = false
     @State private var typing = false
     @State private var typed = ""
@@ -292,7 +296,11 @@ private struct RepositoriesView: View {
             }
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { if current == nil { current = sc.repos.first?.id } }
+        .onAppear {
+            if let f = health.focusRepo { current = f; health.focusRepo = nil }
+            if current == nil { current = sc.repos.first?.id }
+        }
+        .onChange(of: health.focusRepo) { f in if let f { current = f; health.focusRepo = nil } }
         .sheet(isPresented: $picking) { RepoPicker { names in if let id = sc.addRepos(names) { current = id } } }
         .sheet(isPresented: $typing) {
             VStack(alignment: .leading, spacing: 10) {
