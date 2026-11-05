@@ -170,7 +170,13 @@ enum GroqClient {
         return ((json?["data"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String }.sorted()
     }
 
-    struct RateLimited: LocalizedError { var errorDescription: String? { "Groq rate limit — try again in a minute" } }
+    struct RateLimited: LocalizedError {
+        var who = "Groq"
+        var code = 429
+        var errorDescription: String? {
+            code == 429 ? "\(who) rate limit — try again in a minute" : "\(who) is overloaded right now (HTTP \(code)) — try again in a minute"
+        }
+    }
 
     /// Groq's "request too large" (HTTP 413, tokens-per-minute cap): the limit and what was asked for.
     struct TooLarge: LocalizedError {
