@@ -28,7 +28,7 @@ struct LLMPreset: Identifiable {
                   note: "console.groq.com → API Keys"),
         LLMPreset(name: "Cerebras", base: "https://api.cerebras.ai/v1", model: "llama-3.3-70b", gap: 3,
                   note: "cloud.cerebras.ai → API Keys"),
-        LLMPreset(name: "Google Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash", gap: 5,
+        LLMPreset(name: "Google Gemini", base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-3.8-flash", gap: 5,
                   note: "aistudio.google.com → Get API key"),
         LLMPreset(name: "OpenRouter (free models)", base: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct:free", gap: 4,
                   note: "openrouter.ai → Keys · free models end in :free, ~50 requests / day"),
@@ -130,7 +130,8 @@ struct LLMPreset: Identifiable {
         guard ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200 else { throw GroqClient.Failure(message: "couldn't list models") }
         let o = try JSONSerialization.jsonObject(with: data)
         let arr = ((o as? [String: Any])?["data"] as? [[String: Any]]) ?? (o as? [[String: Any]]) ?? []
-        return arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
+        return arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }
+            .map { $0.hasPrefix("models/") ? String($0.dropFirst(7)) : $0 }.sorted()
     }
 
     func test(_ e: LLMEndpoint) {
@@ -139,9 +140,34 @@ struct LLMPreset: Identifiable {
             do {
                 let r = try await chat(e, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 20)
                 note(e, "✓ works (\(r.prefix(12)))")
-            } catch { note(e, "✗ " + error.localizedDescription) }
+            } catch {
+                // 404 is usually a model name the provider no longer has: pick a current text model and try again
+                if error.localizedDescription.contains("HTTP 404"), let list = try? await models(e), let m = Self.bestModel(list, now: e.model) {
+                    if let i = endpoints.firstIndex(where: { $0.id == e.id }) { endpoints[i].model = m }
+                    var e2 = e; e2.model = m
+                    do {
+                        let r = try await chat(e2, system: "Reply with the single word OK.", user: "Say OK", maxTokens: 20)
+                        note(e, "✓ works with \(m) (the old model wasn't found) (\(r.prefix(12)))")
+                    } catch { note(e, "✗ " + error.localizedDescription) }
+                } else {
+                    note(e, "✗ " + error.localizedDescription)
+                }
+            }
             testing.remove(e.id)
         }
+    }
+
+    /// A sensible chat model from a provider's list: fast "flash"/"mini"/"small"/"70b"-type text models first.
+    static func bestModel(_ list: [String], now: String) -> String? {
+        let text = list.filter { m in
+            let l = m.lowercased()
+            return !["embed", "image", "tts", "audio", "vision", "whisper", "guard", "moderation", "aqa", "veo", "imagen", "live", "transcribe"].contains(where: l.contains)
+        }
+        guard !text.isEmpty, !text.contains(now) else { return nil }
+        for want in ["flash", "mini", "small", "70b", "versatile", "instruct"] {
+            if let m = text.filter({ $0.lowercased().contains(want) && !$0.lowercased().contains("lite") && !$0.lowercased().contains("preview") }).last { return m }
+        }
+        return text.first
     }
 }
 
