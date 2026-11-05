@@ -290,3 +290,79 @@ struct DelChartView: View {
         }
     }
 }
+
+// MARK: - Market totals for every NSE stock, worked out once per NSE update (shared by the DEL chart and Daily Gainers)
+
+@MainActor final class DelMarketCenter: ObservableObject {
+    static let shared = DelMarketCenter()
+    @Published private(set) var days: [DelMarketDay] = []
+    private var rev = -1
+    private var working = false
+
+    /// Recomputes in the background when the stored NSE data changed.
+    func refreshIfNeeded() {
+        let dc = DeliveryCenter.shared
+        guard !working, dc.revision != rev, !dc.book.series.isEmpty else { return }
+        working = true
+        let book = dc.book, r = dc.revision
+        Task {
+            let d = await Task.detached(priority: .utility) { DelMarket.build(book, only: nil) }.value
+            days = d; rev = r; working = false
+        }
+    }
+}
+
+/// Two chips for the markets strip: the whole NSE's delivered value (Σ DELIV_QTY × CLOSE) and traded value (Σ VOL × CLOSE)
+/// on the latest stored NSE day, vs the day before, with a 22-day sparkline. Click = DEL chart.
+struct DelMarketChips: View {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var c = DelMarketCenter.shared
+    @ObservedObject private var dc = DeliveryCenter.shared
+
+    var body: some View {
+        Group {
+            if c.days.count >= 2 {
+                chip("NSE DEL × CLOSE", c.days.map(\.del), color: .blue)
+                if c.days.last!.vol > 0 { chip("NSE VOL × CLOSE", c.days.map(\.vol), color: .orange) }
+            }
+        }
+        .onAppear { dc.loadIfNeeded(); c.refreshIfNeeded() }
+        .onChange(of: dc.revision) { _ in c.refreshIfNeeded() }
+    }
+
+    private func chip(_ name: String, _ v: [Double], color: Color) -> some View {
+        let last = v[v.count - 1], prev = v[v.count - 2]
+        let ch = prev > 0 ? (last / prev - 1) * 100 : nil
+        let avg = v.suffix(22).reduce(0, +) / Double(min(22, v.count))
+        let vsAvg = avg > 0 ? (last / avg - 1) * 100 : nil
+        let up = (ch ?? 0) >= 0
+        let tint: Color = ch == nil ? .secondary : (up ? .green : .red)
+        let spark = Array(v.suffix(22))
+        let day = c.days.last?.day ?? ""
+        return Button { openWindow(id: "delchart") } label: {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name).font(.caption2.bold()).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(last >= 1e5 ? String(format: "₹%.2fL Cr", last / 1e5) : String(format: "₹%.0f Cr", last)).font(.caption.monospacedDigit().bold())
+                        if let ch { Text(String(format: "%+.1f%%", ch)).font(.caption2.monospacedDigit().bold()).foregroundStyle(tint) }
+                    }
+                }
+                Chart {
+                    ForEach(Array(spark.enumerated()), id: \.offset) { p in
+                        LineMark(x: .value("t", p.offset), y: .value("v", p.element)).foregroundStyle(color)
+                    }
+                    RuleMark(y: .value("avg", avg)).foregroundStyle(Color.secondary.opacity(0.4)).lineStyle(StrokeStyle(lineWidth: 0.5, dash: [2, 2]))
+                }
+                .chartXAxis(.hidden).chartYAxis(.hidden)
+                .chartYScale(domain: .automatic(includesZero: false))
+                .frame(width: 46, height: 22)
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 7).fill(color.opacity(0.1)))
+        }
+        .buttonStyle(.plain)
+        .help("\(name) for all NSE stocks on \(day): vs the previous NSE day " + (ch.map { String(format: "%+.1f%%", $0) } ?? "—")
+              + (vsAvg.map { String(format: ", vs its 22-day average %+.1f%%", $0) } ?? "") + ". Click for the DEL chart.")
+    }
+}

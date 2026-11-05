@@ -80,7 +80,7 @@ struct MarketStrip: View {
                 .buttonStyle(.borderless).help(show ? "Hide the global markets strip" : "Show global markets")
             if show {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) { ForEach(items) { chip($0) } }
+                    HStack(spacing: 6) { DelMarketChips(); ForEach(items) { chip($0) } }
                 }
                 Button { editing = true } label: { Image(systemName: "slider.horizontal.3") }.buttonStyle(.borderless)
                     .help("Choose the markets shown (any Yahoo ticker)")
