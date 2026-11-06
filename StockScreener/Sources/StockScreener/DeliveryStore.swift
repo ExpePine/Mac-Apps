@@ -160,6 +160,10 @@ struct DeliverySeries {
 }
 
 struct DeliveryBook {
+    /// Shares, SME shares, trade-for-trade, InvITs and REITs — not bonds, G-secs or gold bonds (memory).
+    static let equitySeries: Set<String> = ["EQ", "BE", "BZ", "SM", "ST", "IV", "RR"]
+    /// Days kept in memory: every indicator needs ≤ ~900 (EMA 300 + 300 + 300); older files stay on disk.
+    static var memoryDays: Int { max(900, UserDefaults.standard.integer(forKey: "deliv.target") + 150) }
     var days: [String] = []
     var series: [String: DeliverySeries] = [:]
 
@@ -168,7 +172,7 @@ struct DeliveryBook {
         var book = DeliveryBook(days: days)
         for d in days {
             var best: [String: DeliveryRow] = [:]
-            for r in load(d) {
+            for r in load(d) where equitySeries.contains(r.series) {
                 if let e = best[r.symbol], e.series == "EQ" || (r.series != "EQ" && e.delivQty >= r.delivQty) { continue }
                 best[r.symbol] = r
             }
@@ -760,7 +764,8 @@ struct DeliveryColumns {
         isLoading = true
         Task {
             let days = DeliveryFiles.days()
-            let b = await Task.detached(priority: .userInitiated) { DeliveryBook.build(days: days, load: DeliveryFiles.load) }.value
+            let recent = Array(days.suffix(DeliveryBook.memoryDays))
+            let b = await Task.detached(priority: .userInitiated) { DeliveryBook.build(days: recent, load: DeliveryFiles.load) }.value
             let cols = await Task.detached(priority: .userInitiated) { DeliveryColumns.all(b) }.value
             self.book = b
             self.storedDays = days

@@ -11,6 +11,14 @@ struct PriceSeries: Codable {
     var highs: [Double]? = nil
     var lows: [Double]? = nil
 
+    /// The last `n` days (memory: the stored history grows with every daily merge).
+    func suffix(_ n: Int) -> PriceSeries {
+        guard closes.count > n else { return self }
+        let k = closes.count - n
+        return PriceSeries(days: Array(days[k...]), closes: Array(closes[k...]),
+                           opens: opens.map { Array($0.dropFirst(k)) }, highs: highs.map { Array($0.dropFirst(k)) }, lows: lows.map { Array($0.dropFirst(k)) })
+    }
+
     /// Close on or before `day`, and its index.
     func index(onOrBefore day: String) -> Int? {
         var lo = 0, hi = days.count - 1, found: Int?
@@ -62,6 +70,7 @@ struct PriceBook: Codable {
 }
 
 enum PriceStore {
+    static let keepDays = 620
     private static var fileURL: URL {
         HistoryStore.folder.deletingLastPathComponent().appendingPathComponent("prices.json.lzfse")
     }
@@ -69,7 +78,9 @@ enum PriceStore {
     static func load() -> PriceBook {
         guard let data = try? Data(contentsOf: fileURL),
               let raw = try? (data as NSData).decompressed(using: .lzfse) as Data,
-              let book = try? JSONDecoder().decode(PriceBook.self, from: raw) else { return PriceBook() }
+              var book = try? JSONDecoder().decode(PriceBook.self, from: raw) else { return PriceBook() }
+        // ~2.5 years in memory is all any screen uses (the file keeps growing with daily merges)
+        for (k, s) in book.series where s.closes.count > keepDays { book.series[k] = s.suffix(keepDays) }
         return book
     }
 
