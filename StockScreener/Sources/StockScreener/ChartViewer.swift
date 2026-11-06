@@ -221,9 +221,20 @@ struct ChartViewer: View {
         vm.chartStatus = status
         web.use(account: acct)
         web.signingIn = false
-        web.view.stopLoading()
         if !vm.chartExactGoTo { vm.chartGoTo = vm.centreDay(symbol, vm.chartContext, fallback: vm.chartSoftGoTo) }
         centreSig = ChartCentre.title(vm.chartContext, vm)
+        // Fast path: the same TradingView layout is already open — switch its symbol in place (about a second)
+        // instead of loading the whole TradingView app again (several seconds). Falls back to a full load.
+        if let cur = web.view.url, !web.view.isLoading, cur.host == url.host,
+           ChartLinkBook.layoutID(cur.absoluteString) == layout, let want = TVRange.symbol(in: url) {
+            let wanted = url
+            TVRange.run(web.view, TVRange.setSymbolBody(want)) { r in
+                if r != "ok" { web.view.stopLoading(); web.view.load(URLRequest(url: wanted)) }
+                centreOnGoTo()
+            }
+            return
+        }
+        web.view.stopLoading()
         web.view.load(URLRequest(url: url))
         centreOnGoTo()
     }

@@ -635,6 +635,28 @@ enum TVRange {
     }
     """
 
+    /// "NSE:TCS" from a chart link's ?symbol=…
+    static func symbol(in url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "symbol" }?.value.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Switches the open chart to another symbol through TradingView's chart API ("ok"), or "noapi".
+    static func setSymbolBody(_ sym: String) -> String {
+        let lit = (try? String(data: JSONSerialization.data(withJSONObject: [sym]), encoding: .utf8)).flatMap { $0 }.map { String($0.dropFirst().dropLast()) } ?? "\"\""
+        return finder + """
+        var c = __ssChart();
+        if (!c || typeof c.setSymbol !== 'function') return 'noapi';
+        var want = \(lit);
+        await new Promise(function(res){
+          var done = false, f = function(){ if (!done) { done = true; res(); } };
+          try { c.setSymbol(want, f); } catch (e) { f(); }
+          setTimeout(f, 5000);
+        });
+        try { var now = c.symbol && c.symbol(); if (now && String(now).toUpperCase().indexOf(want.split(':').pop().toUpperCase()) < 0) return 'nochange'; } catch (e) {}
+        return 'ok';
+        """
+    }
+
     /// Returns "from,to" (unix seconds) or a short reason it couldn't.
     static let getBody = finder + """
     var c = __ssChart();
