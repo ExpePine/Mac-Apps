@@ -132,6 +132,7 @@ struct LWChartData: Encodable {
     var t3: [Point] = []              // T3 with green / red per point
     var del2c: [Point] = []           // DEL2C step line (Chart 3: on the price scale; delivery chart: its own scale)
     var d2cOwn = false
+    var style = ChartStyle.current      // your look: colours, line width, price / delivery split, grid
     var t3Own = false                 // T3's source differs from the bars → its own scale
     var t3Name = ""
     var title = ""
@@ -160,7 +161,8 @@ struct LWChartData: Encodable {
                 d.candles = d.candles.map { c in
                     guard hot.contains(c.time) else { return c }
                     var x = c
-                    let col = c.close >= c.open ? "#B388FF" : "#7C4DFF"
+                    let st = ChartStyle.current
+                    let col = c.close >= c.open ? st.shadeUp : st.shadeDown
                     x.color = col; x.borderColor = col; x.wickColor = col
                     return x
                 }
@@ -519,14 +521,21 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(!chart || dark!==d.dark) build(d.dark);
       last=d;
       var hasCandles=d.candles.length>0;
-      chart.priceScale('deliv').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}});
-      chart.priceScale('prank').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}, visible:false});
-      chart.priceScale('per').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}, visible:false});
-      chart.applyOptions({rightPriceScale:{visible:hasCandles}, leftPriceScale:{visible:false}});
+      var S=d.style||{}, split=(S.split||72)/100;                  // where the delivery pane starts (fraction of height)
+      var low=hasCandles?{top:split,bottom:0}:{top:0.08,bottom:0};
+      chart.priceScale('deliv').applyOptions({scaleMargins:low});
+      chart.priceScale('prank').applyOptions({scaleMargins:low, visible:false});
+      chart.priceScale('per').applyOptions({scaleMargins:low, visible:false});
+      chart.applyOptions({rightPriceScale:{visible:hasCandles && S.priceScale!==false, scaleMargins:{top:0.06,bottom:Math.max(0.05,1-split+0.03)}},
+                          leftPriceScale:{visible:false},
+                          grid:{vertLines:{visible:S.grid!==false},horzLines:{visible:S.grid!==false}}});
+      candle.applyOptions({upColor:S.up||'#26a69a', downColor:S.down||'#ef5350', wickUpColor:S.up||'#26a69a', wickDownColor:S.down||'#ef5350',
+                           wickVisible:S.wicks!==false, borderVisible:S.borders===true, borderUpColor:S.up||'#26a69a', borderDownColor:S.down||'#ef5350'});
+      d2c.applyOptions({color:S.d2c||'#FFC400', lineWidth:S.d2cWidth||2});
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]);
       sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
       t3s.applyOptions({priceScaleId:d.t3Own?'t3':'deliv'});
-      if(d.t3Own) chart.priceScale('t3').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}, visible:false});
+      if(d.t3Own) chart.priceScale('t3').applyOptions({scaleMargins:low, visible:false});
       t3s.setData(d.t3||[]);
       d2c.applyOptions({priceScaleId:d.d2cOwn?'d2c':'right'});
       if(d.d2cOwn) chart.priceScale('d2c').applyOptions({scaleMargins:{top:0.08,bottom:0.08}, visible:false});
@@ -758,5 +767,108 @@ enum DelsmacShade {
             if let v = DeliveryColumns.delSmaC(s, at: i, metric: k), v > level { out.insert(s.days[i]) }
         }
         return out
+    }
+}
+
+
+/// How the delivery charts and Chart 3 look (the brush button on each chart). Saved for the whole app.
+struct ChartStyle: Codable, Equatable {
+    var up = "#26a69a"
+    var down = "#ef5350"
+    var shadeUp = "#B388FF"
+    var shadeDown = "#7C4DFF"
+    var d2c = "#FFC400"
+    var d2cWidth = 2
+    var split = 72              // % of the height for price; delivery bars below
+    var grid = true
+    var wicks = true
+    var borders = false
+    var priceScale = true
+
+    static let key = "chart.style"
+    static var current: ChartStyle {
+        (UserDefaults.standard.data(forKey: key)).flatMap { try? JSONDecoder().decode(ChartStyle.self, from: $0) } ?? ChartStyle()
+    }
+    func save() { UserDefaults.standard.set(try? JSONEncoder().encode(self), forKey: Self.key) }
+}
+
+/// Price candles for the delivery charts: real Yahoo OHLC, fetched once per stock and kept for the last few stocks.
+@MainActor final class CandleCache: ObservableObject {
+    static let shared = CandleCache()
+    @Published private(set) var revision = 0
+    private var store: [String: [YahooClient.Candle]] = [:]
+    private var order: [String] = []
+    private var loading = Set<String>()
+
+    func candles(_ sym: String) -> [YahooClient.Candle]? {
+        if let c = store[sym] { return c }
+        guard !loading.contains(sym) else { return nil }
+        loading.insert(sym)
+        Task {
+            if let c = try? await YahooClient.candles(sym, range: "2y"), !c.isEmpty {
+                store[sym] = c; order.append(sym)
+                while order.count > 24 { store[order.removeFirst()] = nil }     // a couple of reels' worth
+                revision += 1
+            }
+            loading.remove(sym)
+        }
+        return nil
+    }
+}
+
+import SwiftUI
+
+/// The brush button: colours, DEL2C line, price / delivery split, grid, wicks.
+struct ChartStyleButton: View {
+    @State private var open = false
+    @State private var st = ChartStyle.current
+    @AppStorage("chart.styleRev") private var rev = 0
+
+    var body: some View {
+        Button { st = ChartStyle.current; open = true } label: { Image(systemName: "paintbrush") }
+            .help("Chart settings — colours, lines, layout")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Chart settings").font(.headline)
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow { Text("Candles up / down"); HStack { colour($st.up); colour($st.down) } }
+                        GridRow { Text("Shaded (DELSMAC) up / down"); HStack { colour($st.shadeUp); colour($st.shadeDown) } }
+                        GridRow { Text("DEL2C line"); HStack { colour($st.d2c); Stepper("width \(st.d2cWidth)", value: $st.d2cWidth, in: 1...5).fixedSize() } }
+                        GridRow {
+                            Text("Price area")
+                            HStack { Slider(value: Binding(get: { Double(st.split) }, set: { st.split = Int($0) }), in: 40...90, step: 2).frame(width: 160); Text("\(st.split)%").monospacedDigit() }
+                        }
+                    }
+                    Toggle("Grid lines", isOn: $st.grid)
+                    Toggle("Candle wicks", isOn: $st.wicks)
+                    Toggle("Candle borders", isOn: $st.borders)
+                    Toggle("Price scale on the right", isOn: $st.priceScale)
+                    HStack {
+                        Button("Reset") { st = ChartStyle() }
+                        Spacer()
+                        Text("Applies to every delivery chart and Chart 3").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .padding(14).frame(width: 380)
+                .onChange(of: st) { v in v.save(); rev &+= 1 }
+            }
+    }
+
+    private func colour(_ hex: Binding<String>) -> some View {
+        ColorPicker("", selection: Binding(get: { Color(hexString: hex.wrappedValue) }, set: { hex.wrappedValue = $0.hexString }), supportsOpacity: false)
+            .labelsHidden()
+    }
+}
+
+extension Color {
+    init(hexString: String) {
+        var s = hexString.trimmingCharacters(in: .whitespaces); if s.hasPrefix("#") { s.removeFirst() }
+        let v = UInt64(s, radix: 16) ?? 0x888888
+        self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
+    }
+    var hexString: String {
+        let c = NSColor(self).usingColorSpace(.sRGB) ?? .gray
+        return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
     }
 }

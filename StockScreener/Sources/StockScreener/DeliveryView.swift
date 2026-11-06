@@ -9,6 +9,7 @@ struct DeliveryView: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var dc = DeliveryCenter.shared
 
+    @AppStorage("chart.styleRev") private var mainStyleRev = 0
     @AppStorage("deliv.length") private var length = 300
     @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
     @AppStorage("deliv.jumpMode") private var jumpMode = 0
@@ -241,7 +242,10 @@ struct DeliveryView: View {
                     Image(systemName: "info.circle").foregroundStyle(.secondary)
                         .help("Scroll / pinch = zoom · drag = pan · double-click the date axis = reset")
                     Spacer(minLength: 8)
-                    if pane == "Chart" { ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize() }
+                    if pane == "Chart" {
+                        ChartStyleButton().controlSize(.small)
+                        ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize()
+                    }
                     Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                     Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
@@ -284,6 +288,7 @@ struct DeliveryView: View {
         .onChange(of: full) { _ in pushChart() }
         .onChange(of: colorScheme) { _ in pushChart() }
         .onChange(of: layersRaw) { _ in pushChart() }
+        .onChange(of: mainStyleRev) { _ in pushChart() }
         .onChange(of: t3Rev) { _ in pushChart() }
         .onChange(of: newsTL.revision) { _ in pushChart() }
         .onChange(of: dealsC.revision) { _ in pushChart() }
@@ -467,6 +472,8 @@ struct DeliveryMiniChart: View {
     @AppStorage("lower.chart") private var lower = "delivery"
     @AppStorage("del2.len") private var del2Len = 100
     @AppStorage("delsmac.shade") private var shadeLevel = 0.40
+    @AppStorage("chart.styleRev") private var styleRev = 0
+    @ObservedObject private var candleCache = CandleCache.shared
     @EnvironmentObject var vm: ScreenerViewModel
     private var showChart3: Bool { lower == "chart3" }
 
@@ -541,6 +548,7 @@ struct DeliveryMiniChart: View {
                             .help("Shade candles (purple) on days DELSMAC is above this")
                     }
                 }
+                ChartStyleButton().buttonStyle(.borderless).controlSize(.mini)
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases)
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
@@ -553,6 +561,8 @@ struct DeliveryMiniChart: View {
         .onChange(of: lower) { _ in push() }
         .onChange(of: del2Len) { _ in push(); dc.refreshColumns() }
         .onChange(of: shadeLevel) { _ in push() }
+        .onChange(of: candleCache.revision) { _ in push() }
+        .onChange(of: styleRev) { _ in push() }
         .onAppear { if lower == "both" { lower = "delivery" } }
         .onChange(of: vm.priceBook.series.count) { _ in if showChart3 { push() } }
         .onAppear { dc.loadIfNeeded(); push() }
@@ -575,7 +585,7 @@ struct DeliveryMiniChart: View {
         let c3 = LWChartData.chart3(symbol: sym, series: s, prices: vm.priceBook.series(for: sym), length: del2Len == 300 ? 300 : 100,
                                     full: full, range: range, dark: colorScheme == .dark)
         if lower == "chart3" { lw.show(c3); centre(); return }
-        lw.show(LWChartData.make(symbol: sym, series: s, candles: Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
+        lw.show(LWChartData.make(symbol: sym, series: s, candles: CandleCache.shared.candles(sym) ?? Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw))))
         centre()
@@ -596,7 +606,11 @@ struct DeliveryMiniChart: View {
         if let p, let o = p.opens, let h = p.highs, let l = p.lows, o.count == p.closes.count, h.count == o.count, l.count == o.count {
             return p.days.indices.map { YahooClient.Candle(day: p.days[$0], date: f.date(from: p.days[$0]) ?? Date(), open: o[$0], high: h[$0], low: l[$0], close: p.closes[$0], volume: 0) }
         }
-        return s.days.indices.map { YahooClient.Candle(day: s.days[$0], date: f.date(from: s.days[$0]) ?? Date(), open: s.close[$0], high: s.close[$0], low: s.close[$0], close: s.close[$0], volume: 0) }
+        // NSE closes only: open = the previous close, so each day still shows its move
+        return s.days.indices.map { i in
+            let c = s.close[i], o = i > 0 ? s.close[i - 1] : c
+            return YahooClient.Candle(day: s.days[i], date: f.date(from: s.days[i]) ?? Date(), open: o, high: max(o, c), low: min(o, c), close: c, volume: 0)
+        }
     }
 
     /// ~120 calendar days before to ~90 after `day`.
