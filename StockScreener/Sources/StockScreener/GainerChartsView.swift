@@ -341,7 +341,7 @@ struct GainerChartsView: View {
         for j in [s, s + 1, s + 2, s - 1] where list.indices.contains(j) {
             for c in 0..<perStock { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, goTo(list[j]))) } }
         }
-        pool.preload(urls, keep: perStock * 3)
+        pool.preload(urls, keep: perStock * 2)
     }
 
     private func currentWeb() -> WKWebView? {

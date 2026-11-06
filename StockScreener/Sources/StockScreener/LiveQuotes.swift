@@ -79,6 +79,7 @@ import AppKit
         for (k, v) in fresh.series { book.series[k] = book.series[k].map { $0.merged(with: v) } ?? v }
         book.fetchedAt = Date()
         vm.priceBook = book
+        MemoryRelief.giveBack()                 // the old copy of every price series was just freed
         await vm.refreshIndexCharts()
         stocks = fresh.series.count
         lastError = failed.count > symbols.count / 4 ? "\(failed.count) of \(symbols.count) symbols failed on Yahoo this pass" : nil

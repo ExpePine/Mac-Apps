@@ -23,12 +23,39 @@ import Darwin
             if !mbOpen { MultibaggerCenter.shared.unload() }
         }
         URLCache.shared.removeAllCachedResponses()
+        giveBack()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { lastRun = (Date(), before, footprintMB()) }
     }
+
+    /// Hands memory the app has already freed back to macOS. Big background jobs (delivery columns, live prices,
+    /// market totals) allocate and free hundreds of MB; malloc keeps those pages for reuse, and Activity Monitor
+    /// counts them until they're returned.
+    nonisolated static func giveBack() { _ = malloc_zone_pressure_relief(nil, 0) }
+
+    /// The 5-year multibagger prices (~150 MB) are only needed by the Multibaggers / F windows, the Reel's
+    /// Multibaggers source and "centre on the multibagger move" — drop them a couple of minutes after none is in use.
+    static func unloadUnusedHistory() {
+        let mb = MultibaggerCenter.shared
+        guard !mb.book.series.isEmpty else { return }
+        let titles = NSApp.windows.filter { $0.isVisible }.map(\.title)
+        let mbWindow = titles.contains { $0.hasPrefix("Multibaggers") || $0.hasPrefix("F ") }
+        let d = UserDefaults.standard
+        let reelMB = titles.contains { $0.hasPrefix("Chart Reel") } && d.string(forKey: "reel.source") == ReelSource.multibaggers.rawValue
+        let centreMB = ChartContext.allCases.contains { ChartCentre.kind($0) == .mb }
+        if mbWindow || reelMB || centreMB { idleSince = nil; return }
+        if let t = idleSince, Date().timeIntervalSince(t) > 120 { mb.unload(); idleSince = nil; giveBack() }
+        else if idleSince == nil { idleSince = Date() }
+    }
+    private static var idleSince: Date?
+    private static var timer: Timer?
 
     /// Call once at launch.
     static func install(_ vm: ScreenerViewModel) {
         guard pressure == nil else { return }
+        URLCache.shared.memoryCapacity = 4 * 1_048_576            // web data is cached on disk; keep only a little in RAM
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            Task { @MainActor in unloadUnusedHistory(); giveBack() }
+        }
         let src = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         src.setEventHandler { [weak vm] in Task { @MainActor in if let vm { run(vm, deep: true) } } }
         src.resume()

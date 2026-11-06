@@ -701,6 +701,7 @@ struct DeliveryColumns {
                 let cols = await Task.detached(priority: .userInitiated) { DeliveryColumns.all(b, asOf: asOf) }.value
                 guard self.revision == rev, self.computingKey == key else { return }
                 self.colCache = (rev, day, cols)
+                MemoryRelief.giveBack()
                 self.computingKey = nil
                 self.onReload?()
             }

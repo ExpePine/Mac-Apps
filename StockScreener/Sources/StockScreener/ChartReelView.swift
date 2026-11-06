@@ -722,7 +722,7 @@ struct ChartReelView: View {
         for j in [i, i + 1, i + 2, i + 3, i - 1] where list.indices.contains(j) {
             for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
         }
-        pool.preload(urls, keep: cols.count * 3)
+        pool.preload(urls, keep: cols.count * 2)
     }
 }
 
