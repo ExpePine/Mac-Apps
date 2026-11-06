@@ -540,6 +540,8 @@ struct DeliveryColumns {
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
     var delSmaC: Double? = nil   // DELSMAC = today's % change in the selected signal ÷ its ta.highest(%, 300)
+    var del2: Double? = nil      // DEL2 = DELI × 100 / ta.highest(DELI, 100 or 300), DELI = DELIV_QTY × CLOSE
+    var del2c: Double? = nil     // DEL2C = ta.valuewhen(DEL2 == 100, close, 0)
     var delsmaDays: Int? = nil   // DAYS_DELSMA = ta.barssince(DELSMA > threshold) (0 = true today, nil = never / not enough data)
     let day: String          // the stock's latest NSE day
 
@@ -559,12 +561,15 @@ struct DeliveryColumns {
         let dlvr: Double? = sig.last == i ? m[i] / 1e7 : nil
         let safety: Double? = i >= 99 ? s.qty[(i - 99)...i].reduce(0, +) / 100 * 0.05 : nil
         let mode = UserDefaults.standard.integer(forKey: "deliv.jumpMode")
+        let d2 = Del2.series(s, upTo: i)
         return DeliveryColumns(dlvr: dlvr, safety: safety, pctRank: percentRank(s.qty, length: 300, at: i),
                                jump: DeliverySignal.jump(m, at: i, mode: mode), delSma: delSma(m, at: i, smaLength: hiSma),
                                streak: StreakDef.current.streak(m, at: i),
                                t3Color: T3Def.current.color(T3Def.current.source(s, upTo: i)),
                                hiT3: hiOverT3(m, t3Source: T3Def.current.source(s, upTo: i)),
                                delSmaC: delSmaC(s, at: i),
+                               del2: d2.del2.last ?? nil,
+                               del2c: d2.del2c.last ?? nil,
                                delsmaDays: DelsmaDaysDef.current.days(m, at: i, smaLength: hiSma), day: latestDay)
     }
 
@@ -925,5 +930,49 @@ struct DeliveryColumns {
         guard !DemoShots.active, !isFetching, Date().timeIntervalSince(lastAutoCheck) > 3600, !DeliveryFiles.days().isEmpty else { return }
         lastAutoCheck = Date()
         download(target: max(600, DeliveryFiles.days().count))
+    }
+}
+
+
+// MARK: - DEL2 / DEL2C (Chart 3 and the Filter's C/DL2C)
+//
+//   DELI  = DELIV_QTY × CLOSE
+//   DEL2  = DELI × 100 / ta.highest(DELI, L)        L = 100 or 300 (Settings / Chart 3)
+//   DEL2C = ta.valuewhen(DEL2 == 100, close, 0)     close on the latest day DELI made its L-day high
+// "== 100" is tested as DELI ≥ the L-day highest (the same days, without floating-point rounding).
+// Pine rules: with "full history" on, nothing until L bars exist.
+enum Del2 {
+    static var length: Int { UserDefaults.standard.integer(forKey: "del2.len") == 300 ? 300 : 100 }
+
+    /// Rolling ta.highest over `n` bars (O(count) with a monotonic queue).
+    static func highest(_ x: [Double], _ n: Int, full: Bool) -> [Double?] {
+        var out = [Double?](repeating: nil, count: x.count)
+        var q: [Int] = [], head = 0
+        for i in x.indices {
+            while q.count > head, x[q[q.count - 1]] <= x[i] { q.removeLast() }
+            q.append(i)
+            if q[head] <= i - n { head += 1 }
+            if !full || i >= n - 1 { out[i] = x[q[head]] }
+            if head > 512 { q.removeFirst(head); head = 0 }
+        }
+        return out
+    }
+
+    static func series(_ s: DeliverySeries, upTo end: Int? = nil, length L: Int = Del2.length, full: Bool = DeliveryColumns.full)
+        -> (del2: [Double?], del2c: [Double?]) {
+        let n = min(s.qty.count, s.close.count, (end ?? Int.max - 1) + 1)
+        guard n > 0 else { return ([], []) }
+        let deli = (0..<n).map { s.qty[$0] * s.close[$0] }
+        let hi = highest(deli, L, full: full)
+        var d2 = [Double?](repeating: nil, count: n), dc = [Double?](repeating: nil, count: n)
+        var lastC: Double?
+        for i in 0..<n {
+            if let h = hi[i], h > 0 {
+                d2[i] = deli[i] >= h ? 100 : deli[i] * 100 / h
+                if deli[i] >= h { lastC = s.close[i] }
+            }
+            dc[i] = lastC
+        }
+        return (d2, dc)
     }
 }

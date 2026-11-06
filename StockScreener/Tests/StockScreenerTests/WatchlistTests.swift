@@ -172,3 +172,28 @@ final class DelSmaCTests: XCTestCase {
         XCTAssertGreaterThan(e, 0); XCTAssertLessThanOrEqual(e, 1)
     }
 }
+
+final class Del2Tests: XCTestCase {
+    func testDel2AndValueWhen() {
+        // DELI rises to a high on day 5 (close 50), drifts lower, new high on day 9 (close 90)
+        let qty: [Double] = [10, 12, 11, 13, 15, 30, 20, 18, 16, 40, 30]
+        let close: [Double] = [10, 20, 30, 40, 45, 50, 60, 70, 80, 90, 100]
+        let s = DeliverySeries(days: qty.indices.map { "D\($0)" }, qty: qty, per: qty.map { _ in 50 }, close: close)
+        let r = Del2.series(s, length: 3, full: true)
+        XCTAssertNil(r.del2[1])                                  // fewer than 3 bars
+        XCTAssertEqual(r.del2[5]!, 100)                          // new 3-day high
+        XCTAssertEqual(r.del2c[5]!, 50)
+        XCTAssertEqual(r.del2c[7]!, 50)                          // still the last high's close
+        XCTAssertEqual(r.del2[7]!, 1260.0 * 100 / 1500, accuracy: 1e-9)
+        XCTAssertEqual(r.del2c[8]!, 80)                          // 1280 is the 3-day high again
+        XCTAssertEqual(r.del2c[9]!, 90)
+        XCTAssertEqual(r.del2c[10]!, 90)
+    }
+
+    func testRollingHighestMatchesNaive() {
+        let x: [Double] = (0..<200).map { Double(($0 * 37) % 101) }
+        let h = Del2.highest(x, 30, full: true)
+        for i in 29..<x.count { XCTAssertEqual(h[i]!, x[(i - 29)...i].max()!) }
+        XCTAssertNil(h[28])
+    }
+}

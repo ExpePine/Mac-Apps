@@ -257,6 +257,10 @@ final class ScreenerViewModel: ObservableObject {
                 UserDefaults.standard.set(true, forKey: "deliv.colsAdded9")
                 if !self.settings.filterColumns.contains("DAYS_DELSMA") { self.settings.filterColumns.append("DAYS_DELSMA") }
             }
+            if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAddedD2") {
+                UserDefaults.standard.set(true, forKey: "deliv.colsAddedD2")
+                if !self.settings.filterColumns.contains("C/DL2C") { self.settings.filterColumns.append("C/DL2C") }
+            }
             if !self.settings.filterColumns.isEmpty && !UserDefaults.standard.bool(forKey: "deliv.colsAddedC") {
                 UserDefaults.standard.set(true, forKey: "deliv.colsAddedC")
                 if !self.settings.filterColumns.contains("DELSMAC") { self.settings.filterColumns.append("DELSMAC") }
@@ -492,22 +496,34 @@ final class ScreenerViewModel: ObservableObject {
         let hName = t.index(of: "HI/T3") == nil ? "HI/T3" : "HI/T3 (NSE)"
         let yName = t.index(of: "DAYS_DELSMA") == nil ? "DAYS_DELSMA" : "DAYS_DELSMA (NSE)"
         let cName = t.index(of: "DELSMAC") == nil ? "DELSMAC" : "DELSMAC (NSE)"
+        func nm(_ n: String) -> String { t.index(of: n) == nil ? n : n + " (NSE)" }
+        let d2Names = ["DEL2", "DEL2C", "C/DL2C"].map(nm)
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
             let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump, ms = c?.delSma, sk = c?.streak.map(Double.init), t3 = c?.t3Color.map(Double.init), ht = c?.hiT3      // DLVR 0 = no new 300-day high today
             let dd: Double? = c?.delsmaDays.map(Double.init)
             let dc = c?.delSmaC
+            // C/DL2C = current close (Yahoo, live while NSE is open; else NSE's close) ÷ DEL2C
+            let sym = row.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+            let now = priceBook.series(for: sym)?.closes.last ?? dc_close(sym)
+            let d2 = c?.del2, d2c = c?.del2c
+            let cdl: Double? = (now != nil && d2c != nil && d2c! > 0) ? now! / d2c! : nil
             return SheetRow(id: row.id,
                             cells: row.cells + [d == 0 ? "0" : String(format: "%.2f", d), sf.map { String(format: "%.0f", $0) } ?? "",
                                                 pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? "",
                                                 ms.map { String(format: "%.1f", $0) } ?? "", sk.map { String(format: "%.0f", $0) } ?? "",
                                                 t3.map { String(format: "%.0f", $0) } ?? "", ht.map { String(format: "%.2f", $0) } ?? "",
-                                                dd.map { String(format: "%.0f", $0) } ?? "", dc.map { String(format: "%.2f", $0) } ?? ""],
-                            numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3, ht, dd, dc])
+                                                dd.map { String(format: "%.0f", $0) } ?? "", dc.map { String(format: "%.2f", $0) } ?? "",
+                                                d2.map { String(format: "%.1f", $0) } ?? "", d2c.map { String(format: "%.2f", $0) } ?? "",
+                                                cdl.map { String(format: "%.3f", $0) } ?? ""],
+                            numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3, ht, dd, dc, d2, d2c, cdl])
         }
-        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName]
+        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
+
+    /// The latest NSE close stored for a stock (when Yahoo has none).
+    func dc_close(_ sym: String) -> Double? { DeliveryCenter.shared.book.series[sym]?.close.last }
 
     /// EARNINGS = days from the results board meeting (NSE) to the data day: −10 = results in 10 days,
     /// +10 = results were 10 days ago (the next announced meeting if there is one, else the latest). EARN_DATE = its date.

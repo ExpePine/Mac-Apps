@@ -463,12 +463,29 @@ struct DeliveryMiniChart: View {
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
     @AppStorage("t3.rev") private var t3Rev = 0
+    /// What this panel shows: the Delivery chart, Chart 3 (price + DEL2C line), or both stacked.
+    @AppStorage("lower.chart") private var lower = "delivery"
+    @AppStorage("del2.len") private var del2Len = 100
+    @EnvironmentObject var vm: ScreenerViewModel
+    @StateObject private var lw3 = LWChartHolder()
+    private var showDelivery: Bool { lower != "chart3" }
+    private var showChart3: Bool { lower != "delivery" }
 
     var body: some View {
         let s = dc.book.series[SymbolBook.clean(symbol)]
         let sig = s.map { DeliverySignal.signals($0.metric(metric), length: max(2, length), full: full, onlyRises: onlyRises) } ?? []
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                Picker("", selection: $lower) {
+                    Text("Delivery").tag("delivery"); Text("Chart 3").tag("chart3"); Text("Both").tag("both")
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
+                .help("Chart 3 = price with the DEL2C line: the close on the latest day DELIV_QTY×CLOSE made its \(del2Len)-day high (DEL2 = 100). Shown with Chart 1 / 2 above it, or with the Delivery chart (Both).")
+                if showChart3 {
+                    Picker("", selection: $del2Len) { Text("highest 100").tag(100); Text("highest 300").tag(300) }
+                        .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
+                        .help("DEL2 = DELI × 100 / ta.highest(DELI, 100 or 300) — also used by the Filter's DEL2, DEL2C and C/DL2C")
+                }
                 Text("Delivery").font(.caption.bold())
                 Text(metric.pine).font(.caption.monospaced()).foregroundStyle(.secondary)
                 if let s, let last = sig.last {
@@ -516,8 +533,20 @@ struct DeliveryMiniChart: View {
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
             }
             .padding(.horizontal, 8).padding(.vertical, 3)
-            if s != nil { LWChartView(holder: lw) }
+            if s != nil {
+                if lower == "both" {
+                    VSplitView {
+                        LWChartView(holder: lw).frame(minHeight: 80)
+                        LWChartView(holder: lw3).frame(minHeight: 80)
+                    }
+                } else {
+                    LWChartView(holder: lw)       // the synced chart: Delivery, or Chart 3 on its own
+                }
+            }
         }
+        .onChange(of: lower) { _ in push() }
+        .onChange(of: del2Len) { _ in push(); dc.refreshColumns() }
+        .onChange(of: vm.priceBook.series.count) { _ in if showChart3 { push() } }
         .onAppear { dc.loadIfNeeded(); push() }
         .task(id: symbol + "|" + (focus ?? "")) { push() }
         .onChange(of: dc.revision) { _ in push() }
@@ -535,13 +564,21 @@ struct DeliveryMiniChart: View {
     private func push() {
         let sym = symbol.uppercased()
         guard let s = dc.book.series[sym] else { return }
+        let c3 = LWChartData.chart3(symbol: sym, series: s, prices: vm.priceBook.series(for: sym), length: del2Len == 300 ? 300 : 100,
+                                    full: full, range: range, dark: colorScheme == .dark)
+        if lower == "chart3" { lw.show(c3); centre(); return }
+        if lower == "both" { lw3.show(c3) }
         lw.show(LWChartData.make(symbol: sym, series: s, candles: [], metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw))))
+        centre()
+    }
+
+    private func centre() {
         if let f = focus, let w = Self.window(around: f) {
-            let holder = lw
+            let holders = lower == "both" ? [lw, lw3] : [lw]
             for delay in [0.5, 1.5] {            // after the data has been drawn (first load can take a moment)
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { holder.setRange(from: w.0, to: w.1) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { holders.forEach { $0.setRange(from: w.0, to: w.1) } }
             }
         }
     }
