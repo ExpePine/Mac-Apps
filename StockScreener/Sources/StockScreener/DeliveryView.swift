@@ -466,6 +466,7 @@ struct DeliveryMiniChart: View {
     /// What this panel shows: the Delivery chart, Chart 3 (price + DEL2C line), or both stacked.
     @AppStorage("lower.chart") private var lower = "delivery"
     @AppStorage("del2.len") private var del2Len = 100
+    @AppStorage("delsmac.shade") private var shadeLevel = 0.40
     @EnvironmentObject var vm: ScreenerViewModel
     private var showChart3: Bool { lower == "chart3" }
 
@@ -524,8 +525,24 @@ struct DeliveryMiniChart: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
                 .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
+                if !showChart3 {
+                    let L = ChartLayer.decode(layersRaw)
+                    ForEach([ChartLayer.candles, .del2c, .shade], id: \.self) { layer in
+                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : "Shade"), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                            var x = L; if on { x.insert(layer) } else { x.remove(layer) }
+                            layersRaw = ChartLayer.encode(x)
+                        }))
+                        .toggleStyle(.button).controlSize(.mini)
+                        .help(layer.label(metric.pine, length))
+                    }
+                    if L.contains(.shade) {
+                        Stepper(String(format: "> %.2f", shadeLevel), value: $shadeLevel, in: 0.05...1.0, step: 0.05)
+                            .font(.caption2.monospacedDigit()).controlSize(.mini).fixedSize()
+                            .help("Shade candles (purple) on days DELSMAC is above this")
+                    }
+                }
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
-                                  options: ChartLayer.allCases.filter { $0 != .candles })
+                                  options: ChartLayer.allCases)
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
@@ -535,6 +552,7 @@ struct DeliveryMiniChart: View {
         }
         .onChange(of: lower) { _ in push() }
         .onChange(of: del2Len) { _ in push(); dc.refreshColumns() }
+        .onChange(of: shadeLevel) { _ in push() }
         .onAppear { if lower == "both" { lower = "delivery" } }
         .onChange(of: vm.priceBook.series.count) { _ in if showChart3 { push() } }
         .onAppear { dc.loadIfNeeded(); push() }
@@ -557,7 +575,7 @@ struct DeliveryMiniChart: View {
         let c3 = LWChartData.chart3(symbol: sym, series: s, prices: vm.priceBook.series(for: sym), length: del2Len == 300 ? 300 : 100,
                                     full: full, range: range, dark: colorScheme == .dark)
         if lower == "chart3" { lw.show(c3); centre(); return }
-        lw.show(LWChartData.make(symbol: sym, series: s, candles: [], metric: metric, length: max(2, length),
+        lw.show(LWChartData.make(symbol: sym, series: s, candles: Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw))))
         centre()
@@ -570,6 +588,15 @@ struct DeliveryMiniChart: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { holder.setRange(from: w.0, to: w.1) }
             }
         }
+    }
+
+    /// Price candles for the delivery chart: Yahoo OHLC, else NSE's close (flat candles).
+    static func candles(_ p: PriceSeries?, nse s: DeliverySeries) -> [YahooClient.Candle] {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd"
+        if let p, let o = p.opens, let h = p.highs, let l = p.lows, o.count == p.closes.count, h.count == o.count, l.count == o.count {
+            return p.days.indices.map { YahooClient.Candle(day: p.days[$0], date: f.date(from: p.days[$0]) ?? Date(), open: o[$0], high: h[$0], low: l[$0], close: p.closes[$0], volume: 0) }
+        }
+        return s.days.indices.map { YahooClient.Candle(day: s.days[$0], date: f.date(from: s.days[$0]) ?? Date(), open: s.close[$0], high: s.close[$0], low: s.close[$0], close: s.close[$0], volume: 0) }
     }
 
     /// ~120 calendar days before to ~90 after `day`.

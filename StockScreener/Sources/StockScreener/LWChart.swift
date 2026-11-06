@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, news, deals
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, shade, news, deals
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -24,6 +24,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .per: return "Delivery % (DELIV_PER)"
         case .t3: return "T3 line (green rising / red falling) — \(T3Def.current.pine)"
         case .del2c: return "DEL2C line — close on the last DEL2 = 100 day (ta.highest \(Del2.length))"
+        case .shade: return "Shade candles where DELSMAC > \(String(format: "%.2f", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
         }
@@ -37,13 +38,14 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .per: return Color(red: 0.55, green: 0.76, blue: 0.29)
         case .t3: return .green
         case .del2c: return Color(red: 1, green: 0.77, blue: 0)
+        case .shade: return Color(red: 0.7, green: 0.4, blue: 1)
         case .news: return .blue
         case .deals: return .purple
         case .bands, .markers: return .orange
         default: return nil
         }
     }
-    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c]
+    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c, .shade]
     /// Stored as "a,b,c" in UserDefaults; "" = the defaults, "none" = nothing.
     static func decode(_ s: String) -> Set<ChartLayer> {
         if s.isEmpty { return defaults }
@@ -52,10 +54,11 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         if !s.contains("v2") && s != "none" { out.insert(.t3) }
         // saved before DEL2C existed (no "v3"): show it too
         if !s.contains("v3") && s != "none" { out.insert(.del2c) }
+        if !s.contains("v4") && s != "none" { out.insert(.shade); out.insert(.candles) }
         return out
     }
     static func encode(_ set: Set<ChartLayer>) -> String {
-        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3"]).joined(separator: ",")
+        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3", "v4"]).joined(separator: ",")
     }
 }
 
@@ -98,7 +101,10 @@ struct ChartLayersButton: View {
 }
 
 struct LWChartData: Encodable {
-    struct Candle: Encodable { let time: String; let open, high, low, close: Double }
+    struct Candle: Encodable {
+        let time: String; let open, high, low, close: Double
+        var color: String? = nil, borderColor: String? = nil, wickColor: String? = nil     // shaded days (DELSMAC)
+    }
     struct Point: Encodable { let time: String; let value: Double?; var color: String? = nil }   // value nil = empty day (gap)
     struct Marker: Encodable {
         let time: String
@@ -147,6 +153,19 @@ struct LWChartData: Encodable {
             seen.insert(c.day).inserted ? Candle(time: c.day, open: c.open, high: c.high, low: c.low, close: c.close) : nil
         }
         if !layers.contains(.candles) { d.candles = [] }
+        // candles shaded on days DELSMAC is above the level
+        if layers.contains(.shade), !d.candles.isEmpty, let s = series {
+            let hot = DelsmacShade.days(s)
+            if !hot.isEmpty {
+                d.candles = d.candles.map { c in
+                    guard hot.contains(c.time) else { return c }
+                    var x = c
+                    let col = c.close >= c.open ? "#B388FF" : "#7C4DFF"
+                    x.color = col; x.borderColor = col; x.wickColor = col
+                    return x
+                }
+            }
+        }
         if let s = series {
             let m = s.metric(metric)
             if layers.contains(.prank) {
@@ -700,4 +719,22 @@ enum TVRange {
     }()
     static func day(_ unix: Int) -> String { f.string(from: Date(timeIntervalSince1970: TimeInterval(unix))) }
     static func unix(_ day: String) -> Int? { f.date(from: day).map { Int($0.timeIntervalSince1970) } }
+}
+
+
+/// Candle shading on the delivery charts: days whose DELSMAC (the Filter's, with the Delivery Analysis signal)
+/// is above the level (default 0.40, Settings key "delsmac.shade").
+enum DelsmacShade {
+    static var level: Double {
+        let v = UserDefaults.standard.double(forKey: "delsmac.shade")
+        return v > 0 ? v : 0.40
+    }
+    static func days(_ s: DeliverySeries, level: Double = DelsmacShade.level) -> Set<String> {
+        let k = DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value
+        var out = Set<String>()
+        for i in s.days.indices where i < s.qty.count {
+            if let v = DeliveryColumns.delSmaC(s, at: i, metric: k), v > level { out.insert(s.days[i]) }
+        }
+        return out
+    }
 }
