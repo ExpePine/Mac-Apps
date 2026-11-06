@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, news, deals
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, news, deals
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -23,6 +23,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .sma66: return "ta.sma(delivery, 66) line"
         case .per: return "Delivery % (DELIV_PER)"
         case .t3: return "T3 line (green rising / red falling) — \(T3Def.current.pine)"
+        case .del2c: return "DEL2C line — close on the last DEL2 = 100 day (ta.highest \(Del2.length))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
         }
@@ -35,23 +36,26 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .sma66: return Color(red: 0.91, green: 0.12, blue: 0.39)
         case .per: return Color(red: 0.55, green: 0.76, blue: 0.29)
         case .t3: return .green
+        case .del2c: return Color(red: 1, green: 0.77, blue: 0)
         case .news: return .blue
         case .deals: return .purple
         case .bands, .markers: return .orange
         default: return nil
         }
     }
-    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3]
+    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c]
     /// Stored as "a,b,c" in UserDefaults; "" = the defaults, "none" = nothing.
     static func decode(_ s: String) -> Set<ChartLayer> {
         if s.isEmpty { return defaults }
         var out = Set(s.split(separator: ",").compactMap { ChartLayer(rawValue: String($0)) })
         // saved before T3 existed (no "v2" marker): show T3 too
         if !s.contains("v2") && s != "none" { out.insert(.t3) }
+        // saved before DEL2C existed (no "v3"): show it too
+        if !s.contains("v3") && s != "none" { out.insert(.del2c) }
         return out
     }
     static func encode(_ set: Set<ChartLayer>) -> String {
-        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2"]).joined(separator: ",")
+        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3"]).joined(separator: ",")
     }
 }
 
@@ -120,7 +124,8 @@ struct LWChartData: Encodable {
     var sma66: [Point] = []
     var per: [Point] = []             // DELIV_PER, 0–100
     var t3: [Point] = []              // T3 with green / red per point
-    var del2c: [Point] = []           // Chart 3: DEL2C step line on the price scale
+    var del2c: [Point] = []           // DEL2C step line (Chart 3: on the price scale; delivery chart: its own scale)
+    var d2cOwn = false
     var t3Own = false                 // T3's source differs from the bars → its own scale
     var t3Name = ""
     var title = ""
@@ -165,6 +170,11 @@ struct LWChartData: Encodable {
                 d.t3Name = "T3(\(def.length))"
             }
             if layers.contains(.per) { d.per = s.days.indices.map { Point(time: s.days[$0], value: s.per[$0]) } }
+            if layers.contains(.del2c) {
+                let r = Del2.series(s, full: full)
+                for i in s.days.indices where i < r.del2c.count { if let v = r.del2c[i] { d.del2c.append(Point(time: s.days[i], value: v)) } }
+                d.d2cOwn = d.candles.isEmpty
+            }
             let h = DeliverySignal.highest(m, length: length, full: full)
             let sig = Set(DeliverySignal.signals(m, length: length, full: full, onlyRises: onlyRises))
             for i in s.days.indices {
@@ -499,6 +509,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       t3s.applyOptions({priceScaleId:d.t3Own?'t3':'deliv'});
       if(d.t3Own) chart.priceScale('t3').applyOptions({scaleMargins:hasCandles?{top:0.72,bottom:0}:{top:0.08,bottom:0}, visible:false});
       t3s.setData(d.t3||[]);
+      d2c.applyOptions({priceScaleId:d.d2cOwn?'d2c':'right'});
+      if(d.d2cOwn) chart.priceScale('d2c').applyOptions({scaleMargins:{top:0.08,bottom:0.08}, visible:false});
       d2c.setData(d.del2c||[]);
       var ts={}; d.candles.forEach(function(x){ ts[x.time]=1; }); d.deliv.forEach(function(x){ ts[x.time]=1; });
       window._times=Object.keys(ts).sort();
