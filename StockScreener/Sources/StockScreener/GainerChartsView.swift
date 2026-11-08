@@ -135,7 +135,7 @@ struct GainerChartsView: View {
             guard Date().timeIntervalSince(lastStep) >= wait else { return }
             if p + 1 < total { go(p + 1, list) } else { playing = false }
         }
-        .onReceive(syncTimer) { _ in if OnScreen.visible(currentWeb()) { pollTV(cur, chart) } }
+        .onReceive(syncTimer) { _ in if OnScreen.visible(currentWeb()) { pollTV(cur, chart); TVCursor.poll(currentWeb(), symbol: cur?.symbol) } }
         .onAppear {
             lw.onUserRange = { from, to in
                 guard sync, let f = TVRange.unix(from), let t = TVRange.unix(to), let web = currentWeb() else { return }

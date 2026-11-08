@@ -135,6 +135,7 @@ extension ScreenerViewModel {
         inAppAlerts = alerts
         guard !alerts.isEmpty else { return }
         if asPopup { showAlertsPopup = true } else { showAlertsBanner = true }
+        NoteAlerts.notify(alerts)
         let summary = alerts.map { "\($0.name): \($0.stocks.count)" }.joined(separator: ", ")
         addLog("In-app alert", summary, success: true)
     }

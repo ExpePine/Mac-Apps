@@ -90,7 +90,7 @@ struct ChartViewer: View {
             let s = ChartCentre.title(vm.chartContext, vm)
             if !centreSig.isEmpty && s != centreSig { centreSig = s; recentre() }
         }
-        .onReceive(syncTimer) { _ in if OnScreen.visible(web.view) { pollTVRange(); pollCross() } }
+        .onReceive(syncTimer) { _ in if OnScreen.visible(web.view) { pollTVRange(); pollCross(); TVCursor.poll(web.view, symbol: symbol) } }
         .onChange(of: mini.crossDay) { d in if let d { crossDay = d } }
         .onChange(of: symbol) { _ in crossDay = nil; crossFails = 0 }
         .onAppear {

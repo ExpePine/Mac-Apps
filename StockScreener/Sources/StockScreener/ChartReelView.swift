@@ -280,7 +280,7 @@ struct ChartReelView: View {
                 show(i, list)
             }
         }
-        .onReceive(syncTimer) { _ in if OnScreen.visible(chart1Web()) { pollTV(current) } }
+        .onReceive(syncTimer) { _ in if OnScreen.visible(chart1Web()) { pollTV(current); TVCursor.poll(chart1Web(), symbol: current?.symbol) } }
         .onAppear {
             // delivery chart → TradingView: when you pan / zoom the delivery chart, Chart 1 follows
             deliveryLW.onUserRange = { from, to in

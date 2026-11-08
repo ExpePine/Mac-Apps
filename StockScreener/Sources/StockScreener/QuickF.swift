@@ -120,7 +120,10 @@ struct QuickFButton: View {
     @ObservedObject private var c = MBFilterCenter.shared
 
     var body: some View {
-        Button { QuickFPanel.shared.toggle(vm, openCombos: { openWindow(id: "mbnotes") }) } label: { FBadge(on: fOn && c.ready) }
+        Button {
+            NoteAlerts.open = { openWindow(id: $0) }
+            QuickFPanel.shared.toggle(vm, openCombos: { openWindow(id: "mbnotes") })
+        } label: { FBadge(on: fOn && c.ready) }
             .buttonStyle(.plain)
             .keyboardShortcut("f", modifiers: [.command, .shift])
             .help("F: a small floating note box for the stock on screen — write in your own words; it autocompletes from Filter titles, this stock's values and your past notes (⇧⌘F)")

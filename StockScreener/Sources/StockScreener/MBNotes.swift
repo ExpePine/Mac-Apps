@@ -16,7 +16,16 @@ struct MBNote: Codable, Identifiable, Equatable {
 @MainActor final class MBNoteFocus: ObservableObject {
     static let shared = MBNoteFocus()
     @Published var event: MBEvent?
-    func set(_ e: MBEvent?) { if e?.id != event?.id { event = e } }
+    /// Day under Chart 1's crosshair (TradingView) — F checks the note's formula on this day. nil = the note's own day.
+    @Published var cursorDay: String?
+    func set(_ e: MBEvent?) {
+        if e?.symbol != event?.symbol { cursorDay = nil }
+        if e?.id != event?.id { event = e }
+    }
+    func setCursor(_ symbol: String, day: String) {
+        guard let e = event, e.symbol == symbol.trimmingCharacters(in: .whitespaces).uppercased(), cursorDay != day else { return }
+        cursorDay = day
+    }
 
     /// Any chart: the stock's note for that month (the multibagger move's own note when there is one).
     func setChart(_ symbol: String, day: String?) {
@@ -338,11 +347,20 @@ enum NoteCompleter {
 // MARK: - The stock's values before the move, and how they ranked that day
 
 enum NoteData {
-    static func load(_ e: MBEvent, current: SheetTable, label: Int) async -> (day: String, today: Bool, values: [String: String], rank: [String: Double]) {
+    private final class Box { let t: SheetTable; init(_ t: SheetTable) { self.t = t } }
+    private static let cache: NSCache<NSString, Box> = { let c = NSCache<NSString, Box>(); c.countLimit = 3; return c }()
+
+    /// `on`: a day to use instead of the move's base day (Chart 1's crosshair).
+    static func load(_ e: MBEvent, on: String? = nil, current: SheetTable, label: Int) async -> (day: String, today: Bool, values: [String: String], rank: [String: Double]) {
         await Task.detached(priority: .userInitiated) { () -> (String, Bool, [String: String], [String: Double]) in
             var table = current, day = "today", isToday = true
-            if let d = HistoryStore.days().last(where: { $0 <= e.baseDay }), let data = HistoryStore.load(d),
-               let t = ScreenerViewModel.align(data, to: current) { table = t; day = d; isToday = false }
+            let want = on ?? e.baseDay
+            if let d = HistoryStore.days().last(where: { $0 <= want }) {
+                if let b = cache.object(forKey: d as NSString) { table = b.t; day = d; isToday = false }
+                else if let data = HistoryStore.load(d), let t = ScreenerViewModel.align(data, to: current) {
+                    cache.setObject(Box(t), forKey: d as NSString); table = t; day = d; isToday = false
+                }
+            }
             guard let row = table.rows.first(where: { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() == e.symbol }) else {
                 return (day, isToday, [:], [:])
             }
@@ -540,7 +558,12 @@ struct MBNoteView: View {
                 HStack(spacing: 8) {
                     Text("Tab = grey text · ↑↓ Return = list · saved").font(.caption2).foregroundStyle(.secondary)
                     Spacer()
-                    Text(valuesDay).font(.caption2).foregroundStyle(.secondary)
+                    Text(valuesDay).font(.caption2).foregroundStyle(focus.cursorDay == nil ? Color.secondary : Color.orange)
+                    if focus.cursorDay != nil {
+                        Button { focus.cursorDay = nil; if let e = focus.event, let l = vm.labelIndex { Task { await loadValues(e, label: l) } } } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).font(.caption2).help("Back to the note's own day")
+                    }
+                    NoteAlertButton(text: text)
                     Button("All notes (\(store.ordered.count))") { QuickFPanel.shared.openCombos?() }.buttonStyle(.link).font(.caption2)
                 }
             } else {
@@ -551,6 +574,12 @@ struct MBNoteView: View {
         .padding(10)
         .frame(width: 430)
         .task(id: focus.event?.id) { await loadEvent() }
+        .task(id: focus.cursorDay) {
+            guard focus.cursorDay != nil, let e = focus.event, let label = vm.labelIndex else { return }
+            try? await Task.sleep(nanoseconds: 150_000_000)          // crosshair moves fast: settle first
+            if Task.isCancelled { return }
+            await loadValues(e, label: label)
+        }
         .onChange(of: text) { t in
             listHidden = false
             selected = nil
@@ -565,10 +594,20 @@ struct MBNoteView: View {
         text = t; cursor = (t as NSString).length; setVersion &+= 1
         ctx = NoteContext(columns: columns)
         guard let label = vm.labelIndex else { return }
-        let r = await NoteData.load(e, current: vm.table, label: label)
-        guard focus.event?.id == e.id else { return }
+        await loadValues(e, label: label)
+    }
+
+    /// The chips' values: on Chart 1's crosshair day when you hover TradingView, else the note's own day.
+    private func loadValues(_ e: MBEvent, label: Int) async {
+        let cur = focus.cursorDay
+        let r = await NoteData.load(e, on: cur, current: vm.table, label: label)
+        guard focus.event?.id == e.id, focus.cursorDay == cur else { return }
         ctx = NoteContext(columns: columns, values: r.values, rank: r.rank)
-        valuesDay = r.today ? "today's values (no stored day before the move)" : "values on \(r.day)"
+        if let cur {
+            valuesDay = r.today ? "no stored day on/before \(cur) — today's values" : "values on \(r.day) · Chart 1 cursor"
+        } else {
+            valuesDay = r.today ? "today's values (no stored day before the move)" : "values on \(r.day)"
+        }
     }
 
     private func key(key: GhostTextView.Key, comp: NoteCompletion, list: [NoteSuggestion]) -> Bool {
@@ -693,6 +732,7 @@ struct MBNotesWindow: View {
                                 Text(n.symbol).font(.callout.bold())
                                 Text("\(MBEngine.monthTitle(n.month)) \(String(format: "%+.0f%%", n.gain))").font(.caption).foregroundStyle(.green)
                                 Spacer()
+                                NoteAlertButton(text: n.text, compact: true)
                                 Button("Chart") { openInReel(n.id) }.controlSize(.small)
                                 Menu {
                                     Button("Delete note", role: .destructive) { store.delete(n.id) }
@@ -709,6 +749,8 @@ struct MBNotesWindow: View {
             .frame(minWidth: 420, idealWidth: 480)
 
             VStack(alignment: .leading, spacing: 10) {
+                NoteAlertsList()
+                Divider()
                 Text("Patterns in your notes").font(.headline)
                 let n = store.ordered.count
                 if n < Self.enough {
@@ -752,7 +794,7 @@ struct MBNotesWindow: View {
             .frame(minWidth: 460)
         }
         .navigationTitle("F Notes")
-        .onAppear { MultibaggerCenter.shared.loadIfNeeded() }
+        .onAppear { MultibaggerCenter.shared.loadIfNeeded(); NoteAlerts.open = { openWindow(id: $0) } }
     }
 
     private func find() {
