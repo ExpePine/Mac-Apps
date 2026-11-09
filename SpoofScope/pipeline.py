@@ -21,22 +21,34 @@ def load_csvs(root, log=print):
     frames = []
     for p in glob.glob(os.path.join(root, "**", "Model_*.csv"), recursive=True):
         try:
-            df = pd.read_csv(p)
+            with open(p, "rb") as fh:
+                raw = fh.read().replace(b"\x00", b"")          # some files contain NUL bytes
+            import io
+            df = pd.read_csv(io.BytesIO(raw))
+            df.columns = [str(c).strip() for c in df.columns]
+            need = {"Version", "MAC ID", "ImageName", "F_Live", "F_Spoof"}
+            if not need.issubset(df.columns):
+                log(f"skip csv (columns) {p}"); continue
+            for c in ["ImageName", "F_Live", "F_Spoof", "Quality"]:
+                if c in df:
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+            n0 = len(df)
+            df = df.dropna(subset=["ImageName", "F_Live", "F_Spoof", "MAC ID"])
+            if len(df) < n0:
+                log(f"{os.path.basename(p)}: skipped {n0 - len(df)} incomplete rows")
+            if df.empty:
+                continue
+            df["Version"] = df["Version"].astype(str).str.strip().replace({"": np.nan, "nan": np.nan})
+            if df["Version"].isna().any():
+                vc = df["Version"].value_counts()
+                short = vc[vc == vc.max() - 1]
+                df["Version"] = df["Version"].fillna(short.index[0] if len(short) == 1 else "unknown")
+            df["MAC"] = df["MAC ID"].astype(str).str.strip().str.upper()
+            df["ts"] = df["ImageName"].astype("int64").astype(str).str.zfill(14)
+            df["csv_file"] = os.path.relpath(p, root)
+            frames.append(df)
         except Exception as e:
-            log(f"skip csv {p}: {e}"); continue
-        df.columns = [c.strip() for c in df.columns]
-        need = {"Version", "MAC ID", "ImageName", "F_Live", "F_Spoof"}
-        if not need.issubset(df.columns):
-            log(f"skip csv (columns) {p}"); continue
-        # one row usually has a blank version: give it the version that is one row short
-        if df["Version"].isna().any():
-            vc = df["Version"].value_counts()
-            short = vc[vc == vc.max() - 1]
-            df["Version"] = df["Version"].fillna(short.index[0] if len(short) == 1 else "unknown")
-        df["MAC"] = df["MAC ID"].astype(str).str.strip().str.upper()
-        df["ts"] = df["ImageName"].astype("int64").astype(str).str.zfill(14)
-        df["csv_file"] = os.path.relpath(p, root)
-        frames.append(df)
+            log(f"skip csv {p}: {type(e).__name__}: {e}")
     return pd.concat(frames, ignore_index=True) if frames else None
 
 
