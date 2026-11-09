@@ -431,7 +431,7 @@ private struct ChainPanel: View {
                     .fixedSize()
                 }
                 if let rid = addRepo {
-                    let wfs = sc.workflows[rid] ?? []
+                    let wfs = sc.shownWorkflows(rid)
                     if wfs.isEmpty {
                         HStack {
                             Button("Load its workflows") { Task { await sc.loadWorkflows(rid) } }

@@ -37,6 +37,8 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
     var at = 16 * 60 + 35            // minutes after midnight IST
     var ownToken = false             // use its own Keychain token instead of the shared one
     var lastAutoDay = ""
+    var hidden: [Int]? = nil         // workflows removed from the app (still on GitHub)
+    func isHidden(_ wf: Int) -> Bool { hidden?.contains(wf) ?? false }
     var title: String { repo.isEmpty ? "New repository" : repo }
 
     /// "https://github.com/owner/repo.git", "github.com/owner/repo/", "owner/repo" → "owner/repo"
@@ -105,6 +107,20 @@ struct ScraperRepo: Identifiable, Codable, Equatable {
         return last
     }
     func update(_ id: UUID, _ f: (inout ScraperRepo) -> Void) { if let i = repos.firstIndex(where: { $0.id == id }) { f(&repos[i]) } }
+    /// Removes a workflow from the app (list, ticks, health check, chains pickers) — it stays on GitHub.
+    func hide(_ repo: UUID, _ wf: Int) {
+        update(repo) { r in
+            var h = r.hidden ?? []; if !h.contains(wf) { h.append(wf) }; r.hidden = h
+            r.selected.removeAll { $0 == wf }
+        }
+    }
+    func unhide(_ repo: UUID, _ wf: Int) { update(repo) { $0.hidden?.removeAll { $0 == wf } } }
+    /// The workflows shown for a repository (without the removed ones).
+    func shownWorkflows(_ id: UUID) -> [GHWorkflow] {
+        let all = workflows[id] ?? []
+        guard let r = repo(id) else { return all }
+        return all.filter { !r.isHidden($0.id) }
+    }
     func hasToken(_ r: ScraperRepo) -> Bool { !Keychain.get(r.tokenAccount).isEmpty }
 
     func request(_ r: ScraperRepo, _ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> (Data, Int) {
@@ -377,7 +393,8 @@ private struct RepoPanel: View {
     }
 
     var body: some View {
-        let wfs = sc.workflows[id] ?? []
+        let wfs = sc.shownWorkflows(id)
+        let removed = (sc.workflows[id] ?? []).filter { r.isHidden($0.id) }
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 GroupBox("Repository") {
@@ -421,7 +438,23 @@ private struct RepoPanel: View {
                                 if w.state != "active" { Text(w.state).font(.caption).foregroundStyle(.orange) }
                                 Spacer(minLength: 4)
                                 Button("Run now") { Task { await sc.run(id, [w.id]) } }.controlSize(.small).disabled(sc.busy.contains(id))
+                                Button { sc.hide(id, w.id) } label: { Image(systemName: "minus.circle") }
+                                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                    .help("Remove from the app — hidden from this list, the 18:00 check and chains (it stays on GitHub; restore below)")
                             }
+                        }
+                        if !removed.isEmpty {
+                            DisclosureGroup("Removed (\(removed.count))") {
+                                ForEach(removed) { w in
+                                    HStack {
+                                        Text(w.name).foregroundStyle(.secondary).lineLimit(1)
+                                        Text(w.file).font(.caption.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+                                        Spacer()
+                                        Button("Restore") { sc.unhide(id, w.id) }.controlSize(.small)
+                                    }
+                                }
+                            }
+                            .font(.caption)
                         }
                         if !wfs.isEmpty {
                             Divider()

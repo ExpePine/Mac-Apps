@@ -85,7 +85,8 @@ struct ScraperIssue: Identifiable, Equatable {
             guard let res = try? await sc.request(r, "/repos/\(r.repo)/actions/workflows?per_page=100"), res.1 == 200,
                   let wfs = try? JSONDecoder().decode(WL.self, from: res.0).workflows else { continue }
             sc.workflows[r.id] = wfs.sorted { $0.name < $1.name }
-            let watch = r.selected.isEmpty ? wfs : wfs.filter { r.selected.contains($0.id) }
+            let shown = wfs.filter { !r.isHidden($0.id) }
+            let watch = r.selected.isEmpty ? shown : shown.filter { r.selected.contains($0.id) }
             for w in watch {
                 if w.state != "active" {
                     found.append(ScraperIssue(repoID: r.id, repo: r.repo, workflowID: w.id, workflow: w.name, kind: .disabled, runURL: nil))
@@ -144,6 +145,8 @@ struct ScraperIssue: Identifiable, Equatable {
         }
     }
 
+    func drop(_ i: ScraperIssue) { issues.removeAll { $0.id == i.id } }
+
     func runAll() { for i in issues { if case .running = i.kind { continue }; runNow(i) } }
 }
 
@@ -187,6 +190,9 @@ struct ScraperHealthBanner: View {
                                 if let u = i.runURL.flatMap(URL.init(string:)) {
                                     Button { NSWorkspace.shared.open(u) } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless).help("Open the run on GitHub")
                                 }
+                                Button { ScraperCenter.shared.hide(i.repoID, i.workflowID); h.drop(i) } label: { Image(systemName: "minus.circle") }
+                                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                    .help("Not needed: remove this workflow from the app (stays on GitHub; restore in the Scraper window)")
                                 if h.acting.contains(i.id) { ProgressView().controlSize(.mini) }
                             }
                             .gridColumnAlignment(.leading)
