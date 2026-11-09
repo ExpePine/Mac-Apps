@@ -716,9 +716,9 @@ struct DeliveryColumns {
     private var computingKey: String?
 
     /// Fetches NSE's trading calendar (Yahoo ^NSEI daily bars, 5 years) and keeps it on disk.
-    func refreshCalendar() async {
+    func refreshCalendar(force: Bool = false) async {
         if calendar.isEmpty, let d = try? Data(contentsOf: Self.calendarURL), let c = try? JSONDecoder().decode([String].self, from: d) { calendar = c }
-        guard Date().timeIntervalSince(calendarCheckedAt) > 6 * 3600 else { return }
+        guard force || Date().timeIntervalSince(calendarCheckedAt) > 6 * 3600 else { return }
         calendarCheckedAt = Date()
         guard let s = try? await YahooClient.daily("^NSEI", range: "5y") else { return }
         let merged = Array(Set(calendar).union(s.days)).sorted()

@@ -10,6 +10,7 @@ struct DeliveryView: View {
     @ObservedObject private var dc = DeliveryCenter.shared
 
     @AppStorage("chart.styleRev") private var mainStyleRev = 0
+    @State private var showRepair = false
     @AppStorage("deliv.length") private var length = 300
     @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
     @AppStorage("deliv.jumpMode") private var jumpMode = 0
@@ -100,8 +101,9 @@ struct DeliveryView: View {
                 }
                 if dc.isLoading { HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Reading…").font(.caption) }.fixedSize() }
                 if !dc.isFetching && !dc.storedDays.isEmpty {
-                    Button("Check gaps") { dc.repairGaps() }.fixedSize()
-                        .help("Compares the stored days with NSE's trading calendar (NIFTY 50 trading days from Yahoo) and downloads any missing day")
+                    Button { showRepair = true } label: { Label("Check now", systemImage: "wrench.and.screwdriver") }.fixedSize()
+                        .help("Repair NSE data: re-reads the trading calendar, fetches every missing day from several NSE sources with retries, and fills single-stock holes")
+                        .sheet(isPresented: $showRepair) { NSERepairView().environmentObject(vm) }
                 }
                 Text(storedText).font(.caption).foregroundStyle(.secondary).fixedSize()
                 HStack(spacing: 4) {
