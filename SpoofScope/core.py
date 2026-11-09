@@ -29,7 +29,7 @@ def file_md5(path, chunk=1 << 20):
 
 
 def parse_name(path):
-    """Return (MAC, timestamp) from names like Imag_640x640_50_18C04D9A7660_11022025144641.jpg."""
+    """Return (MAC, timestamp) from names like Imag_640x640_50_AABBCCDDEEFF_01012025120000.jpg."""
     m = FNAME_RE.search(str(path))
     return (m.group(1).upper(), m.group(2)) if m else (None, None)
 
