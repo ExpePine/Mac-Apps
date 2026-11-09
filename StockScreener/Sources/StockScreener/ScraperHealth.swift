@@ -167,29 +167,33 @@ struct ScraperHealthBanner: View {
                     Button { Task { await h.check() } } label: { if h.checking { ProgressView().controlSize(.mini) } else { Text("Recheck") } }
                     Button { h.dismissToday() } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Hide until tomorrow")
                 }
-                ForEach(h.issues) { i in
-                    HStack(spacing: 8) {
-                        Circle().fill(i.color).frame(width: 7, height: 7)
-                        Text(i.workflow).fontWeight(.medium)
-                        Text(i.repo).font(.caption).foregroundStyle(.secondary)
-                        Text(i.text).font(.caption).foregroundStyle(i.color)
-                        Spacer()
-                        if h.acting.contains(i.id) { ProgressView().controlSize(.mini) }
-                        switch i.kind {
-                        case .disabled: Button("Enable & run") { h.runNow(i) }.disabled(h.acting.contains(i.id))
-                        case .notRun: Button("Run now") { h.runNow(i) }.disabled(h.acting.contains(i.id))
-                        case .failed: Button("Run again") { h.runNow(i) }.disabled(h.acting.contains(i.id))
-                        case .running: EmptyView()
+                // one grid: each row's buttons sit right after its status, in a column that lines up
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
+                    ForEach(h.issues) { i in
+                        GridRow {
+                            Circle().fill(i.color).frame(width: 7, height: 7)
+                            Text(i.workflow).fontWeight(.medium).lineLimit(1)
+                            Text(i.repo).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(i.text).font(.caption).foregroundStyle(i.color).lineLimit(1)
+                            HStack(spacing: 6) {
+                                switch i.kind {
+                                case .disabled: Button("Enable & run") { h.runNow(i) }.disabled(h.acting.contains(i.id))
+                                case .notRun: Button("Run now") { h.runNow(i) }.disabled(h.acting.contains(i.id))
+                                case .failed: Button("Run again") { h.runNow(i) }.disabled(h.acting.contains(i.id))
+                                case .running: EmptyView()
+                                }
+                                Button("Open") { h.focusRepo = i.repoID; openWindow(id: "scraper") }
+                                    .help("Open this repository in the Scraper window")
+                                if let u = i.runURL.flatMap(URL.init(string:)) {
+                                    Button { NSWorkspace.shared.open(u) } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless).help("Open the run on GitHub")
+                                }
+                                if h.acting.contains(i.id) { ProgressView().controlSize(.mini) }
+                            }
+                            .gridColumnAlignment(.leading)
                         }
-                        if let u = i.runURL.flatMap(URL.init(string:)) {
-                            Button { NSWorkspace.shared.open(u) } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless).help("Open the run on GitHub")
-                        }
-                        Button("Open") { h.focusRepo = i.repoID; openWindow(id: "scraper") }
-                            .help("Open this repository in the Scraper window")
+                        .controlSize(.small)
                     }
-                    .controlSize(.small)
                 }
-            }
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(Color.orange.opacity(0.12))
         }
