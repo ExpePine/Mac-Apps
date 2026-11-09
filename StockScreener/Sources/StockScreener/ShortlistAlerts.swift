@@ -121,9 +121,8 @@ extension ScreenerViewModel {
         return (map, t)
     }
 
-    /// Columns the app recomputes for stored days (delivery analysis).
-    static let deliveryNames = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3"]
-    private static var truthCache: [String: Set<String>] = [:]
+    private static var truthCache: [String: Set<String>?] = [:]
+    private static var truthCacheVersion = 2
 
     /// Symbols for which the whole formula (shortlist AND the conditions) holds in `t`.
     nonisolated static func holdsSet(_ a: ShortlistAlert, t: SheetTable, label: Int) -> Set<String> {
@@ -139,19 +138,37 @@ extension ScreenerViewModel {
     }
 
     private func needsDelivery(_ a: ShortlistAlert) -> Bool {
-        ([a.shortlistColumn] + a.conditions.map(\.column)).contains { c in Self.deliveryNames.contains { c.hasPrefix($0) } }
+        ([a.shortlistColumn] + a.conditions.map(\.column)).contains { Self.isDeliveryColumn($0) }
     }
 
-    /// The formula on a stored day (cached).
-    func storedTruth(_ a: ShortlistAlert, day: String) -> Set<String> {
-        let key = a.signature + "|" + day + "|\(table.headers.count)"
+    /// Columns the alert uses that have no value at all in `t` (not stored for past days) — that day can't be judged.
+    nonisolated static func blankColumns(_ a: ShortlistAlert, t: SheetTable) -> [String] {
+        let used = [a.shortlistColumn] + a.conditions.map(\.column)
+        var seen = Set<String>(), out: [String] = []
+        for c in used where seen.insert(c).inserted {
+            guard let i = t.index(of: c) else { out.append(c); continue }
+            if !t.rows.contains(where: { $0.number(i) != nil }) { out.append(c) }
+        }
+        return out
+    }
+
+    /// The formula on a stored day (cached). nil = can't be judged (a column it uses wasn't stored that day).
+    func storedTruth(_ a: ShortlistAlert, day: String) -> Set<String>? {
+        let key = a.signature + "|" + day + "|\(table.headers.count)|\(Self.truthCacheVersion)"
         if let c = Self.truthCache[key] { return c }
-        guard let label = labelIndex, let data = HistoryStore.load(day), var t = ScreenerViewModel.align(data, to: table) else { return [] }
+        guard let label = labelIndex, let data = HistoryStore.load(day), var t = ScreenerViewModel.align(data, to: table) else { return nil }
         if needsDelivery(a) { t = withDeliveryValues(t, asOf: day) }
-        let s = Self.holdsSet(a, t: t, label: label)
+        let s: Set<String>? = Self.blankColumns(a, t: t).isEmpty ? Self.holdsSet(a, t: t, label: label) : nil
         if Self.truthCache.count > 600 { Self.truthCache.removeAll() }
         Self.truthCache[key] = s
         return s
+    }
+
+    /// Columns of this alert that past stored days don't have (so "just became true" can't be checked on them).
+    func shortlistBlankColumns(_ a: ShortlistAlert) -> [String] {
+        guard let d = storedDaysBeforeLive.last, let data = HistoryStore.load(d), var t = ScreenerViewModel.align(data, to: table) else { return [] }
+        if needsDelivery(a) { t = withDeliveryValues(t, asOf: d) }
+        return Self.blankColumns(a, t: t)
     }
 
     /// Stored days before the live data day, oldest first.
@@ -169,10 +186,13 @@ extension ScreenerViewModel {
             let back = Array(storedDaysBeforeLive.suffix(alert.n).reversed())        // most recent first
             if !back.isEmpty {                                                       // no stored day yet: everything is new
                 for k in 0..<(alert.n - 1) {
-                    guard k < back.count else { hit = []; break }
-                    hit.formIntersection(storedTruth(alert, day: back[k]))
+                    guard k < back.count, let s = storedTruth(alert, day: back[k]) else { hit = []; break }
+                    hit.formIntersection(s)
                 }
-                if alert.n - 1 < back.count { hit.subtract(storedTruth(alert, day: back[alert.n - 1])) }
+                if alert.n - 1 < back.count {
+                    // the day before the run: unknown (column not stored) → don't claim "became true"
+                    if let s = storedTruth(alert, day: back[alert.n - 1]) { hit.subtract(s) } else { hit = [] }
+                }
             }
         }
         guard !hit.isEmpty else { return [] }
@@ -184,16 +204,16 @@ extension ScreenerViewModel {
         guard let label = labelIndex else { return ShortlistBacktest(fires: [], days: 0) }
         let days = storedDaysBeforeLive
         let liveKey = HistoryStore.dayKey(dataDay(of: table))
-        var truths: [Set<String>] = []
+        var truths: [Set<String>?] = []
         for (i, d) in days.enumerated() {
-            let key = a.signature + "|" + d + "|\(table.headers.count)"
+            let key = a.signature + "|" + d + "|\(table.headers.count)|\(Self.truthCacheVersion)"
             if let c = Self.truthCache[key] { truths.append(c) }
             else {
                 let current = table
                 let t0 = await Task.detached(priority: .userInitiated) { HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) } }.value
-                guard var t = t0 else { truths.append([]); continue }
+                guard var t = t0 else { truths.append(nil); continue }
                 if needsDelivery(a) { t = withDeliveryValues(t, asOf: d) }
-                let s = Self.holdsSet(a, t: t, label: label)
+                let s: Set<String>? = Self.blankColumns(a, t: t).isEmpty ? Self.holdsSet(a, t: t, label: label) : nil
                 Self.truthCache[key] = s
                 truths.append(s)
             }
@@ -204,15 +224,17 @@ extension ScreenerViewModel {
         var fires: [ShortlistFire] = []
         let n = a.becomes ? a.n : 1
         for i in allDays.indices where i >= n {
-            var hit = truths[i]
+            // every day of the run and the day before it must be known (columns stored)
+            guard var hit = truths[i], (0...n).allSatisfy({ truths[i - $0] != nil }) else { continue }
             if a.becomes {
-                for k in 1..<n { hit.formIntersection(truths[i - k]) }
-                hit.subtract(truths[i - n])
+                for k in 1..<n { hit.formIntersection(truths[i - k]!) }
+                hit.subtract(truths[i - n]!)
             }
             for sym in hit.sorted() { fires.append(fire(sym, day: allDays[i])) }
         }
         progress(1)
-        return ShortlistBacktest(fires: fires.sorted { $0.day == $1.day ? $0.symbol < $1.symbol : $0.day > $1.day }, days: allDays.count)
+        return ShortlistBacktest(fires: fires.sorted { $0.day == $1.day ? $0.symbol < $1.symbol : $0.day > $1.day },
+                                 days: truths.filter { $0 != nil }.count)
     }
 
     /// % moves after `day` from the stock's close that day (Yahoo closes, else NSE's).
@@ -296,6 +318,7 @@ struct ShortlistAlertsEditor: View {
     @State private var alerts: [ShortlistAlert] = ShortlistStore.all
     @State private var preview: [UUID: [String]] = [:]
     @State private var tests: [UUID: ShortlistBacktest] = [:]
+    @State private var blanks: [UUID: [String]] = [:]
     @State private var testing: [UUID: Double] = [:]
     @State private var showFires: UUID?
     @Environment(\.openWindow) private var openWindow
@@ -367,6 +390,10 @@ struct ShortlistAlertsEditor: View {
                             }
                             .controlSize(.small)
                             Text("Fires when the formula is \(a.fireText).").font(.caption).foregroundStyle(.secondary)
+                            if a.becomes, let b = blanks[a.id], !b.isEmpty {
+                                Text("⚠︎ \(b.joined(separator: ", ")) isn't saved for past days, so \"just became true\" can't be checked — this alert won't fire until those days exist.")
+                                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                            }
                             historyRow(a)
                         }
                         .padding(10)
@@ -389,6 +416,11 @@ struct ShortlistAlertsEditor: View {
         }
         .padding(20)
         .frame(minWidth: 860, idealWidth: 920, minHeight: 600, idealHeight: 720)
+        .task(id: alerts.map { $0.signature }.joined(separator: ";")) {
+            var b: [UUID: [String]] = [:]
+            for a in alerts { b[a.id] = vm.shortlistBlankColumns(a) }
+            blanks = b
+        }
     }
 
     /// "Test on history": every past firing on your stored days and the % move after it.

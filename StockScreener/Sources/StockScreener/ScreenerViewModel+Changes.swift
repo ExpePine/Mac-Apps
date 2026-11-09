@@ -35,25 +35,58 @@ extension ScreenerViewModel {
     }
 
     /// A stored day's table with the delivery columns (DLVR / Safety / DQ_PRANK) as they were on that day.
+    /// Every column the app computes from NSE delivery data (stored snapshots hold only the sheet, so these are
+    /// empty for past days until recomputed here).
+    static let deliveryColumnNames = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3",
+                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C"]
+    static func isDeliveryColumn(_ h: String) -> Bool {
+        let base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
+        return deliveryColumnNames.contains(base)
+    }
+
+    /// The delivery columns as they were on `day` (C/DL2C = that day's close ÷ that day's DEL2C).
     func withDeliveryValues(_ t: SheetTable, asOf day: String) -> SheetTable {
         let dc = DeliveryCenter.shared
         guard !dc.storedDays.isEmpty, let label = labelIndex else { return t }
-        let names = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "t3Color (NSE)", "HI/T3", "HI/T3 (NSE)", "DLVR (NSE)", "Safety (NSE)", "DQ_PRANK (NSE)", "JUMP (NSE)", "DELSMA (NSE)", "STREAK (NSE)"]
-        let idx = names.compactMap { n in t.headers.firstIndex(of: n).map { (n, $0) } }
+        let idx = t.headers.enumerated().filter { Self.isDeliveryColumn($0.element) }.map { (n: $0.element.hasSuffix(" (NSE)") ? String($0.element.dropLast(6)) : $0.element, i: $0.offset) }
         guard !idx.isEmpty else { return t }
         let cols = DeliveryColumns.all(dc.book, asOf: day)
         let rows = t.rows.map { r -> SheetRow in
             var cells = r.cells, nums = r.numbers
-            let c = cols[r.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
+            let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+            let c = cols[sym]
             for (n, i) in idx where i < cells.count {
-                let v: Double?
-                if n.hasPrefix("DLVR") { v = c?.dlvr ?? 0 } else if n.hasPrefix("Safety") { v = c?.safety } else if n.hasPrefix("JUMP") { v = c?.jump } else if n.hasPrefix("DELSMA") { v = c?.delSma } else if n.hasPrefix("STREAK") { v = c?.streak.map(Double.init) } else if n.hasPrefix("t3Color") { v = c?.t3Color.map(Double.init) } else if n.hasPrefix("HI/T3") { v = c?.hiT3 } else { v = c?.pctRank }
-                cells[i] = v.map { n.hasPrefix("DLVR") ? ($0 == 0 ? "0" : String(format: "%.2f", $0)) : (n.hasPrefix("Safety") || n.hasPrefix("STREAK") || n.hasPrefix("t3Color") ? String(format: "%.0f", $0) : (n.hasPrefix("JUMP") || n.hasPrefix("HI/T3") ? String(format: "%.2f", $0) : String(format: "%.1f", $0))) } ?? ""
+                let v: Double?, f: String
+                switch n {
+                case "DLVR": v = c?.dlvr ?? 0; f = "%.2f"
+                case "Safety": v = c?.safety; f = "%.0f"
+                case "DQ_PRANK": v = c?.pctRank; f = "%.1f"
+                case "JUMP": v = c?.jump; f = "%.2f"
+                case "DELSMA": v = c?.delSma; f = "%.1f"
+                case "STREAK": v = c?.streak.map(Double.init); f = "%.0f"
+                case "t3Color": v = c?.t3Color.map(Double.init); f = "%.0f"
+                case "HI/T3": v = c?.hiT3; f = "%.2f"
+                case "DAYS_DELSMA": v = c?.delsmaDays.map(Double.init); f = "%.0f"
+                case "DELSMAC": v = c?.delSmaC; f = "%.2f"
+                case "DEL2": v = c?.del2; f = "%.1f"
+                case "DEL2C": v = c?.del2c; f = "%.2f"
+                default:                                   // C/DL2C on that day
+                    let close = Self.close(of: sym, on: day, prices: priceBook.series(for: sym), nse: dc.book.series[sym])
+                    v = (close != nil && (c?.del2c ?? 0) > 0) ? close! / c!.del2c! : nil; f = "%.3f"
+                }
+                cells[i] = v.map { n == "DLVR" && $0 == 0 ? "0" : String(format: f, $0) } ?? ""
                 nums[i] = v
             }
             return SheetRow(id: r.id, cells: cells, numbers: nums)
         }
         return SheetTable(headers: t.headers, rows: rows, originalHeaders: t.originalHeaders)
+    }
+
+    /// Close on (or the last trading day before) `day`: Yahoo, else NSE.
+    nonisolated static func close(of sym: String, on day: String, prices: PriceSeries?, nse: DeliverySeries?) -> Double? {
+        if let p = prices, let i = p.days.lastIndex(where: { $0 <= day }), i < p.closes.count { return p.closes[i] }
+        if let s = nse, let i = s.days.lastIndex(where: { $0 <= day }), i < s.close.count { return s.close[i] }
+        return nil
     }
 
     /// Recomputes every card: live data vs the chosen (or previous) stored day.
