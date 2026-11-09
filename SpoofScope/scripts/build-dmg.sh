@@ -6,7 +6,7 @@ EXTRA=()
 if [ -f models/dinov2_small_560.onnx ]; then EXTRA+=(--add-data "models/dinov2_small_560.onnx:models"); fi
 pyinstaller --noconfirm --windowed --name SpoofScope \
   --osx-bundle-identifier com.raj.SpoofScope \
-  --add-data "app.py:." \
+  --add-data "app.py:appsrc" \
   --collect-all streamlit \
   --copy-metadata streamlit \
   --collect-submodules sklearn \

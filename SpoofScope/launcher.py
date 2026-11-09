@@ -6,6 +6,54 @@ def _base():
     return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 
 
+def _app_path():
+    p = os.path.join(_base(), "appsrc", "app.py")
+    return p if os.path.exists(p) else os.path.join(_base(), "app.py")
+
+
+URL = "http://localhost:8501"
+
+
+def _healthy():
+    import urllib.request
+    try:
+        with urllib.request.urlopen(URL + "/_stcore/health", timeout=1) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _notify(msg):
+    if sys.platform == "darwin":
+        import subprocess
+        try:
+            subprocess.Popen(["osascript", "-e", f'display notification "{msg}" with title "SpoofScope"'])
+        except Exception:
+            pass
+
+
+def _open_when_ready():
+    import time, subprocess, webbrowser
+    for _ in range(240):
+        if _healthy():
+            try:
+                subprocess.Popen(["open", URL]) if sys.platform == "darwin" else webbrowser.open(URL)
+            except Exception:
+                pass
+            return
+        time.sleep(0.5)
+
+
+class _Tee:
+    def __init__(self, *s): self.s = s
+    def write(self, x):
+        for f in self.s:
+            try: f.write(x); f.flush()
+            except Exception: pass
+    def flush(self): pass
+    def isatty(self): return False
+
+
 def _pyinstaller_hints():   # never called; makes PyInstaller bundle everything app.py needs
     import config, core, pipeline                                     # noqa
     import numpy, scipy.ndimage, pandas, joblib, cv2                  # noqa
@@ -85,17 +133,33 @@ def selftest():
     elif os.environ.get("SPOOFSCOPE_REQUIRE_DINO"):
         raise RuntimeError("DINOv2 model or onnxruntime missing")
     from streamlit.testing.v1 import AppTest
-    at = AppTest.from_file(os.path.join(_base(), "app.py"), default_timeout=180).run()
+    at = AppTest.from_file(_app_path(), default_timeout=180).run()
     if at.exception:
         raise RuntimeError(f"app raised: {[e.value for e in at.exception]}")
     print(f"SELFTEST app OK ({len(at.tabs)} tabs)")
     print("SELFTEST PASSED")
 
 
+def apptest_fresh():
+    """Run app.py exactly as the server would, in a process where nothing is pre-imported."""
+    import tempfile
+    os.environ["HOME"] = tempfile.mkdtemp(prefix="spoofscope_apptest_")
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(_app_path(), default_timeout=180).run()
+    if at.exception:
+        raise RuntimeError(f"app raised: {[e.value for e in at.exception]}")
+    print(f"APPTEST fresh OK ({len(at.tabs)} tabs)")
+
+
 def main():
     multiprocessing.freeze_support()
     if "--selftest" in sys.argv:
         selftest(); return
+    if "--apptest" in sys.argv:
+        apptest_fresh(); return
+    if _healthy():                      # already running: just bring up the page
+        _notify("SpoofScope is already running - opening it in your browser.")
+        import subprocess; subprocess.Popen(["open", URL]); return
     home = os.path.join(os.path.expanduser("~"), "SpoofScope")
     os.makedirs(home, exist_ok=True)
     os.chdir(home)
@@ -107,11 +171,18 @@ def main():
             pass
     if getattr(sys, "frozen", False):
         log = open(os.path.join(home, "launcher.log"), "a", buffering=1)
-        sys.stdout = sys.stderr = log
+        tee = _Tee(log, sys.__stdout__) if sys.__stdout__ and sys.__stdout__.isatty() else log
+        sys.stdout = sys.stderr = tee
+    print("SpoofScope starting ...")
+    _notify("Starting... your browser will open in a few seconds.")
+    import cv2, core, pipeline          # load the heavy libraries once, from the bundle  # noqa
+    if not os.environ.get("SPOOFSCOPE_HEADLESS"):
+        import threading
+        threading.Thread(target=_open_when_ready, daemon=True).start()
     from streamlit.web import cli as stcli
-    sys.argv = ["streamlit", "run", os.path.join(_base(), "app.py"),
+    sys.argv = ["streamlit", "run", _app_path(),
                 "--global.developmentMode=false", "--browser.gatherUsageStats=false",
-                "--server.headless=" + ("true" if os.environ.get("SPOOFSCOPE_HEADLESS") else "false")]
+                "--server.port=8501", "--server.headless=true"]
     sys.exit(stcli.main())
 
 

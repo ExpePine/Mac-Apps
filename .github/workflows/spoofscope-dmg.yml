@@ -76,6 +76,9 @@ jobs:
           SPOOFSCOPE_REQUIRE_DINO: "1"
         run: ./dist/SpoofScope.app/Contents/MacOS/SpoofScope --selftest
 
+      - name: App page runs in a fresh process (bundled app)
+        run: ./dist/SpoofScope.app/Contents/MacOS/SpoofScope --apptest
+
       - name: Server starts (bundled app)
         run: |
           SPOOFSCOPE_HEADLESS=1 ./dist/SpoofScope.app/Contents/MacOS/SpoofScope &
