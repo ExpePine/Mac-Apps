@@ -13,6 +13,7 @@ def _pyinstaller_hints():   # never called; makes PyInstaller bundle everything 
     import sklearn.model_selection, sklearn.metrics                   # noqa
     import skimage.feature                                            # noqa
     import streamlit, streamlit.web.cli, streamlit.testing.v1         # noqa
+    import onnxruntime, sklearn.decomposition                         # noqa
 
 
 def _synthetic_dataset(root, n_per=12):
@@ -32,7 +33,8 @@ def _synthetic_dataset(root, n_per=12):
                 cx, cy = rng.integers(200, 440, 2)
                 img[(xx - cx) ** 2 + (yy - cy) ** 2 < rng.uniform(9, 40)] = 0.95 if m_i else 0.05
             ts = f"1102202512{k:02d}{m_i:02d}"
-            cv2.imwrite(os.path.join(d, f"Imag_640x640_50_{mac}_{ts}.jpg"), (np.clip(img, 0, 1) * 255).astype("uint8"))
+            ext = ".bmp" if m_i else ".jpg"     # cover both BMP and JPG inputs
+            cv2.imwrite(os.path.join(d, f"Imag_640x640_50_{mac}_{ts}{ext}"), (np.clip(img, 0, 1) * 255).astype("uint8"))
             for v in ("V1", "V2"):
                 fl = int(rng.random() < 0.4)
                 rows.append({"Version": v, "MAC ID": mac, " ImageName": int(ts), " Quality": 50,
@@ -67,6 +69,21 @@ def selftest():
         regs = core.find_regions(models, f, b, sm, 0.7)
         core.overlay(g, sm, regs); core.evidence_search(sm, 0.5)
     print(f"SELFTEST pipeline OK in {time.time() - t:.0f}s")
+    if core.dino_available():
+        t = time.time()
+        tok = core.dino_tokens(g)
+        assert tok.shape == (core.N, core.N, core.DINO_DIM), tok.shape
+        s["backend"] = "dino"; config.save(s)
+        n, errs = pipeline.extract(progress=lambda d, t_: None)
+        assert n == 24 and not errs, errs
+        rep = pipeline.train()
+        m2 = joblib.load(os.path.join(config.WORK_DIR, "models.joblib"))
+        f2, b2 = core.compute_features(g, "dino", m2["pca"])
+        assert f2.shape[-1] == len(core.feature_names("dino")), f2.shape
+        core.head_scores(m2, f2, b2, "hard_case")
+        print(f"SELFTEST dino OK in {time.time() - t:.0f}s ({(time.time() - t) / 24:.1f}s/image incl. PCA+train)")
+    elif os.environ.get("SPOOFSCOPE_REQUIRE_DINO"):
+        raise RuntimeError("DINOv2 model or onnxruntime missing")
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(os.path.join(_base(), "app.py"), default_timeout=180).run()
     if at.exception:
@@ -82,6 +99,12 @@ def main():
     home = os.path.join(os.path.expanduser("~"), "SpoofScope")
     os.makedirs(home, exist_ok=True)
     os.chdir(home)
+    if sys.platform == "darwin":      # keep the Mac awake while the app runs (overnight extraction)
+        import subprocess
+        try:
+            subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+        except Exception:
+            pass
     if getattr(sys, "frozen", False):
         log = open(os.path.join(home, "launcher.log"), "a", buffering=1)
         sys.stdout = sys.stderr = log

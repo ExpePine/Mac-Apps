@@ -12,7 +12,34 @@ permissions:
   contents: write
 
 jobs:
+  export-dino:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: dino
+          key: dinov2-small-560-${{ hashFiles('SpoofScope/scripts/export_dino.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.11"
+      - name: Export DINOv2-small to ONNX
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers onnx onnxruntime
+          mkdir -p dino
+          python SpoofScope/scripts/export_dino.py dino/dinov2_small_560.onnx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dinov2-onnx
+          path: dino/dinov2_small_560.onnx
+
   build:
+    needs: export-dino
     runs-on: macos-15-intel        # Intel (x86_64) build for a 2019 MacBook Pro
     timeout-minutes: 60
     defaults:
@@ -20,6 +47,11 @@ jobs:
         working-directory: SpoofScope
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dinov2-onnx
+          path: SpoofScope/models
 
       - uses: actions/setup-python@v5
         with:
@@ -32,12 +64,16 @@ jobs:
           python -c "import platform; print(platform.machine(), platform.mac_ver())"
 
       - name: Self-test (plain Python)
+        env:
+          SPOOFSCOPE_REQUIRE_DINO: "1"
         run: python launcher.py --selftest
 
       - name: Build app and DMG
         run: ./scripts/build-dmg.sh
 
       - name: Self-test (bundled app)
+        env:
+          SPOOFSCOPE_REQUIRE_DINO: "1"
         run: ./dist/SpoofScope.app/Contents/MacOS/SpoofScope --selftest
 
       - name: Server starts (bundled app)
@@ -63,5 +99,5 @@ jobs:
           gh release delete spoofscope-latest --yes --cleanup-tag || true
           gh release create spoofscope-latest dist/SpoofScope.dmg \
             --title "SpoofScope (latest, build ${{ github.run_number }})" \
-            --notes "Intel (x86_64) build. Drag SpoofScope to Applications. First launch: right-click > Open, or System Settings > Privacy & Security > Open Anyway. It opens in your web browser." \
+            --notes "Intel (x86_64) build, macOS 14+. Includes DINOv2-small (Apache-2.0). Drag SpoofScope to Applications. First launch: right-click > Open, or System Settings > Privacy & Security > Open Anyway. It opens in your web browser." \
             --latest=false

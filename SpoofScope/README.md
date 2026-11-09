@@ -21,6 +21,14 @@ Runs entirely on your Mac (no internet, no GPU). Opens in your web browser.
 Everything SpoofScope creates lives in `~/SpoofScope` (settings, features, trained models, `launcher.log`).
 Your images are only read, never changed or copied.
 
+## Feature backends (Setup tab)
+- **Classic**: 31 hand-designed measurements per 16x16 patch. About 0.5-1 s per image.
+- **DINOv2 + classic**: adds DINOv2-small (Meta's self-supervised vision foundation model, Apache-2.0),
+  run locally with ONNX Runtime. Each patch gets 96 extra learned numbers (PCA of the 384-number token).
+  Slower (expect a few seconds per image on a 2019 Intel MacBook); run it overnight.
+  SpoofScope keeps the Mac awake while it runs; keep it plugged in and the lid open.
+Images can be BMP, JPG, PNG or TIFF.
+
 ## Heads
 - `rarity`: how unusual a patch is (unsupervised)
 - `hard_case`: patches like those in spoofs that fooled the production model (needs `Model_*.csv` files in the data folder)

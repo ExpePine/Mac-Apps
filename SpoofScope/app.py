@@ -35,7 +35,7 @@ def load_long():
 
 
 def analyse(g, models, head, thr, img_thr, min_patches=1):
-    feats, bmask = core.patch_features(g)
+    feats, bmask = core.compute_features(g, models.get("backend", "classic"), models.get("pca"))
     sm = core.head_scores(models, feats, bmask, head)
     regions = core.find_regions(models, feats, bmask, sm, thr, min_patches)
     ev = core.evidence_search(sm, img_thr)
@@ -82,15 +82,26 @@ with tab_setup:
     live = st.multiselect("Materials that are LIVE fingers (leave empty if none)",
                           sorted(set(mats_known) | set(SETTINGS.get("live_materials", []))),
                           default=SETTINGS.get("live_materials", []))
+    dino_ok = core.dino_available()
+    opts = ["classic", "dino"] if dino_ok else ["classic"]
+    backend = st.radio("Feature backend", opts, index=opts.index(SETTINGS.get("backend", "classic")) if SETTINGS.get("backend", "classic") in opts else 0,
+                       format_func=lambda b: {"classic": "Classic (fast, ~0.5-1 s/image)",
+                                              "dino": "DINOv2 + classic (foundation model, slower: run overnight)"}[b],
+                       horizontal=True)
+    if not dino_ok:
+        st.caption("DINOv2 model not found in this build; only the classic backend is available.")
     if st.button("Save settings"):
+        SETTINGS["backend"] = backend
         SETTINGS["data_root"], SETTINGS["live_materials"] = root, live
         config.save(SETTINGS)
         st.success("Saved.")
 
     st.subheader("2. Build")
-    n_feat = len(glob.glob(os.path.join(W, "feats", "*.npz")))
+    n_feat = len(glob.glob(os.path.join(pipeline.feat_dir(SETTINGS.get("backend", "classic")), "*.npz")))
     st.write(f"Indexed images: **{0 if idx is None else len(idx)}**, with features: **{n_feat}**, "
-             f"model trained: **{'yes' if models is not None else 'no'}**")
+             f"model trained: **{'yes (' + models.get('backend', 'classic') + ')' if models is not None else 'no'}**")
+    st.caption("Your Mac is kept awake while SpoofScope runs, so overnight runs are not interrupted by sleep "
+               "(keep it plugged in; closing the lid of a laptop without an external display still sleeps it).")
     quick = st.checkbox("Quick test (first ~200 images only)", value=False)
     c1, c2, c3, c4 = st.columns(4)
     do_idx, do_ext, do_tr, do_all = c1.button("Index data"), c2.button("Extract features"), c3.button("Train"), c4.button("Run all 3")
@@ -103,9 +114,11 @@ with tab_setup:
 
     try:
         if do_idx or do_all:
-            SETTINGS["data_root"], SETTINGS["live_materials"] = root, live
+            SETTINGS["data_root"], SETTINGS["live_materials"], SETTINGS["backend"] = root, live, backend
             config.save(SETTINGS)
             pipeline.build_index(root, SETTINGS, log)
+        if do_ext or do_tr:
+            SETTINGS["backend"] = backend; config.save(SETTINGS)
         if do_ext or do_all:
             bar = st.progress(0.0, text="Extracting features")
             pipeline.extract(limit=200 if quick else 0,

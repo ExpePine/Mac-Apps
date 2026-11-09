@@ -4,3 +4,4 @@ __pycache__/
 *.spec
 work/
 .venv/
+models/*.onnx

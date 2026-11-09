@@ -2,6 +2,8 @@
 # Builds dist/SpoofScope.app and dist/SpoofScope.dmg (run on macOS from the SpoofScope folder).
 set -euo pipefail
 rm -rf build dist
+EXTRA=()
+if [ -f models/dinov2_small_560.onnx ]; then EXTRA+=(--add-data "models/dinov2_small_560.onnx:models"); fi
 pyinstaller --noconfirm --windowed --name SpoofScope \
   --osx-bundle-identifier com.raj.SpoofScope \
   --add-data "app.py:." \
@@ -9,6 +11,8 @@ pyinstaller --noconfirm --windowed --name SpoofScope \
   --copy-metadata streamlit \
   --collect-submodules sklearn \
   --collect-submodules skimage.feature \
+  --collect-all onnxruntime \
+  ${EXTRA[@]+"${EXTRA[@]}"} \
   launcher.py
 
 APP="dist/SpoofScope.app"

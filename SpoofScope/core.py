@@ -1,6 +1,6 @@
 """SpoofScope core: per-patch feature extraction and inference.
 Pure numpy / scipy / OpenCV / scikit-image. No deep-learning framework needed."""
-import re, hashlib
+import os, sys, re, hashlib, importlib.util
 import numpy as np, cv2
 from scipy import ndimage as ndi
 from skimage.feature import local_binary_pattern
@@ -153,6 +153,60 @@ def patch_features(g, mask=None):
                        ridge_band, ridge_period, bright_blob, dark_blob, cross_line, rel_contrast,
                        lbp_h, nb(mean), nb(std), nb(coh), nb(ridge_band), nb(dark), nb(white)]).astype(np.float32)
     return feats, bmask
+
+
+# ---------------------------------------------------------------- DINOv2 (optional, ONNX)
+DINO_INPUT = 560                 # 560 / 14 = 40 -> one token per 16x16 patch of the 640 image
+DINO_DIM = 384
+DINO_PCS = 96                    # tokens are reduced to this many numbers per patch (PCA)
+_MEAN = np.array([0.485, 0.456, 0.406], np.float32)[:, None, None]
+_STD = np.array([0.229, 0.224, 0.225], np.float32)[:, None, None]
+_SESSION = None
+
+
+def dino_model_path():
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "models", "dinov2_small_560.onnx")
+
+
+def dino_available():
+    return os.path.exists(dino_model_path()) and importlib.util.find_spec("onnxruntime") is not None
+
+
+def _session():
+    global _SESSION
+    if _SESSION is None:
+        import onnxruntime as ort
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = os.cpu_count() or 4
+        _SESSION = ort.InferenceSession(dino_model_path(), so, providers=["CPUExecutionProvider"])
+    return _SESSION
+
+
+def dino_tokens(g):
+    """DINOv2-small patch tokens: array [N, N, 384]."""
+    x = cv2.resize(g, (DINO_INPUT, DINO_INPUT), interpolation=cv2.INTER_AREA)
+    x = (np.repeat(x[None], 3, 0) - _MEAN) / _STD
+    s = _session()
+    out = s.run(None, {s.get_inputs()[0].name: x[None].astype(np.float32)})[0][0]
+    side = int(round((out.shape[0] - 1) ** 0.5))
+    tok = out[out.shape[0] - side * side:]          # drop CLS (and any register) tokens
+    return tok.reshape(side, side, -1)
+
+
+def feature_names(backend):
+    return FEATURE_NAMES + ([f"dino_pc{i}" for i in range(DINO_PCS)] if backend == "dino" else [])
+
+
+def compute_features(g, backend="classic", pca=None):
+    """Classic 31 features, plus (backend='dino') 96 PCA-reduced DINOv2 numbers per patch."""
+    f, b = patch_features(g)
+    if backend == "dino":
+        t = dino_tokens(g)
+        if pca is not None:
+            t = pca.transform(t.reshape(-1, t.shape[-1])).reshape(N, N, -1)
+        f = np.dstack([f, t.astype(np.float32)])
+    return f, b
 
 
 # ---------------------------------------------------------------- inference

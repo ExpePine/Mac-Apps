@@ -92,16 +92,45 @@ def build_index(root, settings=None, log=print):
     return idx
 
 
-FEAT_DIR = os.path.join(config.WORK_DIR, "feats")
+def feat_dir(backend):
+    return os.path.join(config.WORK_DIR, "feats" if backend == "classic" else "feats_" + backend)
 
 
-def _extract_one(row):
-    out = os.path.join(FEAT_DIR, row["id"] + ".npz")
+def backend_now():
+    b = config.load().get("backend", "classic")
+    return b if (b == "classic" or core.dino_available()) else "classic"
+
+
+def load_pca(backend):
+    p = os.path.join(feat_dir(backend), "pca.joblib")
+    return joblib.load(p) if os.path.exists(p) else None
+
+
+def _fit_pca(rows, backend, log):
+    """Fit the DINOv2 token -> 96-number PCA on a sample of up to 120 images."""
+    from sklearn.decomposition import PCA
+    rng_ = np.random.default_rng(1)
+    pick = [rows[i] for i in rng_.choice(len(rows), min(120, len(rows)), replace=False)]
+    T = []
+    for i, r in enumerate(pick):
+        g = core.load_gray(r["path"])
+        _, b = core.patch_features(g)
+        T.append(core.dino_tokens(g)[b])
+        log(f"PCA sample {i + 1}/{len(pick)}") if (i + 1) % 20 == 0 else None
+    T = np.concatenate(T)
+    pca = PCA(n_components=core.DINO_PCS, random_state=0).fit(T)
+    joblib.dump(pca, os.path.join(feat_dir(backend), "pca.joblib"))
+    log(f"PCA fitted on {len(T)} patches; {pca.explained_variance_ratio_.sum():.0%} of DINOv2 variance kept")
+    return pca
+
+
+def _extract_one(row, backend="classic", pca=None):
+    out = os.path.join(feat_dir(backend), row["id"] + ".npz")
     if os.path.exists(out):
         return "skip"
     try:
         g = core.load_gray(row["path"])
-        f, b = core.patch_features(g)
+        f, b = core.compute_features(g, backend, pca)
         np.savez_compressed(out, feats=f.astype(np.float16), bmask=b)
         return "ok"
     except Exception as e:
@@ -112,20 +141,25 @@ def read_index():
     return pd.read_csv(os.path.join(config.WORK_DIR, "index.csv"), dtype={"ts": str})
 
 
-def extract(limit=0, progress=None, log=print):
+def extract(limit=0, progress=None, log=print, backend=None):
     """Compute patch features for indexed images (resumable). progress(done, total) is optional."""
-    os.makedirs(FEAT_DIR, exist_ok=True)
+    backend = backend or backend_now()
+    os.makedirs(feat_dir(backend), exist_ok=True)
     idx = read_index()
     if limit:
         idx = idx.groupby("material", group_keys=False).apply(lambda d: d.head(max(1, limit // idx.material.nunique())))
     rows = idx.to_dict("records")
     t = time.time()
-    if progress is None and config.N_JOBS > 1:
+    pca = None
+    if backend == "dino":
+        pca = load_pca(backend) or _fit_pca(rows, backend, log)
+    log(f"extracting {len(rows)} images with backend '{backend}'")
+    if progress is None and config.N_JOBS > 1 and backend == "classic":
         res = Parallel(n_jobs=config.N_JOBS, verbose=5)(delayed(_extract_one)(r) for r in rows)
     else:
         res = []
         for i, r in enumerate(rows):
-            res.append(_extract_one(r))
+            res.append(_extract_one(r, backend, pca))
             if progress:
                 progress(i + 1, len(rows))
     errs = [r for r in res if r.startswith("error")]
@@ -139,7 +173,7 @@ MAX_HEAD_PATCHES = 400_000
 rng = np.random.default_rng(0)
 
 
-def load_sample(idx):
+def load_sample(idx, FEAT_DIR):
     X, img, rc = [], [], []
     for i, row in enumerate(idx.itertuples()):
         z = np.load(os.path.join(FEAT_DIR, row.id + ".npz"))
@@ -195,19 +229,22 @@ def fit_head(name, X, y_img, img, positive, report, log=print, max_iter=200):
     return {"model": model, "positive": positive}
 
 
-def train(log=print):
+def train(log=print, backend=None):
     W = config.WORK_DIR
+    backend = backend or backend_now()
+    FEAT_DIR = feat_dir(backend)
+    log(f"training on backend '{backend}'")
     t0 = time.time()
     idx = read_index()
     idx = idx[idx["id"].map(lambda h: os.path.exists(os.path.join(FEAT_DIR, h + ".npz")))].reset_index(drop=True)
     if idx.empty:
         raise ValueError("No features found. Run feature extraction first.")
     log(f"images with features: {len(idx)}")
-    X, img, rc = load_sample(idx)
+    X, img, rc = load_sample(idx, FEAT_DIR)
     log(f"patches sampled: {len(X)}  ({X.nbytes / 1e6:.0f} MB)")
     scaler = StandardScaler().fit(X)
     Xs = scaler.transform(X).astype(np.float32)
-    report = {"n_images": int(len(idx)), "n_patches": int(len(X)), "heads": {}, "warnings": []}
+    report = {"backend": backend, "n_images": int(len(idx)), "n_patches": int(len(X)), "heads": {}, "warnings": []}
 
     # ---- rarity head (unsupervised)
     live = idx["is_live"].values.astype(bool)
@@ -265,7 +302,8 @@ def train(log=print):
     names_path = os.path.join(W, "cluster_names.json")
     names = json.load(open(names_path)) if os.path.exists(names_path) else {}
     models = dict(scaler=scaler, iso=iso, iso_norm=iso_norm, heads=heads, kmeans=km, examples=examples,
-                  cluster_names=names, feature_names=core.FEATURE_NAMES, n_feature_types=k)
+                  cluster_names=names, feature_names=core.feature_names(backend), n_feature_types=k,
+                  backend=backend, pca=load_pca(backend) if backend != "classic" else None)
     joblib.dump(models, os.path.join(W, "models.joblib"))
     report["seconds"] = round(time.time() - t0, 1)
     json.dump(report, open(os.path.join(W, "report.json"), "w"), indent=1, default=str)
