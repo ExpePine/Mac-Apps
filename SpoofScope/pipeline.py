@@ -203,7 +203,7 @@ def topk_mean(v, top=0.1):
     return v[: max(1, int(len(v) * top))].mean()
 
 
-def fit_head(name, X, y_img, img, positive, report, log=print, max_iter=200):
+def fit_head(name, X, y_img, img, positive, report, log=print, max_iter=200, groups_img=None):
     """Patch-level classifier trained with image-level labels; evaluated per image with
     grouped cross-validation (no image appears in both train and test)."""
     y = y_img[img]
@@ -218,7 +218,7 @@ def fit_head(name, X, y_img, img, positive, report, log=print, max_iter=200):
     metric = None
     if folds >= 2:
         cv = StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=0)
-        img_true, img_pred = [], []
+        img_true, img_pred, img_ids = [], [], []
         for tr, te in cv.split(X[sel], y[sel], img[sel]):
             m = mk().fit(X[sel][tr], y[sel][tr])
             P = m.predict_proba(X[sel][te]); cls = list(m.classes_)
@@ -228,12 +228,23 @@ def fit_head(name, X, y_img, img, positive, report, log=print, max_iter=200):
                     img_pred.append(cls[int(np.argmax(np.log(P[msk] + 1e-6).sum(0)))])
                 else:
                     img_pred.append(topk_mean(P[msk][:, cls.index(positive)]))
-                img_true.append(y_img[im])
+                img_true.append(y_img[im]); img_ids.append(im)
         if positive is None:
             metric = {"image_accuracy": float(np.mean(np.array(img_true) == np.array(img_pred))), "folds": folds}
         else:
             t = (np.array(img_true) == positive).astype(int)
             metric = {"image_AUC": float(roc_auc_score(t, img_pred)) if 0 < t.sum() < len(t) else None, "folds": folds}
+            if groups_img is not None:     # AUC inside each group (e.g. material): removes between-session shortcuts
+                g = np.asarray(groups_img)[img_ids]; pr = np.asarray(img_pred); per = {}
+                for gv in sorted(set(g)):
+                    m_ = g == gv
+                    if 3 <= t[m_].sum() <= m_.sum() - 3:
+                        per[str(gv)] = {"AUC": round(float(roc_auc_score(t[m_], pr[m_])), 3),
+                                        "fooled": int(t[m_].sum()), "caught": int(m_.sum() - t[m_].sum())}
+                    else:
+                        per[str(gv)] = {"AUC": None, "fooled": int(t[m_].sum()), "caught": int(m_.sum() - t[m_].sum()),
+                                        "note": "too few fooled or caught images"}
+                metric["within_group_AUC"] = per
     model = mk().fit(X[sel], y[sel])
     report["heads"][name] = {"n_images": int(len(y_img)), "classes": {str(k): int(v) for k, v in n_img_cls.items()},
                              "cv": metric}
@@ -293,7 +304,8 @@ def train(log=print, backend=None):
             keep = has[img]
             remap = {old: new for new, old in enumerate(np.where(has)[0])}
             img_h = np.array([remap[i] for i in img[keep]])
-            heads["hard_case"] = fit_head("hard_case", Xs[keep], lab[has], img_h, "fooled", report, log)
+            heads["hard_case"] = fit_head("hard_case", Xs[keep], lab[has], img_h, "fooled", report, log,
+                                          groups_img=idx["material"].values[has])
         else:
             report["warnings"].append("Not enough CSV-matched images with both fooled and caught cases for the hard_case head.")
 
