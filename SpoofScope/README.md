@@ -15,7 +15,7 @@ Runs entirely on your Mac (no internet, no GPU). Opens in your web browser.
 1. **Setup** tab: paste the path of the folder that holds one sub-folder per material
    (in Finder select it and press Option+Command+C to copy the path). Mark live-finger folders if you have any.
 2. Press **Run all 3** (index, extract features, train). Tick *Quick test* first to try ~200 images.
-3. Reload the page (Command+R). Use **Analyse image**, **Data engine**, **Feature types**, **Batch**, **Model report**.
+3. Reload the page (Command+R). Use **Analyse image** (upload an image), **Data engine**, **Feature types**, **Batch**, **Model report**.
 4. To stop the app use **Quit SpoofScope** in the sidebar.
 
 Everything SpoofScope creates lives in `~/SpoofScope` (settings, features, trained models, `launcher.log`).

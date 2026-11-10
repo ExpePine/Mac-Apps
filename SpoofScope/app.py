@@ -158,27 +158,14 @@ with tab_an:
     if READY:
         c0, c1 = st.columns([1, 2])
         with c0:
-            src = st.radio("Image source", ["Upload", "From dataset"], horizontal=True)
-            g, meta = None, {}
-            if src == "Upload":
-                up = st.file_uploader("Fingerprint image", type=["jpg", "jpeg", "png", "bmp", "tif", "tiff"])
-                if up is not None:
-                    arr = cv2.imdecode(np.frombuffer(up.read(), np.uint8), cv2.IMREAD_GRAYSCALE)
-                    if arr is not None:
-                        g = cv2.resize(arr, (core.SIZE, core.SIZE), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
-            else:
-                mat = st.selectbox("Material", sorted(idx["material"].unique()))
-                sub = idx[idx["material"] == mat].reset_index(drop=True)
-                only_hard = st.checkbox("Only images that fooled >= 1 production version",
-                                        value=False, disabled="n_fooled" not in sub)
-                if only_hard and "n_fooled" in sub:
-                    sub = sub[sub["n_fooled"].fillna(0) > 0].reset_index(drop=True)
-                if len(sub):
-                    i = st.number_input(f"Image # (0-{len(sub) - 1})", 0, len(sub) - 1, 0)
-                    meta = sub.iloc[int(i)].to_dict()
-                    g = core.load_gray(meta["path"])
+            g = None
+            up = st.file_uploader("Fingerprint image", type=["jpg", "jpeg", "png", "bmp", "tif", "tiff"])
+            if up is not None:
+                arr = cv2.imdecode(np.frombuffer(up.read(), np.uint8), cv2.IMREAD_GRAYSCALE)
+                if arr is not None:
+                    g = cv2.resize(arr, (core.SIZE, core.SIZE), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
                 else:
-                    st.info("No images match.")
+                    st.error("Could not read this image file.")
         if g is not None:
             feats, bmask, sm, regions, ev = analyse(g, models, head, thr, img_thr, min_size)
             with c1:
@@ -192,11 +179,6 @@ with tab_an:
                 if regions:
                     counts = pd.Series([r["type"] for r in regions]).value_counts().rename_axis("feature type").reset_index(name="count")
                     st.dataframe(counts, hide_index=True)
-                if meta:
-                    info = {k: meta.get(k) for k in ["material", "tags", "quality", "prod_p_spoof", "n_fooled", "n_versions"] if k in meta}
-                    if show_paths:
-                        info.update({k: meta.get(k) for k in ["path", "mac", "ts"]})
-                    st.json(info)
             with st.expander("Evidence search replay (move by move)"):
                 s = sm.copy()
                 rows = []
