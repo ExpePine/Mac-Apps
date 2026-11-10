@@ -104,8 +104,15 @@ def build_index(root, settings=None, log=print):
     return idx
 
 
-def feat_dir(backend):
-    return os.path.join(config.WORK_DIR, "feats" if backend == "classic" else "feats_" + backend)
+def mask_row():
+    return int(config.load().get("mask_max_row", 0) or 0)
+
+
+def feat_dir(backend, max_row=None):
+    """Features depend on the backend and the bezel cut-off, so each combination gets its own folder."""
+    max_row = mask_row() if max_row is None else max_row
+    name = "feats" if backend == "classic" else "feats_" + backend
+    return os.path.join(config.WORK_DIR, name + (f"_r{max_row}" if max_row else ""))
 
 
 def backend_now():
@@ -126,7 +133,7 @@ def _fit_pca(rows, backend, log):
     T = []
     for i, r in enumerate(pick):
         g = core.load_gray(r["path"])
-        _, b = core.patch_features(g)
+        _, b = core.patch_features(g, max_row=mask_row())
         T.append(core.dino_tokens(g)[b])
         log(f"PCA sample {i + 1}/{len(pick)}") if (i + 1) % 20 == 0 else None
     T = np.concatenate(T)
@@ -142,7 +149,7 @@ def _extract_one(row, backend="classic", pca=None):
         return "skip"
     try:
         g = core.load_gray(row["path"])
-        f, b = core.compute_features(g, backend, pca)
+        f, b = core.compute_features(g, backend, pca, mask_row())
         np.savez_compressed(out, feats=f.astype(np.float16), bmask=b)
         return "ok"
     except Exception as e:
@@ -267,7 +274,7 @@ def train(log=print, backend=None):
     log(f"patches sampled: {len(X)}  ({X.nbytes / 1e6:.0f} MB)")
     scaler = StandardScaler().fit(X)
     Xs = scaler.transform(X).astype(np.float32)
-    report = {"backend": backend, "n_images": int(len(idx)), "n_patches": int(len(X)), "heads": {}, "warnings": []}
+    report = {"backend": backend, "mask_max_row": mask_row(), "n_images": int(len(idx)), "n_patches": int(len(X)), "heads": {}, "warnings": []}
 
     # ---- rarity head (unsupervised)
     live = idx["is_live"].values.astype(bool)
@@ -327,7 +334,8 @@ def train(log=print, backend=None):
     names = json.load(open(names_path)) if os.path.exists(names_path) else {}
     models = dict(scaler=scaler, iso=iso, iso_norm=iso_norm, heads=heads, kmeans=km, examples=examples,
                   cluster_names=names, feature_names=core.feature_names(backend), n_feature_types=k,
-                  backend=backend, pca=load_pca(backend) if backend != "classic" else None)
+                  backend=backend, pca=load_pca(backend) if backend != "classic" else None,
+                  mask_max_row=mask_row())
     joblib.dump(models, os.path.join(W, "models.joblib"))
     report["seconds"] = round(time.time() - t0, 1)
     json.dump(report, open(os.path.join(W, "report.json"), "w"), indent=1, default=str)

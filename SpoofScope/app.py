@@ -35,7 +35,8 @@ def load_long():
 
 
 def analyse(g, models, head, thr, img_thr, min_patches=1):
-    feats, bmask = core.compute_features(g, models.get("backend", "classic"), models.get("pca"))
+    feats, bmask = core.compute_features(g, models.get("backend", "classic"), models.get("pca"),
+                                         models.get("mask_max_row", 0))
     sm = core.head_scores(models, feats, bmask, head)
     regions = core.find_regions(models, feats, bmask, sm, thr, min_patches)
     ev = core.evidence_search(sm, img_thr)
@@ -90,14 +91,28 @@ with tab_setup:
                        horizontal=True)
     if not dino_ok:
         st.caption("DINOv2 model not found in this build; only the classic backend is available.")
+    max_row = st.number_input("Ignore rows from (bottom bezel cut-off, in 640-px image; 0 = off)", 0, 640,
+                              int(SETTINGS.get("mask_max_row", 485)), step=5,
+                              help="Everything at or below this row is excluded from the print mask. "
+                                   "Changing it needs features extracted again (stored separately).")
+    if st.checkbox("Preview the cut-off on a dataset image", value=False) and idx is not None and len(idx):
+        _g = core.load_gray(idx["path"].iloc[0])
+        _v = cv2.cvtColor((_g * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
+        _m = core.print_mask(_g, max_row)
+        _v[_m] = (0.6 * _v[_m] + 0.4 * np.array([0, 160, 255])).astype(np.uint8)
+        if max_row:
+            _v[max(0, int(max_row) - 1):int(max_row) + 1, :] = (255, 0, 0)
+        st.image(_v, caption="Blue = print mask used for features; red line = cut-off", width=360)
     if st.button("Save settings"):
         SETTINGS["backend"] = backend
+        SETTINGS["mask_max_row"] = int(max_row)
         SETTINGS["data_root"], SETTINGS["live_materials"] = root, live
         config.save(SETTINGS)
         st.success("Saved.")
 
     st.subheader("2. Build")
-    n_feat = len(glob.glob(os.path.join(pipeline.feat_dir(SETTINGS.get("backend", "classic")), "*.npz")))
+    n_feat = len(glob.glob(os.path.join(pipeline.feat_dir(SETTINGS.get("backend", "classic"),
+                                                          int(SETTINGS.get("mask_max_row", 0) or 0)), "*.npz")))
     st.write(f"Indexed images: **{0 if idx is None else len(idx)}**, with features: **{n_feat}**, "
              f"model trained: **{'yes (' + models.get('backend', 'classic') + ')' if models is not None else 'no'}**")
     st.caption("Your Mac is kept awake while SpoofScope runs, so overnight runs are not interrupted by sleep "
@@ -115,10 +130,11 @@ with tab_setup:
     try:
         if do_idx or do_all:
             SETTINGS["data_root"], SETTINGS["live_materials"], SETTINGS["backend"] = root, live, backend
+            SETTINGS["mask_max_row"] = int(max_row)
             config.save(SETTINGS)
             pipeline.build_index(root, SETTINGS, log)
         if do_ext or do_tr:
-            SETTINGS["backend"] = backend; config.save(SETTINGS)
+            SETTINGS["backend"] = backend; SETTINGS["mask_max_row"] = int(max_row); config.save(SETTINGS)
         if do_ext or do_all:
             bar = st.progress(0.0, text="Extracting features")
             pipeline.extract(limit=200 if quick else 0,

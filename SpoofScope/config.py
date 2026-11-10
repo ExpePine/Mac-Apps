@@ -15,6 +15,8 @@ DEFAULTS = {
                        ["latex", "latex_paint"], ["clay", "clay"], ["wax", "wax"]],
     # Materials that are LIVE fingers (leave empty if none)
     "live_materials": [],
+    # Ignore everything at or below this row (640-px image) - removes the sensor's bottom bezel band. 0 = off.
+    "mask_max_row": 485,
 }
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
 PATCHES_PER_IMAGE = 300

@@ -43,13 +43,17 @@ def load_gray(path):
     return im.astype(np.float32) / 255.0
 
 
-def print_mask(g):
-    """Pixel mask of the fingerprint area (ridge texture = high local variance)."""
+def print_mask(g, max_row=None):
+    """Pixel mask of the fingerprint area (ridge texture = high local variance).
+    max_row: rows at or below this (in 640-px coordinates) are never part of the print;
+    used to exclude the sensor's bottom bezel band."""
     mu = cv2.GaussianBlur(g, (0, 0), 6)
     var = cv2.GaussianBlur(g * g, (0, 0), 6) - mu * mu
     s = np.sqrt(np.clip(var, 0, None))
     s8 = np.clip(s / (s.max() + 1e-6) * 255, 0, 255).astype(np.uint8)
     _, m = cv2.threshold(s8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if max_row:
+        m[int(max_row):, :] = 0
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))
     m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, k)
     m = ndi.binary_fill_holes(m > 0)
@@ -58,7 +62,10 @@ def print_mask(g):
     if n == 0:
         return np.ones_like(g, bool)
     sizes = ndi.sum(m, lab, range(1, n + 1))
-    return lab == (1 + int(np.argmax(sizes)))
+    out = lab == (1 + int(np.argmax(sizes)))
+    if max_row:
+        out[int(max_row):, :] = False
+    return out
 
 
 def _blocks(a):
@@ -72,10 +79,10 @@ def _hessian(img, s):
     return hxx * s * s, hyy * s * s, hxy * s * s
 
 
-def patch_features(g, mask=None):
+def patch_features(g, mask=None, max_row=None):
     """Return (feats[N,N,D] float32, block_mask[N,N] bool)."""
     if mask is None:
-        mask = print_mask(g)
+        mask = print_mask(g, max_row)
     bmask = _blocks(mask.astype(np.float32)).mean(-1) > 0.6
     if bmask.sum() < 4:
         bmask = np.ones((N, N), bool)
@@ -198,9 +205,9 @@ def feature_names(backend):
     return FEATURE_NAMES + ([f"dino_pc{i}" for i in range(DINO_PCS)] if backend == "dino" else [])
 
 
-def compute_features(g, backend="classic", pca=None):
+def compute_features(g, backend="classic", pca=None, max_row=None):
     """Classic 31 features, plus (backend='dino') 96 PCA-reduced DINOv2 numbers per patch."""
-    f, b = patch_features(g)
+    f, b = patch_features(g, max_row=max_row)
     if backend == "dino":
         t = dino_tokens(g)
         if pca is not None:
