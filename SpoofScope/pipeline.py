@@ -100,7 +100,8 @@ def build_index(root, settings=None, log=print):
         log(f"CSV rows: {len(csv)}  images matched to CSV: {idx['n_versions'].notna().sum()}")
     idx.to_csv(os.path.join(config.WORK_DIR, "index.csv"), index=False)
     log(f"Unique images: {len(idx)}  (duplicates skipped: {int(idx['n_copies'].sum() - len(idx))})")
-    log(idx.groupby("material").size().to_string())
+    hidden = set(settings.get("hidden_materials", []))
+    log(idx[~idx["material"].isin(hidden)].groupby("material").size().to_string())
     return idx
 
 

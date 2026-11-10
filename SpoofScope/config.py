@@ -10,11 +10,13 @@ DEFAULTS = {
     # Folder that contains one sub-folder per material
     "data_root": "",
     # Rules that turn a top-level folder name into a material label (first match wins, case-insensitive)
-    "material_rules": [["finger testing", "finger_In"], ["favicol", "fevi_T"],
+    "material_rules": [["finger testing", "finger_In"], ["favicol", "glue_E"],
                        ["glue", "glue_E"], ["gelatin", "gel"], ["silicon", "sil_R"],
                        ["latex", "latex_P"], ["clay", "clay"], ["wax", "wax"]],
     # Materials that are LIVE fingers (leave empty if none)
     "live_materials": [],
+    # Materials still used for training but not shown anywhere in the app
+    "hidden_materials": ["clay", "wax"],
     # Ignore everything at or below this row (640-px image) - removes the sensor's bottom bezel band. 0 = off.
     "mask_max_row": 485,
 }
@@ -25,7 +27,7 @@ N_JOBS = 1 if FROZEN else 2
 
 
 # earlier, longer material names -> current short names (used to update saved settings)
-RENAMED = {"finger_testing_indoor": "finger_In", "transparent_favicol": "fevi_T", "elmers_glue": "glue_E",
+RENAMED = {"finger_testing_indoor": "finger_In", "transparent_favicol": "glue_E", "fevi_T": "glue_E", "elmers_glue": "glue_E",
            "gelatin": "gel", "silicone_rubber": "sil_R", "latex_paint": "latex_P"}
 
 
@@ -37,6 +39,7 @@ def load():
     except Exception:
         pass
     s["material_rules"] = DEFAULTS["material_rules"]          # names always follow this version
+    s["hidden_materials"] = DEFAULTS["hidden_materials"]
     s["live_materials"] = [RENAMED.get(m, m) for m in s.get("live_materials", [])]
     return s
 

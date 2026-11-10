@@ -8,6 +8,16 @@ W = config.WORK_DIR
 os.makedirs(W, exist_ok=True)
 st.set_page_config(page_title="SpoofScope", layout="wide")
 SETTINGS = config.load()
+HIDE = set(SETTINGS.get("hidden_materials", []))
+
+
+def scrub(o):
+    """Remove hidden materials from nested report dictionaries."""
+    if isinstance(o, dict):
+        return {k: scrub(v) for k, v in o.items() if k not in HIDE}
+    if isinstance(o, list):
+        return [scrub(v) for v in o]
+    return o
 
 
 @st.cache_resource
@@ -79,7 +89,7 @@ with tab_setup:
     st.caption("The folder that contains one sub-folder per material. In Finder: select the folder, "
                "press Option+Command+C to copy its path, then paste it here.")
     root = st.text_input("Data folder path", SETTINGS.get("data_root", "")).strip().strip('"').strip("'")
-    mats_known = sorted(idx["material"].unique()) if idx is not None else []
+    mats_known = sorted(set(idx["material"].unique()) - HIDE) if idx is not None else []
     live = st.multiselect("Materials that are LIVE fingers (leave empty if none)",
                           sorted(set(mats_known) | set(SETTINGS.get("live_materials", []))),
                           default=SETTINGS.get("live_materials", []))
@@ -198,11 +208,12 @@ with tab_de:
             st.subheader("Production model: spoofs accepted as live, by version and material")
             lk = long.merge(idx[["mac", "ts", "material"]].drop_duplicates(), left_on=["MAC", "ts"], right_on=["mac", "ts"], how="left")
             lk["material"] = lk["material"].fillna("(no image file)")
+            lk = lk[~lk["material"].isin(HIDE)]
             tab = (lk.groupby(["material", "Version"])["fooled"].mean() * 100).round(1).unstack()
             st.dataframe(tab)
             st.caption("Percent of captures where F_Live > F_Spoof. Lower is better.")
             st.subheader("Hard cases (data-engine triggers)")
-            hc = idx[idx["n_fooled"].fillna(0) > 0].copy() if "n_fooled" in idx else pd.DataFrame()
+            hc = idx[(idx["n_fooled"].fillna(0) > 0) & ~idx["material"].isin(HIDE)].copy() if "n_fooled" in idx else pd.DataFrame()
             if len(hc):
                 hc["version_disagreement"] = hc["prod_p_spoof_std"].round(3)
                 cols = ["material", "n_fooled", "n_versions", "prod_p_spoof", "version_disagreement", "quality"]
@@ -210,9 +221,9 @@ with tab_de:
                     cols += ["mac", "ts", "path"]
                 st.dataframe(hc.sort_values("n_fooled", ascending=False)[cols], hide_index=True)
                 st.caption("Images that fooled at least one version, ranked by how many versions they fooled.")
-            if "ts" in idx and "n_fooled" in idx:
+            if "ts" in idx and "n_fooled" in idx and set(idx["material"].unique()) - HIDE:
                 st.subheader("Control chart: fooled versions over capture time")
-                m = st.selectbox("Material ", sorted(idx["material"].unique()), key="cc")
+                m = st.selectbox("Material ", sorted(set(idx["material"].unique()) - HIDE), key="cc")
                 d = idx[(idx["material"] == m) & idx["n_fooled"].notna()].copy()
                 if len(d):
                     d["time"] = pd.to_datetime(d["ts"], format="%d%m%Y%H%M%S", errors="coerce")
@@ -226,10 +237,10 @@ with tab_ft:
         names = dict(models.get("cluster_names", {}))
         ex = models["examples"]
         for c in sorted(ex, key=int):
-            mix = REPORT.get("feature_types", {}).get(c, {})
+            mix = scrub(REPORT.get("feature_types", {}).get(c, {}))
             st.markdown(f"**Group {c}** - {mix.get('n_patches', '?')} patches; materials: {mix.get('materials', {})}")
             crops = []
-            for path, r, cc, mat in ex[c][:12]:
+            for path, r, cc, mat in [e for e in ex[c] if e[3] not in HIDE][:12]:
                 try:
                     g2 = core.load_gray(path)
                 except Exception:
@@ -277,4 +288,4 @@ with tab_rep:
             rep = json.load(open(p))
             for w in rep.get("warnings", []):
                 st.warning(w)
-            st.json(rep)
+            st.json(scrub(rep))
