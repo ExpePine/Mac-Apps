@@ -59,6 +59,25 @@ struct FFormula: Identifiable, Hashable {
         }
         for r in NoteAlerts.rules(vm) { add(FFormula(name: String(r.name.dropFirst(NoteAlerts.prefix.count)), source: "F alert", group: r.filter)) }
         for c in MBFilterCenter.shared.combos { add(FFormula(name: c.name, source: "F combination", group: c.group)) }
+        // the Filter's own conditions: the whole Filter, then each column's condition(s) alone
+        let fg = vm.settings.filterGroup
+        if fg.activeCount > 0 { add(FFormula(name: fg.describe, source: "Filter — all conditions", group: fg)) }
+        var byColumn: [(String, [FilterCondition])] = []
+        func walk(_ g: FilterGroup) {
+            guard g.isEnabled else { return }
+            for c in g.conditions where c.isEnabled {
+                let k = c.column.isEmpty ? c.describe : c.column
+                if let i = byColumn.firstIndex(where: { $0.0 == k }) { byColumn[i].1.append(c) } else { byColumn.append((k, [c])) }
+            }
+            g.groups.forEach(walk)
+        }
+        walk(fg)
+        if byColumn.count > 1 || fg.groups.count > 0 {
+            for (_, cs) in byColumn {
+                let g = FilterGroup(mode: .all, conditions: cs)
+                add(FFormula(name: g.describe, source: "Filter condition", group: g))
+            }
+        }
         return out
     }
 
@@ -117,7 +136,11 @@ struct FormulaDaysView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var c = FormulaDaysCenter.shared
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("fdays.last") private var lastDays = 20
+    @AppStorage("fdays.last") private var lastDays = 60
+    @AppStorage("fdays.horizon") private var horizon = 30
+    @AppStorage("fdays.mode") private var mode = 0                 // 0 = stocks count, 1 = change %
+    @AppStorage("fdays.sort") private var sortBy = 0               // 0 = as listed, 1 = avg %, 2 = win %
+    @State private var success: [String: FSuccess] = [:]
     @State private var selected: String?
     @State private var cell: (formula: String, day: String)?
     @State private var showCell = false
@@ -126,11 +149,24 @@ struct FormulaDaysView: View {
         let fs = c.formulas(vm)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("F formulas — stocks meeting each one, day by day").font(.title3.bold())
+                Text("F formulas & Filter conditions — stocks meeting each one, and how they did").font(.title3.bold())
                 Spacer()
-                Picker("Days", selection: $lastDays) { ForEach([10, 20, 40, 60, 120, 250], id: \.self) { Text("\($0) days").tag($0) } }.fixedSize()
+                Text("Look back")
+                TextField("", value: $lastDays, format: .number).frame(width: 44).textFieldStyle(.roundedBorder)
+                Stepper("", value: $lastDays, in: 1...1000, step: 10).labelsHidden()
+                Text("days")
                 if c.running { ProgressView(value: c.progress).frame(width: 100) }
                 Button { c.run(vm, lastDays: lastDays) } label: { Label("Recount", systemImage: "arrow.clockwise") }.disabled(c.running)
+            }
+            HStack(spacing: 10) {
+                Picker("", selection: $mode) { Text("Stocks count").tag(0); Text("Change %").tag(1) }.pickerStyle(.segmented).fixedSize()
+                Text("Success = % change after")
+                TextField("", value: $horizon, format: .number).frame(width: 44).textFieldStyle(.roundedBorder)
+                Stepper("", value: $horizon, in: 1...500).labelsHidden()
+                Text("trading days")
+                Menu("Presets") { ForEach([5, 10, 22, 30, 60, 90, 120, 250], id: \.self) { d in Button("\(d) days") { horizon = d } } }.fixedSize()
+                Spacer()
+                Picker("Sort", selection: $sortBy) { Text("As listed").tag(0); Text("Avg %").tag(1); Text("Win %").tag(2); Text("Signals").tag(3) }.fixedSize()
             }
             Text("Formulas come from your F notes (the recognised chips), F alerts and saved F combinations. Each cell = how many stocks met the formula on that stored day; the last column is today's live data. — = a column the formula uses wasn't stored that day. Click a number for the stocks.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -139,12 +175,21 @@ struct FormulaDaysView: View {
                 Spacer()
             } else {
                 if let s = selected ?? fs.first?.key { chart(s, name: fs.first { $0.key == s }?.name ?? "") }
-                grid(fs)
+                grid(sorted(fs))
             }
         }
         .padding(16)
         .onAppear { if c.counts.isEmpty && !c.running { c.run(vm, lastDays: lastDays) } }
-        .onChange(of: lastDays) { _ in c.run(vm, lastDays: lastDays) }
+        .onChange(of: lastDays) { _ in c.run(vm, lastDays: max(1, lastDays)) }
+        .task(id: "\(c.counts.count)|\(c.running)|\(horizon)|\(c.days.count)") {
+            guard !c.running else { return }
+            var out: [String: FSuccess] = [:]
+            for f in c.formulas(vm) {
+                out[f.key] = FSuccessMath.compute(c.counts[f.key] ?? [:], horizon: max(1, horizon), vm: vm)
+                await Task.yield()
+            }
+            success = out
+        }
         .popover(isPresented: $showCell) { cellPopover }
     }
 
@@ -161,12 +206,27 @@ struct FormulaDaysView: View {
         }
     }
 
+    private func sorted(_ fs: [FFormula]) -> [FFormula] {
+        switch sortBy {
+        case 1: return fs.sorted { (success[$0.key]?.avg ?? -9) > (success[$1.key]?.avg ?? -9) }
+        case 2: return fs.sorted { (success[$0.key]?.win ?? -9) > (success[$1.key]?.win ?? -9) }
+        case 3: return fs.sorted { (success[$0.key]?.signals ?? 0) > (success[$1.key]?.signals ?? 0) }
+        default: return fs
+        }
+    }
+
     private func grid(_ fs: [FFormula]) -> some View {
         let days = Array(c.days.reversed())                   // newest first
         return ScrollView([.horizontal, .vertical]) {
             Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
                 GridRow {
                     Text("Formula").font(.caption.bold()).frame(width: 320, alignment: .leading).padding(4)
+                    Text("Signals").font(.caption2.bold()).frame(width: 52)
+                    Text("Avg \(horizon)d").font(.caption2.bold()).frame(width: 58)
+                    Text("Median").font(.caption2.bold()).frame(width: 54)
+                    Text("Up").font(.caption2.bold()).frame(width: 40)
+                    Text("Best").font(.caption2.bold()).frame(width: 54)
+                    Text("Worst").font(.caption2.bold()).frame(width: 54)
                     ForEach(days, id: \.self) { d in
                         Text(d == c.days.last ? "Today" : String(d.suffix(5))).font(.caption2.bold()).frame(width: 46).padding(.vertical, 4)
                     }
@@ -185,10 +245,26 @@ struct FormulaDaysView: View {
                             .background(selected == f.key ? Color.accentColor.opacity(0.12) : Color.clear)
                         }
                         .buttonStyle(.plain)
+                        let st = success[f.key]
+                        Text("\(st?.signals ?? 0)").font(.caption.monospacedDigit()).frame(width: 52)
+                            .help("\(st?.signals ?? 0) stock-days with prices after them · \(st?.full ?? 0) have the full \(horizon) days (the rest are measured to the latest close)")
+                        Text(FSuccessMath.pct(st?.avg)).font(.caption.monospacedDigit().bold()).foregroundStyle(FSuccessMath.color(st?.avg)).frame(width: 58)
+                        Text(FSuccessMath.pct(st?.median)).font(.caption.monospacedDigit()).foregroundStyle(FSuccessMath.color(st?.median)).frame(width: 54)
+                        Text(st?.win.map { String(format: "%.0f%%", $0 * 100) } ?? "—").font(.caption.monospacedDigit()).frame(width: 40)
+                        Text(FSuccessMath.pct(st?.best)).font(.caption.monospacedDigit()).foregroundStyle(.green).frame(width: 54)
+                        Text(FSuccessMath.pct(st?.worst)).font(.caption.monospacedDigit()).foregroundStyle(.red).frame(width: 54)
                         ForEach(days, id: \.self) { d in
                             let v = row[d]
                             Group {
-                                if let v, let syms = v {
+                                if mode == 1, let v, let syms = v, !syms.isEmpty {
+                                    let a = st?.byDay[d]
+                                    Button(a.map { String(format: "%+.0f", $0 * 100) } ?? "…") { cell = (f.key, d); showCell = true }
+                                        .buttonStyle(.plain).font(.caption.monospacedDigit())
+                                        .foregroundStyle(FSuccessMath.color(a))
+                                        .frame(width: 46, height: 26)
+                                        .background(FSuccessMath.color(a).opacity(a == nil ? 0 : min(0.45, 0.08 + abs(a!) * 1.5)))
+                                        .help(a == nil ? "\(syms.count) stocks — no prices after this day yet" : "\(syms.count) stocks · average \(FSuccessMath.pct(a)) after \(horizon) days (or to the latest close)")
+                                } else if let v, let syms = v {
                                     Button("\(syms.count)") { cell = (f.key, d); showCell = true }
                                         .buttonStyle(.plain).font(.caption.monospacedDigit())
                                         .frame(width: 46, height: 26)
@@ -207,6 +283,15 @@ struct FormulaDaysView: View {
         }
     }
 
+    /// " +12%" — that stock's change `horizon` trading days after `day` (or to the latest close).
+    private func changeText(_ sym: String, from day: String) -> String {
+        let v: ([String], [Double])? = vm.priceBook.series(for: sym).map { ($0.days, $0.closes) }
+            ?? DeliveryCenter.shared.book.series[sym].map { ($0.days, $0.close) }
+        guard let (days, closes) = v, let i = FSuccessMath.index(days, day), i < closes.count - 1, closes[i] > 0 else { return "" }
+        let r = closes[min(i + max(1, horizon), closes.count - 1)] / closes[i] - 1
+        return String(format: " %+.0f%%", r * 100)
+    }
+
     @ViewBuilder private var cellPopover: some View {
         if let cell, let syms = c.counts[cell.formula]?[cell.day] ?? nil {
             VStack(alignment: .leading, spacing: 8) {
@@ -214,7 +299,7 @@ struct FormulaDaysView: View {
                 ScrollView {
                     FlowLayout(spacing: 4, lineSpacing: 3) {
                         ForEach(syms.sorted(), id: \.self) { s in
-                            Button(s) { vm.openChart(s, queue: syms.sorted(), goTo: cell.day == c.days.last ? nil : cell.day, openWindow: openWindow) }
+                            Button(s + changeText(s, from: cell.day)) { vm.openChart(s, queue: syms.sorted(), goTo: cell.day == c.days.last ? nil : cell.day, openWindow: openWindow) }
                                 .buttonStyle(.plain).font(.caption.monospaced())
                                 .padding(.horizontal, 5).padding(.vertical, 1).background(Capsule().fill(Color.green.opacity(0.15)))
                         }
@@ -227,4 +312,69 @@ struct FormulaDaysView: View {
             .padding(12).frame(width: 360)
         }
     }
+}
+
+
+// MARK: - Success: % change after a signal
+
+struct FSuccess {
+    var signals = 0               // stock-days that met the formula (with at least 1 day after)
+    var full = 0                  // of those, with the whole horizon after them
+    var avg: Double?              // average % change after `horizon` trading days (or to the latest close)
+    var median: Double?
+    var win: Double?              // share that were up
+    var best: Double?             // average best close within the horizon
+    var worst: Double?            // average worst close within the horizon
+    var byDay: [String: Double] = [:]
+}
+
+enum FSuccessMath {
+    /// Day index of the first trading day on/after `day` (binary search).
+    static func index(_ days: [String], _ day: String) -> Int? {
+        var lo = 0, hi = days.count
+        while lo < hi { let m = (lo + hi) / 2; if days[m] < day { lo = m + 1 } else { hi = m } }
+        return lo < days.count ? lo : nil
+    }
+
+    @MainActor static func compute(_ perDay: [String: [String]?], horizon: Int, vm: ScreenerViewModel) -> FSuccess {
+        var r = FSuccess()
+        var rets: [Double] = [], bests: [Double] = [], worsts: [Double] = []
+        var series: [String: ([String], [Double])] = [:]
+        func s(_ sym: String) -> ([String], [Double])? {
+            if let x = series[sym] { return x.0.isEmpty ? nil : x }
+            var v: ([String], [Double]) = ([], [])
+            if let p = vm.priceBook.series(for: sym), !p.days.isEmpty { v = (p.days, p.closes) }
+            else if let d = DeliveryCenter.shared.book.series[sym], !d.days.isEmpty { v = (d.days, d.close) }
+            series[sym] = v
+            return v.0.isEmpty ? nil : v
+        }
+        for (day, syms) in perDay {
+            guard let syms, !syms.isEmpty else { continue }
+            var dayRets: [Double] = []
+            for sym in syms {
+                guard let (days, closes) = s(sym), let i = index(days, day), i < closes.count - 1, closes[i] > 0 else { continue }
+                let j = min(i + horizon, closes.count - 1)
+                let base = closes[i]
+                let ret = closes[j] / base - 1
+                let win = closes[(i + 1)...j]
+                rets.append(ret); dayRets.append(ret)
+                bests.append((win.max() ?? base) / base - 1)
+                worsts.append((win.min() ?? base) / base - 1)
+                r.signals += 1
+                if i + horizon <= closes.count - 1 { r.full += 1 }
+            }
+            if !dayRets.isEmpty { r.byDay[day] = dayRets.reduce(0, +) / Double(dayRets.count) }
+        }
+        guard !rets.isEmpty else { return r }
+        let n = Double(rets.count)
+        r.avg = rets.reduce(0, +) / n
+        let sorted = rets.sorted(); r.median = sorted[sorted.count / 2]
+        r.win = Double(rets.filter { $0 > 0 }.count) / n
+        r.best = bests.reduce(0, +) / n
+        r.worst = worsts.reduce(0, +) / n
+        return r
+    }
+
+    static func pct(_ v: Double?) -> String { v.map { String(format: "%+.1f%%", $0 * 100) } ?? "—" }
+    static func color(_ v: Double?) -> Color { guard let v else { return .secondary }; return v > 0 ? .green : (v < 0 ? .red : .secondary) }
 }
