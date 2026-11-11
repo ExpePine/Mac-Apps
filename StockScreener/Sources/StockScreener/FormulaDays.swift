@@ -190,7 +190,7 @@ struct FormulaDaysView: View {
             }
             success = out
         }
-        .popover(isPresented: $showCell) { cellPopover }
+        .sheet(isPresented: $showCell) { cellPopover }
     }
 
     private func chart(_ key: String, name: String) -> some View {
@@ -203,6 +203,18 @@ struct FormulaDaysView: View {
                     .annotation(position: .top) { Text("\(p.1)").font(.system(size: 8)).foregroundStyle(.secondary) }
             }
             .frame(height: 130)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onTapGesture { loc in
+                            let x = loc.x - geo[proxy.plotAreaFrame].origin.x
+                            guard let label: String = proxy.value(atX: x),
+                                  let day = pts.map(\.0).last(where: { $0.hasSuffix(label) }) else { return }
+                            cell = (key, day); showCell = true
+                        }
+                        .help("Click a bar for that day's stocks and how they did")
+                }
+            }
         }
     }
 
@@ -294,22 +306,9 @@ struct FormulaDaysView: View {
 
     @ViewBuilder private var cellPopover: some View {
         if let cell, let syms = c.counts[cell.formula]?[cell.day] ?? nil {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(syms.count) stocks · \(cell.day == c.days.last ? "today" : cell.day)").font(.headline)
-                ScrollView {
-                    FlowLayout(spacing: 4, lineSpacing: 3) {
-                        ForEach(syms.sorted(), id: \.self) { s in
-                            Button(s + changeText(s, from: cell.day)) { vm.openChart(s, queue: syms.sorted(), goTo: cell.day == c.days.last ? nil : cell.day, openWindow: openWindow) }
-                                .buttonStyle(.plain).font(.caption.monospaced())
-                                .padding(.horizontal, 5).padding(.vertical, 1).background(Capsule().fill(Color.green.opacity(0.15)))
-                        }
-                    }
-                }.frame(maxHeight: 220)
-                if !syms.isEmpty {
-                    AddToWatchlistButton(groups: [("These stocks", syms.sorted())], source: "F formula")
-                }
-            }
-            .padding(12).frame(width: 360)
+            DayStocksView(day: cell.day, isToday: cell.day == c.days.last, formula: FormulaDaysCenter.shared.formulas(vm).first { $0.key == cell.formula }?.name ?? "",
+                          symbols: syms, close: { showCell = false })
+                .environmentObject(vm)
         }
     }
 }
@@ -377,4 +376,126 @@ enum FSuccessMath {
 
     static func pct(_ v: Double?) -> String { v.map { String(format: "%+.1f%%", $0 * 100) } ?? "—" }
     static func color(_ v: Double?) -> Color { guard let v else { return .secondary }; return v > 0 ? .green : (v < 0 ? .red : .secondary) }
+}
+
+
+// MARK: - One day's stocks and how they did after (5d, 15d, 30d, till date)
+
+struct DayStocksView: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @Environment(\.openWindow) private var openWindow
+    let day: String
+    let isToday: Bool
+    let formula: String
+    let symbols: [String]
+    let close: () -> Void
+    @State private var sortKey = "Till date"
+    @State private var rows: [Row] = []
+
+    struct Row: Identifiable {
+        var id: String { symbol }
+        let symbol: String
+        var price: Double?
+        var r5: Double?, r15: Double?, r30: Double?, now: Double?, best: Double?, worst: Double?
+        var bars = 0
+    }
+    private static let cols = ["5d", "15d", "30d", "Till date", "Best", "Worst"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(symbols.count) stocks · \(isToday ? "today" : day)").font(.title3.bold())
+                    Text(formula).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                AddToWatchlistButton(groups: [("These stocks", symbols.sorted())], source: "F formula \(day)")
+                Button("Close", action: close).keyboardShortcut(.cancelAction)
+            }
+            // averages
+            HStack(spacing: 18) {
+                ForEach(Self.cols, id: \.self) { k in
+                    let v = avg(k)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Avg \(k)").font(.caption2).foregroundStyle(.secondary)
+                        Text(FSuccessMath.pct(v.avg)).font(.callout.monospacedDigit().bold()).foregroundStyle(FSuccessMath.color(v.avg))
+                        Text(v.n == 0 ? "no data yet" : "\(v.up)/\(v.n) up").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Divider()
+            HStack(spacing: 0) {
+                header("Symbol", 130, align: .leading)
+                header("Close", 80)
+                ForEach(Self.cols, id: \.self) { header($0, 72) }
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(sorted) { r in
+                        HStack(spacing: 0) {
+                            Button(r.symbol) { vm.openChart(r.symbol, queue: sorted.map(\.symbol), goTo: isToday ? nil : day, openWindow: openWindow) }
+                                .buttonStyle(.link).font(.callout.monospaced()).frame(width: 130, alignment: .leading)
+                            Text(r.price.map { String(format: "%.2f", $0) } ?? "—").frame(width: 80, alignment: .trailing)
+                            cellText(r.r5); cellText(r.r15); cellText(r.r30); cellText(r.now); cellText(r.best); cellText(r.worst)
+                        }
+                        .font(.callout.monospacedDigit())
+                        .padding(.vertical, 3)
+                        Divider()
+                    }
+                }
+            }
+            Text("% from the close on \(isToday ? "today" : day) (Yahoo closes, else NSE) to the close 5 / 15 / 30 trading days later and to the latest close. Best / Worst = highest / lowest close since. — = not that many trading days yet.")
+                .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(width: 760, height: 560)
+        .onAppear { rows = symbols.map(compute) }
+    }
+
+    private func header(_ k: String, _ w: CGFloat, align: Alignment = .trailing) -> some View {
+        Button { sortKey = k } label: {
+            Text(k + (sortKey == k ? " ▼" : "")).font(.caption.bold()).frame(width: w, alignment: align)
+        }.buttonStyle(.plain).foregroundStyle(sortKey == k ? Color.accentColor : Color.secondary)
+    }
+
+    private func cellText(_ v: Double?) -> some View {
+        Text(FSuccessMath.pct(v)).frame(width: 72, alignment: .trailing).foregroundStyle(FSuccessMath.color(v))
+    }
+
+    private func value(_ r: Row, _ k: String) -> Double? {
+        switch k { case "5d": return r.r5; case "15d": return r.r15; case "30d": return r.r30; case "Best": return r.best; case "Worst": return r.worst
+                   case "Close": return r.price; default: return r.now }
+    }
+
+    private var sorted: [Row] {
+        if sortKey == "Symbol" { return rows.sorted { $0.symbol < $1.symbol } }
+        return rows.sorted { (value($0, sortKey) ?? -.infinity) > (value($1, sortKey) ?? -.infinity) }
+    }
+
+    private func avg(_ k: String) -> (avg: Double?, n: Int, up: Int) {
+        let v = rows.compactMap { value($0, k) }
+        return (v.isEmpty ? nil : v.reduce(0, +) / Double(v.count), v.count, v.filter { $0 > 0 }.count)
+    }
+
+    private func compute(_ sym: String) -> Row {
+        var r = Row(symbol: sym)
+        let v: ([String], [Double])? = vm.priceBook.series(for: sym).map { ($0.days, $0.closes) }
+            ?? DeliveryCenter.shared.book.series[sym].map { ($0.days, $0.close) }
+        guard let (days, closes) = v, !closes.isEmpty else { return r }
+        let i: Int
+        if isToday { i = closes.count - 1 } else { guard let x = FSuccessMath.index(days, day) else { return r }; i = x }
+        guard i < closes.count, closes[i] > 0 else { return r }
+        let base = closes[i]
+        r.price = base
+        func after(_ k: Int) -> Double? { i + k < closes.count ? closes[i + k] / base - 1 : nil }
+        r.r5 = after(5); r.r15 = after(15); r.r30 = after(30)
+        r.bars = closes.count - 1 - i
+        if r.bars > 0 {
+            r.now = closes[closes.count - 1] / base - 1
+            let rest = closes[(i + 1)...]
+            r.best = rest.max().map { $0 / base - 1 }
+            r.worst = rest.min().map { $0 / base - 1 }
+        }
+        return r
+    }
 }
