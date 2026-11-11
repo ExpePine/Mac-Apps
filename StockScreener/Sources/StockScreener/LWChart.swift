@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, shade, news, deals
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, news, deals
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -24,6 +24,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .per: return "Delivery % (DELIV_PER)"
         case .t3: return "T3 line (green rising / red falling) — \(T3Def.current.pine)"
         case .del2c: return "DEL2C line — close on the last DEL2 = 100 day (ta.highest \(Del2.length))"
+        case .hit3: return "HI/T3 line — ta.highest(ta.sma(delivery, \(DeliveryColumns.hiSma)), 300) / T3 (dashed line at 1.00)"
         case .shade: return "Shade candles where DELSMAC > \(String(format: "%.2f", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
@@ -39,13 +40,14 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .t3: return .green
         case .del2c: return Color(red: 1, green: 0.77, blue: 0)
         case .shade: return Color(red: 0.7, green: 0.4, blue: 1)
+        case .hit3: return Color(red: 1, green: 0.54, blue: 0.4)
         case .news: return .blue
         case .deals: return .purple
         case .bands, .markers: return .orange
         default: return nil
         }
     }
-    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c, .shade]
+    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c, .hit3, .shade]
     /// Stored as "a,b,c" in UserDefaults; "" = the defaults, "none" = nothing.
     static func decode(_ s: String) -> Set<ChartLayer> {
         if s.isEmpty { return defaults }
@@ -55,10 +57,11 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         // saved before DEL2C existed (no "v3"): show it too
         if !s.contains("v3") && s != "none" { out.insert(.del2c) }
         if !s.contains("v4") && s != "none" { out.insert(.shade); out.insert(.candles) }
+        if !s.contains("v5") && s != "none" { out.insert(.hit3) }
         return out
     }
     static func encode(_ set: Set<ChartLayer>) -> String {
-        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3", "v4"]).joined(separator: ",")
+        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3", "v4", "v5"]).joined(separator: ",")
     }
 }
 
@@ -130,6 +133,7 @@ struct LWChartData: Encodable {
     var sma66: [Point] = []
     var per: [Point] = []             // DELIV_PER, 0–100
     var t3: [Point] = []              // T3 with green / red per point
+    var hit3: [Point] = []            // HI/T3 ratio, own scale in the delivery pane
     var del2c: [Point] = []           // DEL2C step line (Chart 3: on the price scale; delivery chart: its own scale)
     var d2cOwn = false
     var style = ChartStyle.current      // your look: colours, line width, price / delivery split, grid
@@ -189,6 +193,10 @@ struct LWChartData: Encodable {
                 } }
                 d.t3Own = def.useQty != (metric == .qty)
                 d.t3Name = "T3(\(def.length))"
+            }
+            if layers.contains(.hit3) {
+                let r = DeliveryColumns.hiT3Series(s)
+                for i in s.days.indices where i < r.count { if let v = r[i] { d.hit3.append(Point(time: s.days[i], value: v)) } }
             }
             if layers.contains(.per) { d.per = s.days.indices.map { Point(time: s.days[$0], value: s.per[$0]) } }
             if layers.contains(.del2c) {
@@ -385,7 +393,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, last=null, dark=null;
+    var chart=null, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -413,6 +421,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       t3s=chart.addLineSeries({priceScaleId:'deliv',color:'#26a69a',lineWidth:2,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       high=chart.addLineSeries({priceScaleId:'deliv',color:'#2962FF',lineWidth:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       d2c=chart.addLineSeries({priceScaleId:'right',color:'#FFC400',lineWidth:2,lineType:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:'DEL2C'});
+      ht3=chart.addLineSeries({priceScaleId:'hit3',color:'#FF8A65',lineWidth:2,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:'HI/T3',
+        priceFormat:{type:'price',precision:2,minMove:0.01}});
       // only YOUR pans / zooms move TradingView — not the chart's own data loads, fits or range buttons
       window._userAt=0;
       var mark=function(e){ if(e.type!=='mousemove' || e.buttons) window._userAt=Date.now(); };
@@ -437,7 +447,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         hover(p);
         if(!p || !p.time || !p.seriesData){ legendLast(); return; }
         var g=function(s){ return p.seriesData.get(s)||null; };
-        legend(g(candle),g(hist),g(high),p.time,g(prank),g(sma22),g(sma66),g(per),g(t3s),g(d2c));
+        legend(g(candle),g(hist),g(high),p.time,g(prank),g(sma22),g(sma66),g(per),g(t3s),g(d2c),g(ht3));
       });
       return true;
     }
@@ -491,8 +501,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       }catch(e){}
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350); };
     function lastOf(a){ return a&&a.length?a[a.length-1]:null; }
-    function legendLast(){ var d=last; legend(lastOf(d.candles),lastOf(d.deliv),lastOf(d.high),null,lastOf(d.prank),lastOf(d.sma22),lastOf(d.sma66),lastOf(d.per),lastOf(d.t3),lastOf(d.del2c)); }
-    function legend(c,h,x,t,pr,s22,s66,pc,t3v,d2v){
+    function legendLast(){ var d=last; legend(lastOf(d.candles),lastOf(d.deliv),lastOf(d.high),null,lastOf(d.prank),lastOf(d.sma22),lastOf(d.sma66),lastOf(d.per),lastOf(d.t3),lastOf(d.del2c),lastOf(d.hit3)); }
+    function legend(c,h,x,t,pr,s22,s66,pc,t3v,d2v,hv){
       var s='<b>'+last.title+'</b> ';
       if(t) s+=(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0')))+' ';
       if(c) s+='O '+c.open.toFixed(2)+' H '+c.high.toFixed(2)+' L '+c.low.toFixed(2)+' C <b>'+c.close.toFixed(2)+'</b>';
@@ -504,6 +514,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(pr&&pr.value!=null) s+=' &nbsp;<span style="color:#AB47BC">percentrank '+pr.value.toFixed(1)+'</span>';
       if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
       if(d2v&&d2v.value!=null){ s+=' &nbsp;<span style="color:#FFC400">DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):'')+'</span>'; }
+      if(hv&&hv.value!=null) s+=' &nbsp;<span style="color:#FF8A65">HI/T3 '+hv.value.toFixed(2)+'</span>';
       if(t3v&&t3v.value!=null){ var tc=t3v.color||'#26a69a'; s+=' &nbsp;<span style="color:'+tc+'">'+(last.t3Name||'T3')+' '+fmt(t3v.value)+(tc==='#26a69a'?' ▲':' ▼')+'</span>'; }
       document.getElementById('legend').innerHTML=s;
       document.getElementById('legend').style.color=dark?'#d1d4dc':'#131722';
@@ -540,6 +551,10 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       d2c.applyOptions({priceScaleId:d.d2cOwn?'d2c':'right'});
       if(d.d2cOwn) chart.priceScale('d2c').applyOptions({scaleMargins:{top:0.08,bottom:0.08}, visible:false});
       d2c.setData(d.del2c||[]);
+      chart.priceScale('hit3').applyOptions({scaleMargins:low, visible:false});
+      ht3.setData(d.hit3||[]);
+      if(ht3Line){ ht3.removePriceLine(ht3Line); ht3Line=null; }
+      if((d.hit3||[]).length) ht3Line=ht3.createPriceLine({price:1,color:'rgba(255,138,101,0.6)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:'1.00'});
       var ts={}; d.candles.forEach(function(x){ ts[x.time]=1; }); d.deliv.forEach(function(x){ ts[x.time]=1; });
       window._times=Object.keys(ts).sort();
       var hasBars=d.deliv.some(function(x){ return x.value!=null; });

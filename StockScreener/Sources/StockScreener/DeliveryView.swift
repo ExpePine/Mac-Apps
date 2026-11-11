@@ -536,8 +536,8 @@ struct DeliveryMiniChart: View {
                 .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
-                    ForEach([ChartLayer.candles, .del2c, .shade], id: \.self) { layer in
-                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : "Shade"), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                    ForEach([ChartLayer.candles, .del2c, .hit3, .shade], id: \.self) { layer in
+                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : "Shade")), isOn: Binding(get: { L.contains(layer) }, set: { on in
                             var x = L; if on { x.insert(layer) } else { x.remove(layer) }
                             layersRaw = ChartLayer.encode(x)
                         }))

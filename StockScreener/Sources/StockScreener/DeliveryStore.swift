@@ -578,6 +578,19 @@ struct DeliveryColumns {
     }
 
     /// SMA length for HI/T3: follows Delivery Analysis' Signal (66 when ta.sma(…, 66) is picked, else 22).
+    /// HI/T3 for every bar (same rule as the HI/T3 column at each day).
+    static func hiT3Series(_ s: DeliverySeries, length: Int = 300) -> [Double?] {
+        let m = s.metric(value: true), n = hiSma
+        guard m.count >= n - 1 + length else { return Array(repeating: nil, count: m.count) }
+        let sm = DeliverySignal.avg(m, n, ema: DeliveryMetric.signalIsEMA)
+        let hi = DeliverySignal.highest(sm, length: length, full: false)
+        let t = T3Def.current.t3(T3Def.current.source(s))
+        return m.indices.map { i in
+            guard i >= n + length - 2, i < hi.count, let h = hi[i], i < t.count, let tv = t[i], tv > 0 else { return nil }
+            return h / tv
+        }
+    }
+
     static var hiSma: Int { DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "")?.smaLength ?? 22 }
 
     /// ta.highest(ta.sma(x, n), 300) / t3 on the last bar of x (nil until both exist: n − 1 + 300 bars for the
