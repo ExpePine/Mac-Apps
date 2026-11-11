@@ -136,6 +136,12 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
 
+        Window("F Formula Counts", id: "fdays") {
+            FormulaDaysView()
+                .environmentObject(vm)
+                .frame(minWidth: 820, minHeight: 520)
+        }
+
         Window("F Notes", id: "mbnotes") {
             MBNotesWindow()
                 .environmentObject(vm)

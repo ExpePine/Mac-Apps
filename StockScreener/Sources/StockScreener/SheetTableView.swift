@@ -37,6 +37,8 @@ struct SheetTableView: NSViewRepresentable {
     var columnMenu: ((Int) -> AnyView)? = nil
     /// Columns that have conditions or colors (their ▼ is highlighted).
     var markedColumns: Set<Int> = []
+    /// Small count after a header's name (e.g. how many stocks meet that column's condition).
+    var headerBadges: [Int: Int] = [:]
     /// When set, an "E" column is shown first: its color per row, and the panel it opens when clicked.
     var eColor: ((SheetRow) -> NSColor)? = nil
     var ePanel: ((SheetRow) -> AnyView)? = nil
@@ -161,6 +163,7 @@ struct SheetTableView: NSViewRepresentable {
             for column in table.tableColumns {
                 guard let index = Coordinator.columnIndex(column) else { continue }
                 var title = index < headers.count ? headers[index] : ""
+                if let n = headerBadges[index] { title += "  ✓\(n)" }
                 if index == sortColumn { title += sortDescending ? "  ▼" : "  ▲" }
                 column.title = title
                 if let cell = column.headerCell as? MenuHeaderCell {

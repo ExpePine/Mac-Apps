@@ -2,6 +2,8 @@ import SwiftUI
 
 /// "Filter" screen: only the columns you choose, advanced filters, sorting and cell colors.
 struct FilterView: View {
+    @AppStorage("filter.condCounts") private var showCondCounts = true
+    @State private var condCounts: [Int: Int] = [:]
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @State private var showColumns = false
@@ -96,6 +98,7 @@ struct FilterView: View {
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
                                    markedColumns: vm.columnsWithRules,
+                                   headerBadges: showCondCounts ? condCounts : [:],
                                    eColor: { row in (vm.eStatus[row.id] ?? .none).nsColor },
                                    ePanel: { row in
                                        AnyView(StockRulesView(stock: vm.stockName(row), row: row).environmentObject(vm))
@@ -141,6 +144,11 @@ struct FilterView: View {
         .onChange(of: vm.importVersion) { _ in refreshDayChange() }
         .onChange(of: live.tick) { _ in refreshDayChange() }
         .onChange(of: vm.timelineIndex) { _ in refreshDayChange() }
+        .task(id: "\(vm.filterVersion)|\(showCondCounts)") {
+            guard showCondCounts else { return }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if !Task.isCancelled { condCounts = vm.conditionCountsByColumn() }
+        }
         .onChange(of: vm.filterVersion) { _ in
             if dayChange.isEmpty { refreshDayChange() }
             flashIfNewDay()
@@ -218,6 +226,10 @@ struct FilterView: View {
                 AddToWatchlistButton(groups: [("Selected", vm.filterSelection.map { vm.rowKey($0) }), ("All shown", vm.filterRows.map { vm.rowKey($0) })],
                                      source: "Filter")
                 if let first = vm.filterSelection.first { EarningsSummaryButton(symbol: vm.rowKey(first), compact: false) }
+                Button { openWindow(id: "fdays") } label: { Label("F counts", systemImage: "chart.bar.doc.horizontal") }
+                    .help("How many stocks meet each F formula (notes, F alerts, F combinations), day by day")
+                Toggle(isOn: $showCondCounts) { Label("✓ counts", systemImage: "number") }
+                    .help("Show in each column header how many of all stocks meet that column's Filter condition(s) alone (✓123)")
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()

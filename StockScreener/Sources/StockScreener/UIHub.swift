@@ -33,6 +33,7 @@ enum AppWindows {
             AppWindow(title: "DEL chart", id: "delchart", icon: "chart.bar.xaxis", shortcut: "", note: "market-wide delivered vs traded value"),
             AppWindow(title: "Multibaggers", id: "multibaggers", icon: "chart.line.uptrend.xyaxis.circle", shortcut: "⌥⌘M", note: "≥ 30% in a month"),
             AppWindow(title: "F Notes", id: "mbnotes", icon: "note.text", shortcut: "⌥⇧⌘N", note: "your notes per multibagger + patterns"),
+            AppWindow(title: "F Formula Counts", id: "fdays", icon: "chart.bar.doc.horizontal", shortcut: "", note: "stocks meeting each F formula, per day"),
             AppWindow(title: "F Combinations", id: "mbcombos", icon: "list.bullet.rectangle", shortcut: "⌥⌘F", note: "saved multibagger combinations"),
             AppWindow(title: "Sectors", id: "sectors", icon: "square.grid.3x3", shortcut: "⇧⌘0", note: "rotation and regimes"),
             AppWindow(title: "My Picks", id: "picks", icon: "star.square.on.square", shortcut: "⌥⌘P", note: "returns since picked"),
