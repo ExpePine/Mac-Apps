@@ -18,7 +18,7 @@ extension ScreenerViewModel {
         for (col, conds) in byColumn {
             guard let i = table.index(of: col) else { continue }
             var issues: [String] = []
-            guard let p = FilterEngine.compile(FilterGroup(mode: .all, conditions: conds), table: table, issues: &issues) else { continue }
+            guard let p = FilterCompiler.compile(FilterGroup(mode: .all, conditions: conds), table: table, issues: &issues) else { continue }
             out[i] = rows.reduce(0) { $0 + (p($1) ? 1 : 0) }
         }
         return out
@@ -70,30 +70,30 @@ struct FFormula: Identifiable, Hashable {
         let stored = Array(HistoryStore.days().filter { $0 < liveKey }.suffix(max(1, lastDays)))
         days = stored + [liveKey]
         running = true; progress = 0
-        task = Task {
+        task = Task { @MainActor in
             var result: [String: [String: [String]?]] = [:]
             let current = vm.table
             for (k, d) in days.enumerated() {
                 if Task.isCancelled { break }
                 let isLive = d == liveKey && k == days.count - 1
-                var table: SheetTable?
-                func ensureTable() async -> SheetTable? {
-                    if let table { return table }
-                    if isLive { table = current; return table }
-                    var t = await Task.detached(priority: .userInitiated) { HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) } }.value
-                    if let tt = t, tt.headers.contains(where: { ScreenerViewModel.isDeliveryColumn($0) }),
-                       fs.contains(where: { f in tt.headers.contains { ScreenerViewModel.isDeliveryColumn($0) && f.key.contains($0) } }) {
-                        t = vm.withDeliveryValues(tt, asOf: d)
-                    }
-                    table = t; return t
+                let todo = fs.filter { f in
+                    if !isLive, let c = cache[d + "|" + f.key] { result[f.key, default: [:]][d] = .some(c); return false }
+                    return true
                 }
-                for f in fs {
-                    let ck = d + "|" + f.key
-                    if !isLive, let c = cache[ck] { result[f.key, default: [:]][d] = c; continue }
-                    guard let t = await ensureTable() else { result[f.key, default: [:]][d] = .some(nil); continue }
-                    let r = Self.evaluate(f, table: t, label: label)
-                    if !isLive { cache[ck] = r }
-                    result[f.key, default: [:]][d] = r
+                if !todo.isEmpty {
+                    var table: SheetTable? = isLive ? current : await Task.detached(priority: .userInitiated) {
+                        HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) }
+                    }.value
+                    if !isLive, let tt = table {
+                        let del = tt.headers.filter { ScreenerViewModel.isDeliveryColumn($0) }
+                        if todo.contains(where: { f in del.contains { f.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
+                    }
+                    for f in todo {
+                        guard let t = table else { result[f.key, default: [:]][d] = .some(nil); continue }
+                        let r = Self.evaluate(f, table: t, label: label)
+                        if !isLive { cache[d + "|" + f.key] = .some(r) }
+                        result[f.key, default: [:]][d] = .some(r)
+                    }
                 }
                 progress = Double(k + 1) / Double(days.count)
                 if k % 3 == 0 { counts = result; await Task.yield() }
@@ -108,7 +108,7 @@ struct FFormula: Identifiable, Hashable {
         let used = t.headers.indices.filter { i in f.key.contains(t.headers[i]) && t.headers[i].count > 1 }
         for i in used where !t.rows.contains(where: { $0.number(i) != nil || !$0.text(i).isEmpty }) { return nil }
         var issues: [String] = []
-        guard let p = FilterEngine.compile(f.group, table: t, issues: &issues) else { return nil }
+        guard let p = FilterCompiler.compile(f.group, table: t, issues: &issues) else { return nil }
         return t.rows.filter(p).map { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() }
     }
 }
