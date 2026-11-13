@@ -32,6 +32,9 @@ struct FFormula: Identifiable, Hashable {
     let name: String
     let source: String            // "Note · ABC (Aug 2026)", "Alert", "Combination"
     let group: FilterGroup
+    var quick: String? = nil      // F text for editing (notes / my formulas)
+    var mineID: UUID? = nil       // one of "My formulas" (edit in place)
+    var alertID: UUID? = nil      // an F alert (edit updates the alert)
     var key: String { group.describe }
     static func == (a: FFormula, b: FFormula) -> Bool { a.key == b.key }
     func hash(into h: inout Hasher) { h.combine(key) }
@@ -45,19 +48,40 @@ struct FFormula: Identifiable, Hashable {
     @Published private(set) var running = false
     @Published private(set) var progress = 0.0
     private var cache: [String: [String]?] = [:]             // "day|formula" → symbols
+
+    /// Formulas you typed or edited here (kept for good).
+    struct Mine: Codable, Identifiable, Equatable { var id = UUID(); var name: String; var quick: String }
+    @Published var mine: [Mine] = { (UserDefaults.standard.data(forKey: "fdays.mine")).flatMap { try? JSONDecoder().decode([Mine].self, from: $0) } ?? [] }() {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(mine), forKey: "fdays.mine") }
+    }
+    /// Rows you hid (formula keys).
+    @Published var hidden: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "fdays.hidden") ?? []) {
+        didSet { UserDefaults.standard.set(Array(hidden), forKey: "fdays.hidden") }
+    }
+    static func group(_ quick: String, vm: ScreenerViewModel) -> FilterGroup? {
+        guard let f = try? QuickF.formula(quick, headers: vm.headers) else { return nil }
+        return FilterGroup(mode: .all, conditions: [FilterCondition(kind: .formula, formula: f)])
+    }
     private var task: Task<Void, Never>?
 
     /// Every formula from F: note formulas, F alerts, saved F combinations (duplicates dropped).
-    func formulas(_ vm: ScreenerViewModel) -> [FFormula] {
+    func formulas(_ vm: ScreenerViewModel, includeHidden: Bool = false) -> [FFormula] {
         var out: [FFormula] = [], seen = Set<String>()
-        func add(_ f: FFormula) { if f.group.activeCount > 0, seen.insert(f.key).inserted { out.append(f) } }
+        func add(_ f: FFormula) {
+            guard f.group.activeCount > 0, includeHidden || !hidden.contains(f.key), seen.insert(f.key).inserted else { return }
+            out.append(f)
+        }
+        for m in mine { if let g = Self.group(m.quick, vm: vm) { add(FFormula(name: m.name.isEmpty ? m.quick : m.name, source: "My formula · \(m.quick)", group: g, quick: m.quick, mineID: m.id)) } }
         for n in MBNoteStore.shared.notes.values.sorted(by: { $0.updated > $1.updated }) {
             let q = NoteAlerts.quick(n.text, headers: vm.headers)
             guard !q.isEmpty, let f = try? QuickF.formula(q, headers: vm.headers) else { continue }
             add(FFormula(name: q, source: "Note · \(n.symbol) \(n.month)",
-                         group: FilterGroup(mode: .all, conditions: [FilterCondition(kind: .formula, formula: f)])))
+                         group: FilterGroup(mode: .all, conditions: [FilterCondition(kind: .formula, formula: f)]), quick: q))
         }
-        for r in NoteAlerts.rules(vm) { add(FFormula(name: String(r.name.dropFirst(NoteAlerts.prefix.count)), source: "F alert", group: r.filter)) }
+        for r in NoteAlerts.rules(vm) {
+            let q = String(r.name.dropFirst(NoteAlerts.prefix.count))
+            add(FFormula(name: q, source: "F alert", group: r.filter, quick: q, alertID: r.id))
+        }
         for c in MBFilterCenter.shared.combos { add(FFormula(name: c.name, source: "F combination", group: c.group)) }
         // the Filter's own conditions: the whole Filter, then each column's condition(s) alone
         let fg = vm.settings.filterGroup
@@ -141,12 +165,15 @@ struct FormulaDaysView: View {
     @AppStorage("fdays.mode") private var mode = 0                 // 0 = stocks count, 1 = change %
     @AppStorage("fdays.sort") private var sortBy = 0               // 0 = as listed, 1 = avg %, 2 = win %
     @State private var success: [String: FSuccess] = [:]
+    @State private var editing: FFormula?
+    @State private var newFormula = false
+    @State private var showHidden = false
     @State private var selected: String?
     @State private var cell: (formula: String, day: String)?
     @State private var showCell = false
 
     var body: some View {
-        let fs = c.formulas(vm)
+        let fs = c.formulas(vm, includeHidden: showHidden)
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("F formulas & Filter conditions — stocks meeting each one, and how they did").font(.title3.bold())
@@ -156,6 +183,8 @@ struct FormulaDaysView: View {
                 Stepper("", value: $lastDays, in: 1...1000, step: 10).labelsHidden()
                 Text("days")
                 if c.running { ProgressView(value: c.progress).frame(width: 100) }
+                Button { newFormula = true } label: { Label("New formula", systemImage: "plus") }
+                    .popover(isPresented: $newFormula) { FormulaEditor(start: nil) { recount() }.environmentObject(vm) }
                 Button { c.run(vm, lastDays: lastDays) } label: { Label("Recount", systemImage: "arrow.clockwise") }.disabled(c.running)
             }
             HStack(spacing: 10) {
@@ -170,6 +199,10 @@ struct FormulaDaysView: View {
             }
             Text("Formulas come from your F notes (the recognised chips), F alerts and saved F combinations. Each cell = how many stocks met the formula on that stored day; the last column is today's live data. — = a column the formula uses wasn't stored that day. Click a number for the stocks.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !c.hidden.isEmpty {
+                Button(showHidden ? "Hide hidden rows" : "Show \(c.hidden.count) hidden row\(c.hidden.count == 1 ? "" : "s")") { showHidden.toggle() }
+                    .buttonStyle(.link).font(.caption)
+            }
             if fs.isEmpty {
                 Text("No formulas yet — write a note in F (count=5 + DELSMA>70 …), make an F alert, or save an F combination.").foregroundStyle(.secondary)
                 Spacer()
@@ -180,6 +213,7 @@ struct FormulaDaysView: View {
         }
         .padding(16)
         .onAppear { if c.counts.isEmpty && !c.running { c.run(vm, lastDays: lastDays) } }
+        .sheet(item: $editing) { f in FormulaEditor(start: f) { recount() }.environmentObject(vm) }
         .onChange(of: lastDays) { _ in c.run(vm, lastDays: max(1, lastDays)) }
         .task(id: "\(c.counts.count)|\(c.running)|\(horizon)|\(c.days.count)") {
             guard !c.running else { return }
@@ -217,6 +251,8 @@ struct FormulaDaysView: View {
             }
         }
     }
+
+    private func recount() { c.run(vm, lastDays: max(1, lastDays)) }
 
     private func sorted(_ fs: [FFormula]) -> [FFormula] {
         switch sortBy {
@@ -257,6 +293,21 @@ struct FormulaDaysView: View {
                             .background(selected == f.key ? Color.accentColor.opacity(0.12) : Color.clear)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Edit…") { editing = f }
+                            Button("Duplicate as my formula") {
+                                c.mine.append(.init(name: "", quick: f.quick ?? f.name)); recount()
+                            }.disabled(f.quick == nil)
+                            if let id = f.mineID { Button("Delete", role: .destructive) { c.mine.removeAll { $0.id == id } } }
+                            Button(c.hidden.contains(f.key) ? "Show this row" : "Hide this row") {
+                                if c.hidden.contains(f.key) { c.hidden.remove(f.key) } else { c.hidden.insert(f.key) }
+                            }
+                        }
+                        .overlay(alignment: .trailing) {
+                            Button { editing = f } label: { Image(systemName: "pencil") }
+                                .buttonStyle(.borderless).foregroundStyle(.secondary).padding(.trailing, 6)
+                                .help("Edit this formula (right-click for more)")
+                        }
                         let st = success[f.key]
                         Text("\(st?.signals ?? 0)").font(.caption.monospacedDigit()).frame(width: 52)
                             .help("\(st?.signals ?? 0) stock-days with prices after them · \(st?.full ?? 0) have the full \(horizon) days (the rest are measured to the latest close)")
@@ -497,5 +548,75 @@ struct DayStocksView: View {
             r.worst = rest.min().map { $0 / base - 1 }
         }
         return r
+    }
+}
+
+
+// MARK: - Editing a formula
+
+/// Edit an F formula. My formulas change in place; F alerts update the alert; note / combination / Filter rows
+/// are saved as a new "My formula" (the note itself is left as you wrote it).
+struct FormulaEditor: View {
+    @EnvironmentObject var vm: ScreenerViewModel
+    @ObservedObject private var c = FormulaDaysCenter.shared
+    @Environment(\.dismiss) private var dismiss
+    let start: FFormula?
+    let saved: () -> Void
+    @State private var name = ""
+    @State private var quick = ""
+    @State private var error: String?
+    @State private var now: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(start == nil ? "New formula" : "Edit formula").font(.headline)
+            if let s = start { Text(s.source).font(.caption).foregroundStyle(.secondary) }
+            TextField("Name (optional)", text: $name).textFieldStyle(.roundedBorder)
+            TextField("count=5 + DELSMA>90 + C/DL2C>1", text: $quick, axis: .vertical)
+                .textFieldStyle(.roundedBorder).font(.body.monospaced()).lineLimit(2...6)
+            Text("+ = AND · | = OR · NOT col · col>5, col=1, col<0.9 … column names as in the Filter").font(.caption2).foregroundStyle(.secondary)
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            else if let now { Text("\(now) stocks meet it today").font(.caption).foregroundStyle(.green) }
+            HStack {
+                if start?.mineID == nil, start != nil { Text(note).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(start?.mineID != nil || start?.alertID != nil || start == nil ? "Save" : "Save as my formula") { save() }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(error != nil || quick.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(16).frame(width: 520)
+        .onAppear {
+            quick = start?.quick ?? start?.name ?? ""
+            if let id = start?.mineID { name = c.mine.first { $0.id == id }?.name ?? "" }
+        }
+        .task(id: quick) {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            do {
+                let f = try QuickF.formula(quick, headers: vm.headers)
+                error = nil; now = NoteAlerts.matches(f, vm: vm).count
+            } catch { self.error = (error as? FormulaError)?.message ?? error.localizedDescription; now = nil }
+        }
+    }
+
+    private var note: String {
+        if start?.alertID != nil { return "" }
+        return "Saved as a new row under My formulas — the original note / combination stays as it is."
+    }
+
+    private func save() {
+        let q = quick.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = start?.mineID, let i = c.mine.firstIndex(where: { $0.id == id }) {
+            c.mine[i].quick = q; c.mine[i].name = name
+        } else if let aid = start?.alertID, let i = vm.settings.buyTriggers.firstIndex(where: { $0.id == aid }),
+                  let f = try? QuickF.formula(q, headers: vm.headers) {
+            vm.settings.buyTriggers[i].name = NoteAlerts.prefix + q
+            vm.settings.buyTriggers[i].filter = FilterGroup(mode: .all, conditions: [FilterCondition(kind: .formula, formula: f)])
+        } else {
+            c.mine.insert(.init(name: name, quick: q), at: 0)
+            if let s = start, s.mineID == nil, s.alertID == nil, s.quick != nil { c.hidden.insert(s.key) }   // the edited copy replaces the note's row
+        }
+        saved()
+        dismiss()
     }
 }
