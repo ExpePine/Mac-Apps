@@ -227,7 +227,9 @@ struct ChartViewer: View {
         centreSig = ChartCentre.title(vm.chartContext, vm)
         // Fast path: the same TradingView layout is already open — switch its symbol in place (about a second)
         // instead of loading the whole TradingView app again (several seconds). Falls back to a full load.
-        if let cur = web.view.url, !web.view.isLoading, cur.host == url.host, !Self.noFastSwitch.contains(layout),
+        // Off by default: on view-only / shared layouts TradingView reports the new symbol but keeps drawing the old one.
+        if UserDefaults.standard.bool(forKey: "chart.fastSwitch"),
+           let cur = web.view.url, !web.view.isLoading, cur.host == url.host, !Self.noFastSwitch.contains(layout),
            ChartLinkBook.layoutID(cur.absoluteString) == layout, let want = TVRange.symbol(in: url) {
             let wanted = url, sym = symbol
             let ticker = (want.split(separator: ":").last.map(String.init) ?? want).uppercased()
