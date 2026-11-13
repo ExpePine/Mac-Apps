@@ -400,7 +400,7 @@ struct GainerAnalysisView: View {
                 Button { showColumns = true } label: {
                     Label(GainerPrefs.allowed.isEmpty ? "Columns: all" : "Columns: \(GainerPrefs.allowed.count) chosen", systemImage: "checklist")
                 }
-                .popover(isPresented: $showColumns) { ColumnChooser(columns: a.usableColumns) { a.suggest() } }
+                .popover(isPresented: $showColumns) { GainerColumnChooser(columns: a.usableColumns) { a.suggest() } }
                 .help("Choose which columns may appear in suggestions, and describe what each one means (the AI reads your descriptions)")
                 Stepper("Up to \(maxRules) rules", value: $maxRules, in: 1...5).fixedSize()
                     .onChange(of: maxRules) { v in GainerPrefs.maxRules = v; a.suggest() }
@@ -547,7 +547,7 @@ struct GainerAnalysisView: View {
 }
 
 /// Choose the columns suggestions may use, and describe what each means.
-struct ColumnChooser: View {
+struct GainerColumnChooser: View {
     let columns: [String]
     let changed: () -> Void
     @State private var allowed = GainerPrefs.allowed
