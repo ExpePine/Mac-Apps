@@ -53,13 +53,6 @@ import SwiftUI
             var samples: [Sample] = []
             let current = vm.table
             var series: [String: ([String], [Double])] = [:]
-            func closes(_ s: String) -> ([String], [Double])? {
-                if let x = series[s] { return x.0.isEmpty ? nil : x }
-                var v: ([String], [Double]) = ([], [])
-                if let p = vm.priceBook.series(for: s), !p.days.isEmpty { v = (p.days, p.closes) }
-                else if let d = DeliveryCenter.shared.book.series[s], !d.days.isEmpty { v = (d.days, d.close) }
-                series[s] = v; return v.0.isEmpty ? nil : v
-            }
             var partial = false
             for (k, d) in days.enumerated() {
                 guard var t = await Task.detached(priority: .userInitiated, operation: { HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) } }).value else { continue }
@@ -69,7 +62,12 @@ import SwiftUI
                 let numeric = t.headers.indices.filter { $0 != label }
                 for r in t.rows where p(r) {
                     let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
-                    guard let (ds, cs) = closes(sym), let i = FSuccessMath.index(ds, d), i < cs.count - 1, cs[i] > 0 else { continue }
+                    if series[sym] == nil {
+                        if let p = vm.priceBook.series(for: sym), !p.days.isEmpty { series[sym] = (p.days, p.closes) }
+                        else if let dd = DeliveryCenter.shared.book.series[sym], !dd.days.isEmpty { series[sym] = (dd.days, dd.close) }
+                        else { series[sym] = ([], []) }
+                    }
+                    guard let (ds, cs) = series[sym], !ds.isEmpty, let i = FSuccessMath.index(ds, d), i < cs.count - 1, cs[i] > 0 else { continue }
                     let j = min(i + horizon, cs.count - 1)
                     if j < i + horizon { partial = true }
                     var vals: [Int: Double] = [:]
