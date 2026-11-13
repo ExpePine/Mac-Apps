@@ -26,6 +26,8 @@ struct ChartViewer: View {
     private let syncTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     private var symbol: String { vm.chartSymbol ?? "" }
+    @State private var lastStep = 1
+    @State private var prevSymbol: String?                 // +1 = going forward through the list, −1 = back
     @State private var centreSig = ""
 
     var body: some View {
@@ -86,8 +88,11 @@ struct ChartViewer: View {
         .task(id: symbol + "|" + (vm.chartGoTo ?? "")) { if !symbol.isEmpty { MBNoteFocus.shared.setChart(symbol, day: vm.chartGoTo) } }
         .onAppear { load(); vm.refreshChartLinksIfStale(); ImpressionStore.shared.begin(symbol, place: "Chart viewer") }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
-        .onChange(of: vm.chartSymbol) { _ in load(); lastTV = ""; syncFails = 0; ImpressionStore.shared.begin(symbol, place: "Chart viewer") }
-        .onDisappear { ImpressionStore.shared.end("Chart viewer") }
+        .onChange(of: vm.chartSymbol) { new in
+            if let o = prevSymbol, let a = vm.chartQueue.firstIndex(of: o), let b = new.flatMap({ vm.chartQueue.firstIndex(of: $0) }) { lastStep = b >= a ? 1 : -1 }
+            prevSymbol = new
+            load(); lastTV = ""; syncFails = 0; ImpressionStore.shared.begin(symbol, place: "Chart viewer") }
+        .onDisappear { ImpressionStore.shared.end("Chart viewer"); web.dropPreloaded() }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let s = ChartCentre.title(vm.chartContext, vm)
             if !centreSig.isEmpty && s != centreSig { centreSig = s; recentre() }
@@ -182,6 +187,14 @@ struct ChartViewer: View {
                     if let u = web.view.url ?? vm.chartURL(symbol) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u.absoluteString, forType: .string) }
                 }
                 Divider()
+                Picker("Preload next charts", selection: Binding(get: { WebHolder.preloadCount }, set: {
+                    UserDefaults.standard.set($0, forKey: "viewer.preload"); if $0 == 0 { web.dropPreloaded() }
+                })) {
+                    Text("Off (least memory)").tag(0)
+                    Text("Next 1 (about +150–300 MB)").tag(1)
+                    Text("Next 2 (about +300–600 MB)").tag(2)
+                }
+                Divider()
                 ForEach(0..<TVAccounts.count, id: \.self) { a in
                     Button("Sign in — \(TVAccounts.name(a)) (\(a == 0 ? "Chart 1" : "Chart 2"))…") {
                         web.openSignIn(account: a)
@@ -251,9 +264,32 @@ struct ChartViewer: View {
             }
             return
         }
-        web.view.stopLoading()
-        web.view.load(URLRequest(url: url))
-        centreOnGoTo()
+        if web.adopt(url, account: acct) {
+            // preloaded: already loaded off-screen — just shown
+            vm.chartStatus = status + " · preloaded"
+            centreOnGoTo()
+        } else {
+            web.view.stopLoading()
+            web.view.load(URLRequest(url: url))
+            centreOnGoTo()
+        }
+        preloadNext(column: c, account: acct)
+    }
+
+    /// Loads the next stock(s) in the list off-screen once this one has had a head start.
+    private func preloadNext(column c: Int, account acct: Int) {
+        let sym = symbol
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            guard symbol == sym, WebHolder.preloadCount > 0, let i = vm.chartQueue.firstIndex(of: sym) else { return }
+            var next: [String] = []
+            let dir = lastStep >= 0 ? 1 : -1
+            for k in 1...max(1, WebHolder.preloadCount) {
+                let j = i + dir * k
+                if vm.chartQueue.indices.contains(j) { next.append(vm.chartQueue[j]) }
+            }
+            let urls = next.compactMap { vm.chartSource($0, column: c).url }
+            web.preload(urls, account: acct, size: web.view.bounds.size)
+        }
     }
 
     /// The app-wide Centre choice changed: re-centre this chart without reloading it.
@@ -379,6 +415,53 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
 
     private func webView(for a: Int) -> WKWebView {
         if let v = views[a] { return v }
+        let v = make(a)
+        views[a] = v
+        return v
+    }
+
+    // MARK: Preloading — the next stock's chart loads in a hidden page; stepping to it just swaps pages (instant).
+    @Published private(set) var swaps = 0
+    private var spares: [String: WKWebView] = [:]       // "account|url" → page loading / loaded off-screen
+    private var spareOrder: [String] = []
+    static var preloadCount: Int { UserDefaults.standard.object(forKey: "viewer.preload") as? Int ?? 1 }
+
+    /// If the page for `url` was preloaded, shows it (old page is closed) and returns true.
+    func adopt(_ url: URL, account a: Int) -> Bool {
+        let k = "\(a)|\(url.absoluteString)"
+        guard let v = spares.removeValue(forKey: k) else { return false }
+        spareOrder.removeAll { $0 == k }
+        if let old = views[a], old !== v { Self.close(old) }
+        views[a] = v
+        swaps += 1
+        return true
+    }
+
+    /// Starts loading these charts off-screen (keeps at most `preloadCount`; drops the rest).
+    func preload(_ urls: [URL], account a: Int, size: CGSize) {
+        let n = Self.preloadCount
+        let want = Array(urls.prefix(n)).map { "\(a)|\($0.absoluteString)" }
+        for k in spares.keys where !want.contains(k) { if let v = spares.removeValue(forKey: k) { Self.close(v) } }
+        spareOrder = spareOrder.filter { want.contains($0) }
+        for (k, u) in zip(want, urls.prefix(n)) where spares[k] == nil {
+            if views[a]?.url?.absoluteString == u.absoluteString { continue }
+            let v = make(a)
+            v.frame = NSRect(origin: .zero, size: size.width > 100 ? size : CGSize(width: 1200, height: 700))
+            v.load(URLRequest(url: u))
+            spares[k] = v; spareOrder.append(k)
+        }
+    }
+
+    func dropPreloaded() { spares.values.forEach(Self.close); spares = [:]; spareOrder = [] }
+
+    private static func close(_ v: WKWebView) {
+        v.stopLoading()
+        v.navigationDelegate = nil; v.uiDelegate = nil
+        v.removeFromSuperview()
+        v.loadHTMLString("", baseURL: nil)
+    }
+
+    private func make(_ a: Int) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = TVAccounts.store(a)
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
@@ -388,7 +471,6 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         v.customUserAgent = Self.userAgent
         v.uiDelegate = self
         v.navigationDelegate = self
-        views[a] = v
         return v
     }
 
@@ -439,7 +521,7 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
     // links that want a new tab (target=_blank) without a pop-up: open in the same view
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if navigationAction.targetFrame == nil, views.values.contains(where: { $0 === webView }), let u = navigationAction.request.url {
+        if navigationAction.targetFrame == nil, views.values.contains(where: { $0 === webView }) || spares.values.contains(where: { $0 === webView }), let u = navigationAction.request.url {
             webView.load(URLRequest(url: u))
             decisionHandler(.cancel)
             return
