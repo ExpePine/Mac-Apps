@@ -105,9 +105,18 @@ struct FFormula: Identifiable, Hashable {
         return out
     }
 
+    /// Extra conditions every formula must also meet ("Also require": e.g. Safety>2, and/or the Filter's conditions).
+    var also: FilterGroup?
+
+    /// The formula as counted: with "Also require" ANDed in.
+    func effective(_ f: FFormula) -> FFormula {
+        guard let a = also, a.activeCount > 0 else { return f }
+        return FFormula(name: f.name, source: f.source, group: FilterGroup(mode: .all, groups: [f.group, a]), quick: f.quick)
+    }
+
     func run(_ vm: ScreenerViewModel, lastDays: Int) {
         task?.cancel()
-        let fs = formulas(vm)
+        let fs = formulas(vm).map { (orig: $0, eff: effective($0)) }
         guard let label = vm.labelIndex else { return }
         let liveKey = HistoryStore.dayKey(vm.dataDay(of: vm.table))
         let stored = Array(HistoryStore.days().filter { $0 < liveKey }.suffix(max(1, lastDays)))
@@ -119,8 +128,8 @@ struct FFormula: Identifiable, Hashable {
             for (k, d) in days.enumerated() {
                 if Task.isCancelled { break }
                 let isLive = d == liveKey && k == days.count - 1
-                let todo = fs.filter { f in
-                    if !isLive, let c = cache[d + "|" + f.key] { result[f.key, default: [:]][d] = .some(c); return false }
+                let todo = fs.filter { p in
+                    if !isLive, let c = cache[d + "|" + p.eff.key] { result[p.orig.key, default: [:]][d] = .some(c); return false }
                     return true
                 }
                 if !todo.isEmpty {
@@ -129,13 +138,13 @@ struct FFormula: Identifiable, Hashable {
                     }.value
                     if !isLive, let tt = table {
                         let del = tt.headers.filter { ScreenerViewModel.isDeliveryColumn($0) }
-                        if todo.contains(where: { f in del.contains { f.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
+                        if todo.contains(where: { p in del.contains { p.eff.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
                     }
-                    for f in todo {
-                        guard let t = table else { result[f.key, default: [:]][d] = .some(nil); continue }
-                        let r = Self.evaluate(f, table: t, label: label)
-                        if !isLive { cache[d + "|" + f.key] = .some(r) }
-                        result[f.key, default: [:]][d] = .some(r)
+                    for p in todo {
+                        guard let t = table else { result[p.orig.key, default: [:]][d] = .some(nil); continue }
+                        let r = Self.evaluate(p.eff, table: t, label: label)
+                        if !isLive { cache[d + "|" + p.eff.key] = .some(r) }
+                        result[p.orig.key, default: [:]][d] = .some(r)
                     }
                 }
                 progress = Double(k + 1) / Double(days.count)
@@ -147,7 +156,7 @@ struct FFormula: Identifiable, Hashable {
     }
 
     /// Symbols meeting the formula in `t`; nil when a column it uses has no values that day.
-    private static func evaluate(_ f: FFormula, table t: SheetTable, label: Int) -> [String]? {
+    static func evaluate(_ f: FFormula, table t: SheetTable, label: Int) -> [String]? {
         let used = t.headers.indices.filter { i in f.key.contains(t.headers[i]) && t.headers[i].count > 1 }
         for i in used where !t.rows.contains(where: { $0.number(i) != nil || !$0.text(i).isEmpty }) { return nil }
         var issues: [String] = []
@@ -168,6 +177,10 @@ struct FormulaDaysView: View {
     @State private var editing: FFormula?
     @State private var newFormula = false
     @State private var showHidden = false
+    @AppStorage("fdays.alsoText") private var alsoText = ""
+    @AppStorage("fdays.alsoFilter") private var alsoFilter = false
+    @State private var alsoError: String?
+    @State private var analysing: FFormula?
     @State private var selected: String?
     @State private var cell: (formula: String, day: String)?
     @State private var showCell = false
@@ -199,6 +212,17 @@ struct FormulaDaysView: View {
             }
             Text("Formulas come from your F notes (the recognised chips), F alerts and saved F combinations. Each cell = how many stocks met the formula on that stored day; the last column is today's live data. — = a column the formula uses wasn't stored that day. Click a number for the stocks.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle").foregroundStyle(alsoActive ? Color.orange : Color.secondary)
+                Text("Also require")
+                TextField("e.g. Safety>2 + DLVR>40  (any Filter columns)", text: $alsoText).textFieldStyle(.roundedBorder).font(.callout.monospaced())
+                    .onSubmit { applyAlso() }
+                Toggle("and the Filter's conditions", isOn: $alsoFilter).toggleStyle(.checkbox)
+                Button("Apply") { applyAlso() }
+                if alsoActive { Button("Clear") { alsoText = ""; alsoFilter = false; applyAlso() } }
+            }
+            .help("Every formula below is counted only for stocks that also meet these — counts, success and the stock lists all change")
+            if let alsoError { Text(alsoError).font(.caption).foregroundStyle(.red) }
             if !c.hidden.isEmpty {
                 Button(showHidden ? "Hide hidden rows" : "Show \(c.hidden.count) hidden row\(c.hidden.count == 1 ? "" : "s")") { showHidden.toggle() }
                     .buttonStyle(.link).font(.caption)
@@ -212,7 +236,9 @@ struct FormulaDaysView: View {
             }
         }
         .padding(16)
-        .onAppear { if c.counts.isEmpty && !c.running { c.run(vm, lastDays: lastDays) } }
+        .onAppear { if c.counts.isEmpty && !c.running { applyAlso() } }
+        .onChange(of: vm.settings.filterGroup) { _ in if alsoFilter { applyAlso() } }
+        .sheet(item: $analysing) { f in GainerAnalysisView(formula: f, horizon: max(1, horizon)).environmentObject(vm) }
         .sheet(item: $editing) { f in FormulaEditor(start: f) { recount() }.environmentObject(vm) }
         .onChange(of: lastDays) { _ in c.run(vm, lastDays: max(1, lastDays)) }
         .task(id: "\(c.counts.count)|\(c.running)|\(horizon)|\(c.days.count)") {
@@ -253,6 +279,21 @@ struct FormulaDaysView: View {
     }
 
     private func recount() { c.run(vm, lastDays: max(1, lastDays)) }
+
+    private var alsoActive: Bool { !alsoText.trimmingCharacters(in: .whitespaces).isEmpty || alsoFilter }
+
+    private func applyAlso() {
+        var groups: [FilterGroup] = []
+        alsoError = nil
+        let t = alsoText.trimmingCharacters(in: .whitespaces)
+        if !t.isEmpty {
+            if let g = FormulaDaysCenter.group(t, vm: vm) { groups.append(g) }
+            else { alsoError = "Also require: " + ((try? QuickF.formula(t, headers: vm.headers)).map { _ in "" } ?? "check the column names / syntax") }
+        }
+        if alsoFilter, vm.settings.filterGroup.activeCount > 0 { groups.append(vm.settings.filterGroup) }
+        c.also = groups.isEmpty ? nil : FilterGroup(mode: .all, groups: groups)
+        recount()
+    }
 
     private func sorted(_ fs: [FFormula]) -> [FFormula] {
         switch sortBy {
@@ -295,6 +336,7 @@ struct FormulaDaysView: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button("Edit…") { editing = f }
+                            Button("Analyse max gainers → suggest a better formula…") { analysing = f }
                             Button("Duplicate as my formula") {
                                 c.mine.append(.init(name: "", quick: f.quick ?? f.name)); recount()
                             }.disabled(f.quick == nil)
@@ -304,9 +346,14 @@ struct FormulaDaysView: View {
                             }
                         }
                         .overlay(alignment: .trailing) {
-                            Button { editing = f } label: { Image(systemName: "pencil") }
-                                .buttonStyle(.borderless).foregroundStyle(.secondary).padding(.trailing, 6)
-                                .help("Edit this formula (right-click for more)")
+                            HStack(spacing: 8) {
+                                Button { analysing = f } label: { Image(systemName: "wand.and.stars") }
+                                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                    .help("What do this formula's biggest gainers have in common? Suggests a sharper formula")
+                                Button { editing = f } label: { Image(systemName: "pencil") }
+                                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                    .help("Edit this formula (right-click for more)")
+                            }.padding(.trailing, 6)
                         }
                         let st = success[f.key]
                         Text("\(st?.signals ?? 0)").font(.caption.monospacedDigit()).frame(width: 52)
