@@ -681,6 +681,15 @@ enum TVRange {
         """
     }
 
+    /// What the page is showing now: TradingView's symbol() and the window title, for checking a switch really happened.
+    static let shownBody = finder + """
+    var c = __ssChart(), s = '';
+    try { s = (c && c.symbol) ? String(c.symbol()) : ''; } catch (e) {}
+    var leg = '';
+    try { var el = document.querySelector('[data-name="legend-source-title"]'); leg = el ? el.textContent : ''; } catch (e) {}
+    return s + '|' + document.title + '|' + leg;
+    """
+
     /// Returns "from,to" (unix seconds) or a short reason it couldn't.
     static let getBody = finder + """
     var c = __ssChart();

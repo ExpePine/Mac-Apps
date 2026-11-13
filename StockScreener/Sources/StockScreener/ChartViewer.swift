@@ -4,6 +4,8 @@ import WebKit
 /// In-app chart window: opens the stock's chart link (e.g. TradingView) in a built-in browser that keeps your login,
 /// with ◀ ▶ through the list it was opened from, and one-click snapshots stored per stock.
 struct ChartViewer: View {
+    /// Layouts where the in-place symbol switch didn't take (this session): always load them in full.
+    @MainActor static var noFastSwitch = Set<String>()
     @EnvironmentObject var vm: ScreenerViewModel
     @Environment(\.openWindow) private var openWindow
     @StateObject private var web = WebHolder()
@@ -225,12 +227,25 @@ struct ChartViewer: View {
         centreSig = ChartCentre.title(vm.chartContext, vm)
         // Fast path: the same TradingView layout is already open — switch its symbol in place (about a second)
         // instead of loading the whole TradingView app again (several seconds). Falls back to a full load.
-        if let cur = web.view.url, !web.view.isLoading, cur.host == url.host,
+        if let cur = web.view.url, !web.view.isLoading, cur.host == url.host, !Self.noFastSwitch.contains(layout),
            ChartLinkBook.layoutID(cur.absoluteString) == layout, let want = TVRange.symbol(in: url) {
-            let wanted = url
+            let wanted = url, sym = symbol
+            let ticker = (want.split(separator: ":").last.map(String.init) ?? want).uppercased()
+            func full() { web.view.stopLoading(); web.view.load(URLRequest(url: wanted)); centreOnGoTo() }
             TVRange.run(web.view, TVRange.setSymbolBody(want)) { r in
-                if r != "ok" { web.view.stopLoading(); web.view.load(URLRequest(url: wanted)) }
-                centreOnGoTo()
+                guard symbol == sym else { return }
+                guard r == "ok" else { full(); return }
+                // TradingView can say "ok" yet keep the old stock (view-only / shared layouts, a page still
+                // starting up): check what it really shows, else load the whole page and stop fast-switching it
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    guard symbol == sym else { return }
+                    TVRange.run(web.view, TVRange.shownBody) { shown in
+                        guard symbol == sym else { return }
+                        let parts = shown.uppercased().split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+                        let ok = parts.contains { $0.contains(ticker) }
+                        if ok { centreOnGoTo() } else { Self.noFastSwitch.insert(layout); full() }
+                    }
+                }
             }
             return
         }
