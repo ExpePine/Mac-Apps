@@ -543,7 +543,7 @@ struct DeliveryColumns {
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
-    var delSmaC: Double? = nil   // DELSMAC = today's % change in the selected signal ÷ its ta.highest(%, 300)
+    var delSmaC: Double? = nil   // DELSMAC = ta.percentrank(today's % change in the selected signal, 300)
     var del2: Double? = nil      // DEL2 = DELI × 100 / ta.highest(DELI, 100 or 300), DELI = DELIV_QTY × CLOSE
     var del2c: Double? = nil     // DEL2C = ta.valuewhen(DEL2 == 100, close, 0)
     var delsmaDays: Int? = nil   // DAYS_DELSMA = ta.barssince(DELSMA > threshold) (0 = true today, nil = never / not enough data)
@@ -613,10 +613,11 @@ struct DeliveryColumns {
 
     /// DELSMAC on bar i — the selected Delivery signal series S (Delivery Analysis: DELIV_QTY×CLOSE, DELIV_QTY,
     /// or its SMA / EMA 22…300):
-    ///   chg = (S / S[1] − 1) × 100            (today's % change)
-    ///   DELSMAC = chg / ta.highest(chg, 300)  (1 = the biggest % rise in 300 days; 0.5 = half of it; negative = it fell)
-    /// Pine rules: na until the average exists and 300 changes are there (with "full" history on); na when the
-    /// 300-day highest change isn't above 0.
+    ///   chg     = (S / S[1] − 1) × 100          (today's % change)
+    ///   DELSMAC = ta.percentrank(chg, 300)      (0–100: % of the previous 300 changes that were ≤ today's;
+    ///                                            100 = today's rise beats every day of the last 300)
+    /// Pine rules: na until the average exists and 300 earlier changes are there (with "full" history on);
+    /// days whose previous S is 0 have no % change and are skipped.
     static func delSmaC(_ s: DeliverySeries, at i: Int, metric k: DeliveryMetric = .current, length: Int = 300) -> Double? {
         guard i < s.qty.count, i > 0 else { return nil }
         let raw: [Double] = k == .qty ? Array(s.qty[...i]) : Array(s.metric(value: true)[...i])
@@ -628,14 +629,15 @@ struct DeliveryColumns {
             start = n - 1                                     // the average is na before this bar
         }
         let end = x.count - 1
-        let from = max(start + 1, end - length + 1)           // the last `length` changes
-        guard end >= from else { return nil }
-        if full && end - from + 1 < length { return nil }
-        var chg: [Double] = []
-        chg.reserveCapacity(end - from + 1)
-        for j in from...end where x[j - 1] > 0 { chg.append((x[j] / x[j - 1] - 1) * 100) }
-        guard x[end - 1] > 0, let now = chg.last, let hi = chg.max(), hi > 0 else { return nil }
-        return now / hi
+        guard end >= start + 1, x[end - 1] > 0 else { return nil }
+        let now = (x[end] / x[end - 1] - 1) * 100
+        let from = max(start + 1, end - length)               // the `length` changes before today
+        var prev: [Double] = []
+        prev.reserveCapacity(length)
+        if from <= end - 1 { for j in from...(end - 1) where x[j - 1] > 0 { prev.append((x[j] / x[j - 1] - 1) * 100) } }
+        if full && end - from < length { return nil }
+        guard !prev.isEmpty else { return nil }
+        return Double(prev.filter { $0 <= now }.count) / Double(prev.count) * 100
     }
 
     /// Binary search in sorted day keys.

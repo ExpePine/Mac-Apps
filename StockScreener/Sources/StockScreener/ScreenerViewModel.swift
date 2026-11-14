@@ -513,7 +513,7 @@ final class ScreenerViewModel: ObservableObject {
                                                 pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? "",
                                                 ms.map { String(format: "%.1f", $0) } ?? "", sk.map { String(format: "%.0f", $0) } ?? "",
                                                 t3.map { String(format: "%.0f", $0) } ?? "", ht.map { String(format: "%.2f", $0) } ?? "",
-                                                dd.map { String(format: "%.0f", $0) } ?? "", dc.map { String(format: "%.2f", $0) } ?? "",
+                                                dd.map { String(format: "%.0f", $0) } ?? "", dc.map { String(format: "%.1f", $0) } ?? "",
                                                 d2.map { String(format: "%.1f", $0) } ?? "", d2c.map { String(format: "%.2f", $0) } ?? "",
                                                 cdl.map { String(format: "%.3f", $0) } ?? ""],
                             numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3, ht, dd, dc, d2, d2c, cdl])

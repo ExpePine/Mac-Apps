@@ -158,18 +158,23 @@ final class NSEResultsTests: XCTestCase {
 }
 
 final class DelSmaCTests: XCTestCase {
-    func testChangeNormalisedByItsHighest() throws {
+    func testChangePercentRank() throws {
         // raw series (DELIV_QTY×CLOSE with close = 1): steady +1% a day, one +5% day, then today +2.5%
         var q: [Double] = [100]
         for k in 1..<400 { q.append(q[k - 1] * (k == 200 ? 1.05 : 1.01)) }
         q.append(q.last! * 1.025)
         let days = q.indices.map { String(format: "D%04d", $0) }
         let s = DeliverySeries(days: days, qty: q, per: q.map { _ in 50 }, close: q.map { _ in 1 })
+        // of the previous 300 changes, 299 were +1 % (≤ 2.5 %) and one was +5 % → 299/300
         let v = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: q.count - 1, metric: .value, length: 300))
-        XCTAssertEqual(v, 2.5 / 5.0, accuracy: 1e-9)
-        // selected average: EMA 22 of it — must still be ≤ 1 and positive
+        XCTAssertEqual(v, 299.0 / 300.0 * 100, accuracy: 1e-9)
+        // a fall today ranks at the bottom
+        var f = q; f.append(f.last! * 0.98)
+        let sf = DeliverySeries(days: f.indices.map { String(format: "D%04d", $0) }, qty: f, per: f.map { _ in 50 }, close: f.map { _ in 1 })
+        XCTAssertEqual(try XCTUnwrap(DeliveryColumns.delSmaC(sf, at: f.count - 1, metric: .value, length: 300)), 0, accuracy: 1e-9)
+        // selected average: EMA 22 — stays within 0…100
         let e = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: q.count - 1, metric: .ema22, length: 300))
-        XCTAssertGreaterThan(e, 0); XCTAssertLessThanOrEqual(e, 1)
+        XCTAssertGreaterThanOrEqual(e, 0); XCTAssertLessThanOrEqual(e, 100)
     }
 }
 

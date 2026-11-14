@@ -473,7 +473,7 @@ struct DeliveryMiniChart: View {
     /// What this panel shows: the Delivery chart, Chart 3 (price + DEL2C line), or both stacked.
     @AppStorage("lower.chart") private var lower = "delivery"
     @AppStorage("del2.len") private var del2Len = 100
-    @AppStorage("delsmac.shade") private var shadeLevel = 0.40
+    @AppStorage("delsmac.shade2") private var shadeLevel = 90.0
     @AppStorage("chart.styleRev") private var styleRev = 0
     @ObservedObject private var candleCache = CandleCache.shared
     @EnvironmentObject var vm: ScreenerViewModel
@@ -545,7 +545,7 @@ struct DeliveryMiniChart: View {
                         .help(layer.label(metric.pine, length))
                     }
                     if L.contains(.shade) {
-                        Stepper(String(format: "> %.2f", shadeLevel), value: $shadeLevel, in: 0.05...1.0, step: 0.05)
+                        Stepper(String(format: "> %.0f", shadeLevel), value: $shadeLevel, in: 50...99, step: 1)
                             .font(.caption2.monospacedDigit()).controlSize(.mini).fixedSize()
                             .help("Shade candles (purple) on days DELSMAC is above this")
                     }
@@ -981,11 +981,11 @@ struct DelsmacBadge: View {
         let i = day.flatMap { d in series.days.lastIndex(where: { $0 <= d }) } ?? (series.qty.count - 1)
         let v = DeliveryColumns.delSmaC(series, at: i, metric: k)
         let when = day != nil && i < series.days.count ? " · " + series.days[i] : ""
-        Text("DELSMAC " + (v.map { String(format: "%.2f", $0) } ?? "—") + when)
+        Text("DELSMAC " + (v.map { String(format: "%.0f", $0) } ?? "—") + when)
             .font(.caption.monospacedDigit().bold())
-            .foregroundStyle(v == nil ? Color.secondary : (v! >= 0.8 ? Color.green : (v! < 0 ? Color.red : Color.primary)))
+            .foregroundStyle(v == nil ? Color.secondary : (v! >= 90 ? Color.green : (v! < 20 ? Color.red : Color.primary)))
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(Color.secondary.opacity(0.15), in: Capsule())
-            .help("DELSMAC = today's % change in \(k.pine) ÷ its highest % change in 300 days (1 = the biggest rise in 300 days) — as the Filter column, on the day under the cursor (or the latest day)")
+            .help("DELSMAC = ta.percentrank(today's % change in \(k.pine), 300) — 0–100, 100 = today's rise beats all of the last 300 days. As the Filter column, on the day under the cursor (or the latest day)")
     }
 }

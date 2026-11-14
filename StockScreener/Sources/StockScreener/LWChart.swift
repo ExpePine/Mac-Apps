@@ -25,7 +25,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .t3: return "T3 line (green rising / red falling) — \(T3Def.current.pine)"
         case .del2c: return "DEL2C line — close on the last DEL2 = 100 day (ta.highest \(Del2.length))"
         case .hit3: return "HI/T3 line — ta.highest(ta.sma(delivery, \(DeliveryColumns.hiSma)), 300) / T3 (dashed line at 1.00)"
-        case .shade: return "Shade candles where DELSMAC > \(String(format: "%.2f", DelsmacShade.level))"
+        case .shade: return "Shade candles where DELSMAC (percentrank) > \(String(format: "%.0f", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
         }
@@ -778,11 +778,11 @@ enum TVRange {
 
 
 /// Candle shading on the delivery charts: days whose DELSMAC (the Filter's, with the Delivery Analysis signal)
-/// is above the level (default 0.40, Settings key "delsmac.shade").
+/// is above the level (0–100 percentrank; default 90, Settings key "delsmac.shade2" — the old 0–1 key isn't used).
 enum DelsmacShade {
     static var level: Double {
-        let v = UserDefaults.standard.double(forKey: "delsmac.shade")
-        return v > 0 ? v : 0.40
+        let v = UserDefaults.standard.double(forKey: "delsmac.shade2")
+        return v > 0 ? v : 90
     }
     static func days(_ s: DeliverySeries, level: Double = DelsmacShade.level) -> Set<String> {
         let k = DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value

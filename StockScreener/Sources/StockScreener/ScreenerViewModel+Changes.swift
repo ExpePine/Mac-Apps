@@ -67,7 +67,7 @@ extension ScreenerViewModel {
                 case "t3Color": v = c?.t3Color.map(Double.init); f = "%.0f"
                 case "HI/T3": v = c?.hiT3; f = "%.2f"
                 case "DAYS_DELSMA": v = c?.delsmaDays.map(Double.init); f = "%.0f"
-                case "DELSMAC": v = c?.delSmaC; f = "%.2f"
+                case "DELSMAC": v = c?.delSmaC; f = "%.1f"
                 case "DEL2": v = c?.del2; f = "%.1f"
                 case "DEL2C": v = c?.del2c; f = "%.2f"
                 default:                                   // C/DL2C on that day
