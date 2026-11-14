@@ -640,6 +640,31 @@ struct DeliveryColumns {
         return Double(prev.filter { $0 <= now }.count) / Double(prev.count) * 100
     }
 
+    /// DELSMAC for every bar at once (same rule as delSmaC(at:), much faster for scans and shading).
+    static func delSmaCSeries(_ s: DeliverySeries, metric k: DeliveryMetric = .current, length L: Int = 300) -> [Double?] {
+        let raw: [Double] = k == .qty ? s.qty : s.metric(value: true)
+        let n = raw.count
+        var out = [Double?](repeating: nil, count: n)
+        var x = raw, start = 0
+        if let m = k.smaLength {
+            guard n >= m + 1 else { return out }
+            x = DeliverySignal.avg(raw, m, ema: k.isEMA); start = m - 1
+        }
+        guard start + 1 < n else { return out }
+        var chg = [Double?](repeating: nil, count: n)
+        for j in (start + 1)..<n where x[j - 1] > 0 { chg[j] = (x[j] / x[j - 1] - 1) * 100 }
+        let isFull = full
+        for i in (start + 1)..<n {
+            guard let now = chg[i] else { continue }
+            let from = max(start + 1, i - L)
+            if isFull && i - from < L { continue }
+            var c = 0, t = 0
+            for j in from..<i { if let v = chg[j] { t += 1; if v <= now { c += 1 } } }
+            if t > 0 { out[i] = Double(c) / Double(t) * 100 }
+        }
+        return out
+    }
+
     /// Binary search in sorted day keys.
     static func index(of day: String, in days: [String]) -> Int? {
         var lo = 0, hi = days.count - 1

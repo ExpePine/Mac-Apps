@@ -787,9 +787,8 @@ enum DelsmacShade {
     static func days(_ s: DeliverySeries, level: Double = DelsmacShade.level) -> Set<String> {
         let k = DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value
         var out = Set<String>()
-        for i in s.days.indices where i < s.qty.count {
-            if let v = DeliveryColumns.delSmaC(s, at: i, metric: k), v > level { out.insert(s.days[i]) }
-        }
+        let v = DeliveryColumns.delSmaCSeries(s, metric: k)
+        for i in s.days.indices where i < v.count { if let x = v[i], x > level { out.insert(s.days[i]) } }
         return out
     }
 }

@@ -9,7 +9,8 @@ import AppKit
 
 enum ScanMetric: String, CaseIterable, Codable, Identifiable {
     case hiT3 = "HI/T3", delSma = "DELSMA", dqPrank = "DQ_PRANK", t3 = "T3", t3Color = "t3Color",
-         close = "Close", value = "DQ×close", sma22 = "SMA22", sma66 = "SMA66", per = "Deliv %"
+         close = "Close", value = "DQ×close", sma22 = "SMA22", sma66 = "SMA66", per = "Deliv %",
+         delSmaC = "DELSMAC", del2 = "DEL2", del2c = "DEL2C", cdl2c = "C/DL2C"
     var id: String { rawValue }
     var help: String {
         switch self {
@@ -23,6 +24,10 @@ enum ScanMetric: String, CaseIterable, Codable, Identifiable {
         case .sma22: return "ta.sma(DQ*close, 22)"
         case .sma66: return "ta.sma(DQ*close, 66)"
         case .per: return "Delivery % of traded quantity"
+        case .delSmaC: return "ta.percentrank(% change of the Delivery signal, 300)"
+        case .del2: return "DQ*close × 100 / ta.highest(DQ*close, 100|300)"
+        case .del2c: return "ta.valuewhen(DEL2 == 100, close, 0)"
+        case .cdl2c: return "close / DEL2C (NSE close of that day)"
         }
     }
 }
@@ -102,6 +107,12 @@ enum ScanEngine {
         }
         switch m {
         case .close: return s.close.map { Optional($0) }
+        case .delSmaC: return DeliveryColumns.delSmaCSeries(s)
+        case .del2: return Del2.series(s).del2
+        case .del2c: return Del2.series(s).del2c
+        case .cdl2c:
+            let dc = Del2.series(s).del2c
+            return dc.indices.map { i in i < s.close.count ? dc[i].flatMap { $0 > 0 ? s.close[i] / $0 : nil } : nil }
         case .value: return v.map { Optional($0) }
         case .per: return s.per.map { Optional($0) }
         case .sma22: return sma(22)

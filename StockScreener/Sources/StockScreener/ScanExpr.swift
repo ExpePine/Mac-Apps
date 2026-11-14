@@ -28,7 +28,11 @@ indirect enum ScanExpr: Sendable {
 
     struct ParseError: Error, LocalizedError { let message: String; var errorDescription: String? { message } }
 
-    static let variables = ["close", "dq", "qty", "per", "value", "vol", "hit3", "delsma", "dqprank", "t3", "t3color", "sma22", "sma66"]
+    static let variables = ["close", "dq", "qty", "per", "value", "vol", "hit3", "delsma", "dqprank", "t3", "t3color", "sma22", "sma66",
+                             "delsmac", "del2", "del2c", "cdl2c"]
+    /// Columns the app calculates from NSE data (not saved with the sheet) → their full-history built-in series.
+    static let computed: [String: String] = ["delsmac": "delsmac", "del2": "del2", "del2c": "del2c", "c/dl2c": "cdl2c", "hi/t3": "hit3",
+                                             "delsma": "delsma", "dq_prank": "dqprank", "t3color": "t3color"]
     static let functions = ["sma", "ema", "highest", "lowest", "change", "roc", "prank", "percentrank", "abs", "max", "min"]
 
     // MARK: Parsing
@@ -95,6 +99,7 @@ indirect enum ScanExpr: Sendable {
             if t == "(" { let e = try expr(); try expect(")"); return e }
             if t.hasPrefix("\"") {
                 let name = String(t.dropFirst())
+                if let v = ScanExpr.computed[name.lowercased()] { return .variable(v) }
                 guard let c = columns.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { throw ParseError(message: "No data-sheet column “\(name)”") }
                 return .column(c)
             }
@@ -116,6 +121,7 @@ indirect enum ScanExpr: Sendable {
                 return .call(t, args)
             }
             if ScanExpr.variables.contains(t) { return .variable(t) }
+            if let v = ScanExpr.computed[t] { return .variable(v) }
             if let c = columns.first(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) { return .column(c) }
             throw ParseError(message: "Unknown name “\(t)” — use \(ScanExpr.variables.joined(separator: ", ")) or a data-sheet column (put names with spaces or / in quotes: \"C/DL2C\")")
         }
@@ -143,6 +149,10 @@ indirect enum ScanExpr: Sendable {
             case "t3": v = ScanEngine.series(.t3, s)
             case "t3color": v = ScanEngine.series(.t3Color, s)
             case "sma22": v = ScanEngine.series(.sma22, s)
+            case "delsmac": v = ScanEngine.series(.delSmaC, s)
+            case "del2": v = ScanEngine.series(.del2, s)
+            case "del2c": v = ScanEngine.series(.del2c, s)
+            case "cdl2c": v = ScanEngine.series(.cdl2c, s)
             default: v = ScanEngine.series(.sma66, s)
             }
             cache[name] = v
