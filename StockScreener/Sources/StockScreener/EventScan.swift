@@ -37,21 +37,37 @@ struct ScanCond: Codable, Identifiable, Equatable {
     var metric: ScanMetric = .hiT3
     var event: ScanEvent = .crossBelow
     var value: Double = 1.10
-    var title: String { "\(metric.rawValue) \(event.rawValue) \(CombiEngine.fmt(value))" }
+    /// A custom series (expression) instead of a built-in metric, and its name.
+    var expr: String? = nil
+    var name: String? = nil
+    var label: String { expr == nil ? metric.rawValue : (name?.isEmpty == false ? name! : expr!) }
+    var title: String { "\(label) \(event.rawValue) \(CombiEngine.fmt(value))" }
+    /// Same series → same key (shared "now" column and cache).
+    var seriesKey: String { expr.map { "x:" + $0.lowercased().replacingOccurrences(of: " ", with: "") } ?? metric.rawValue }
 
-    /// Parses quick text like "HI/T3 < 1.10", "DELSMA > 99", "close crosses above 500".
+    /// Parses quick text like "HI/T3 < 1.10", "DELSMA > 99", "close crosses above 500",
+    /// a saved custom's name ("Close/SMA50 > 1.1") or any expression ("close / sma(close, 50) crosses above 1.1").
     static func parse(_ text: String) -> ScanCond? {
         let t = text.trimmingCharacters(in: .whitespaces)
-        guard let m = ScanMetric.allCases.sorted(by: { $0.rawValue.count > $1.rawValue.count })
-            .first(where: { t.lowercased().hasPrefix($0.rawValue.lowercased()) }) else { return nil }
-        var rest = String(t.dropFirst(m.rawValue.count)).trimmingCharacters(in: .whitespaces).lowercased()
-        var ev: ScanEvent = .crossBelow
-        for (k, e) in [("crosses below", ScanEvent.crossBelow), ("crosses above", .crossAbove), ("last below", .lastBelow), ("last above", .lastAbove),
-                       ("<=", .crossBelow), (">=", .crossAbove), ("<", .crossBelow), (">", .crossAbove), ("below", .crossBelow), ("above", .crossAbove)] where rest.hasPrefix(k) {
-            ev = e; rest = String(rest.dropFirst(k.count)); break
+        let low = t.lowercased()
+        let keys: [(String, ScanEvent)] = [("crosses below", .crossBelow), ("crosses above", .crossAbove), ("last below", .lastBelow), ("last above", .lastAbove),
+                                           ("last day below", .lastBelow), ("last day above", .lastAbove),
+                                           ("<=", .crossBelow), (">=", .crossAbove), ("<", .crossBelow), (">", .crossAbove), (" below ", .crossBelow), (" above ", .crossAbove)]
+        // the LAST event keyword splits series | number (expressions may contain other symbols)
+        var best: (Range<String.Index>, ScanEvent)?
+        for (k, e) in keys { if let r = low.range(of: k, options: .backwards), best == nil || r.lowerBound > best!.0.lowerBound || (r.lowerBound == best!.0.lowerBound && r.upperBound > best!.0.upperBound) { best = (r, e) } }
+        guard let (r, ev) = best else { return nil }
+        let left = String(t[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+        let right = String(t[r.upperBound...]).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
+        guard let v = Double(right), !left.isEmpty else { return nil }
+        if let m = ScanMetric.allCases.first(where: { $0.rawValue.caseInsensitiveCompare(left) == .orderedSame }) {
+            return ScanCond(metric: m, event: ev, value: v)
         }
-        guard let v = Double(rest.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")) else { return nil }
-        return ScanCond(metric: m, event: ev, value: v)
+        if let c = ScanCustomStore.all.first(where: { $0.name.caseInsensitiveCompare(left) == .orderedSame }) {
+            return ScanCond(event: ev, value: v, expr: c.expr, name: c.name)
+        }
+        guard (try? ScanExpr.parse(left)) != nil else { return nil }
+        return ScanCond(event: ev, value: v, expr: left, name: nil)
     }
 }
 
@@ -60,7 +76,7 @@ struct ScanRow: Identifiable {
     var id: String { symbol }
     let symbol: String
     let hits: [UUID: ScanHit]
-    let now: [ScanMetric: Double]
+    let now: [String: Double]          // series key → value on the latest day
 }
 
 enum ScanEngine {
@@ -125,17 +141,22 @@ enum ScanEngine {
     }
 
     static func run(_ book: DeliveryBook, symbols: [String]?, conds: [ScanCond], asOf: String) -> [ScanRow] {
-        let metrics = Set(conds.map(\.metric))
+        var exprs: [String: ScanExpr] = [:]
+        for c in conds { if let e = c.expr, exprs[c.seriesKey] == nil { exprs[c.seriesKey] = try? ScanExpr.parse(e) } }
+        let keys = Set(conds.map(\.seriesKey))
         return (symbols ?? Array(book.series.keys)).compactMap { sym -> ScanRow? in
             guard let s = book.series[sym], let last = s.days.lastIndex(where: { $0 <= asOf }) else { return nil }
-            var cache: [ScanMetric: [Double?]] = [:]
-            for m in metrics { cache[m] = series(m, s) }
-            var hits: [UUID: ScanHit] = [:], now: [ScanMetric: Double] = [:]
+            var cache: [String: [Double?]] = [:], vars: [String: [Double?]] = [:]
+            for c in conds where cache[c.seriesKey] == nil {
+                if c.expr != nil { cache[c.seriesKey] = exprs[c.seriesKey]?.eval(s, cache: &vars) ?? [] }
+                else { cache[c.seriesKey] = series(c.metric, s) }
+            }
+            var hits: [UUID: ScanHit] = [:], now: [String: Double] = [:]
             for c in conds {
-                let x = cache[c.metric]!
+                guard let x = cache[c.seriesKey], last < x.count else { continue }
                 if let h = barsSince(x, c, last: last) { hits[c.id] = ScanHit(bars: h.0, day: s.days[h.1], atEvent: x[h.1] ?? 0) }
             }
-            for m in metrics { if let v = cache[m]?[last] ?? nil { now[m] = v } }
+            for k in keys { if let x = cache[k], last < x.count, let v = x[last] { now[k] = v } }
             return ScanRow(symbol: sym, hits: hits, now: now)
         }
     }
@@ -164,6 +185,9 @@ struct EventScanView: View {
     @State private var quick = ""
     @State private var conds: [ScanCond] = []
     @State private var centreOn: UUID?
+    @State private var customs: [ScanCustom] = ScanCustomStore.all
+    @State private var showCustom = false
+    @State private var editingCond: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -181,6 +205,17 @@ struct EventScanView: View {
             centreOn = centreOn ?? conds.first?.id
         }
         .onChange(of: conds) { c in condsData = (try? JSONEncoder().encode(c)) ?? Data() }
+        .sheet(isPresented: $showCustom) {
+            CustomSeriesEditor(start: editingCond.flatMap { id in conds.first { $0.id == id } }) { custom in
+                customs = ScanCustomStore.all
+                guard let custom else { return }
+                if let id = editingCond, let i = conds.firstIndex(where: { $0.id == id }) {
+                    conds[i].expr = custom.expr; conds[i].name = custom.name
+                } else {
+                    conds.append(ScanCond(event: .crossAbove, value: 1, expr: custom.expr, name: custom.name))
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -204,24 +239,48 @@ struct EventScanView: View {
             Text("Trading days since… (counted back from the latest NSE day, like Pine ta.barssince)").font(.caption.bold())
             ForEach($conds) { $c in
                 HStack(spacing: 6) {
-                    Picker("", selection: $c.metric) { ForEach(ScanMetric.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().fixedSize()
-                        .help(c.metric.help)
+                    Picker("", selection: seriesBinding($c)) {
+                        Section("Built in") { ForEach(ScanMetric.allCases) { Text($0.rawValue).tag("b:" + $0.rawValue) } }
+                        if !customs.isEmpty { Section("Custom") { ForEach(customs) { Text($0.name).tag("c:" + $0.id.uuidString) } } }
+                        if let e = c.expr, !customs.contains(where: { $0.expr == e }) { Text(c.label).tag("x:" + e) }
+                        Divider()
+                        Text("New custom series…").tag("new")
+                    }.labelsHidden().fixedSize()
+                    .help(c.expr ?? c.metric.help)
                     Picker("", selection: $c.event) { ForEach(ScanEvent.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().fixedSize()
                         .help("crosses below = the day it went from ≥ value to < value (start of the move); last day below = the latest day it was < value")
                     TextField("", value: $c.value, format: .number).frame(width: 70).textFieldStyle(.roundedBorder)
-                    Text(c.metric.help).font(.caption2).foregroundStyle(.secondary)
+                    Text(c.expr ?? c.metric.help).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    if c.expr != nil {
+                        Button { editingCond = c.id; showCustom = true } label: { Image(systemName: "pencil") }.buttonStyle(.borderless)
+                            .help("Edit this custom series")
+                    }
                     Button { conds.removeAll { $0.id == c.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
                 }
             }
             HStack(spacing: 6) {
-                TextField("Add: e.g. HI/T3 < 1.10 · DELSMA > 99 · Close crosses above 500 · Deliv % > 60", text: $quick)
+                TextField("Add: e.g. HI/T3 < 1.10 · DELSMA > 99 · close / sma(close, 50) crosses above 1.1 · roc(close, 5) > 20", text: $quick)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 460).onSubmit(addQuick)
                 Button("Add") { addQuick() }
                 Button { conds.append(ScanCond()) } label: { Label("Condition", systemImage: "plus") }
+                Button { editingCond = nil; showCustom = true } label: { Label("Custom series…", systemImage: "function") }
+                    .help("Make your own series from close, delivery, volume … e.g. close / sma(close, 50), roc(close, 5), dq / sma(dq, 20)")
             }
         }
         .controlSize(.small)
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// Picker selection ↔ condition: "b:<metric>", "c:<custom id>", "x:<expression>", "new".
+    private func seriesBinding(_ c: Binding<ScanCond>) -> Binding<String> {
+        Binding(get: {
+            if let e = c.wrappedValue.expr { return customs.first { $0.expr == e }.map { "c:" + $0.id.uuidString } ?? "x:" + e }
+            return "b:" + c.wrappedValue.metric.rawValue
+        }, set: { v in
+            if v == "new" { editingCond = c.wrappedValue.id; showCustom = true; return }
+            if v.hasPrefix("b:"), let m = ScanMetric(rawValue: String(v.dropFirst(2))) { c.wrappedValue.metric = m; c.wrappedValue.expr = nil; c.wrappedValue.name = nil }
+            if v.hasPrefix("c:"), let k = customs.first(where: { "c:" + $0.id.uuidString == v }) { c.wrappedValue.expr = k.expr; c.wrappedValue.name = k.name }
+        })
     }
 
     private func addQuick() {
@@ -282,7 +341,7 @@ struct EventScanView: View {
             HStack(spacing: 0) {
                 Text("Symbol").frame(width: 120, alignment: .leading)
                 ForEach(conds) { c in Text("since \(c.title)").frame(width: 210, alignment: .leading).lineLimit(1) }
-                ForEach(Array(Set(conds.map(\.metric))).sorted { $0.rawValue < $1.rawValue }) { m in Text("\(m.rawValue) now").frame(width: 90, alignment: .trailing) }
+                ForEach(nowColumns, id: \.key) { col in Text("\(col.label) now").frame(width: 110, alignment: .trailing).lineLimit(1) }
                 Spacer()
             }
             .font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 4)
@@ -293,6 +352,12 @@ struct EventScanView: View {
                 }
             }
         }
+    }
+
+    private var nowColumns: [(key: String, label: String)] {
+        var seen = Set<String>(), out: [(key: String, label: String)] = []
+        for c in conds where seen.insert(c.seriesKey).inserted { out.append((c.seriesKey, c.label)) }
+        return out
     }
 
     private func row(_ r: ScanRow) -> some View {
@@ -310,8 +375,8 @@ struct EventScanView: View {
                 }
                 .frame(width: 210, alignment: .leading)
             }
-            ForEach(Array(Set(conds.map(\.metric))).sorted { $0.rawValue < $1.rawValue }) { m in
-                Text(r.now[m].map { CombiEngine.fmt($0) } ?? "—").monospacedDigit().frame(width: 90, alignment: .trailing)
+            ForEach(nowColumns, id: \.key) { col in
+                Text(r.now[col.key].map { CombiEngine.fmt($0) } ?? "—").monospacedDigit().frame(width: 110, alignment: .trailing)
             }
             Spacer()
         }
@@ -382,5 +447,117 @@ struct EventScanView: View {
         var s = "symbol," + conds.map { "\"days since \($0.title)\",\"date \($0.title)\"" }.joined(separator: ",") + "\n"
         for r in list { s += r.symbol + "," + conds.map { c in r.hits[c.id].map { "\($0.bars),\($0.day)" } ?? "," }.joined(separator: ",") + "\n" }
         try? s.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+
+// MARK: - Making / editing a custom series
+
+struct CustomSeriesEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var dc = DeliveryCenter.shared
+    let start: ScanCond?
+    let done: (ScanCustom?) -> Void
+    @State private var list = ScanCustomStore.all
+    @State private var editingID: UUID?
+    @State private var name = ""
+    @State private var expr = ""
+    @State private var sample = ""
+    @State private var error: String?
+    @State private var preview: [(String, Double?)] = []
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            // saved customs
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Saved").font(.headline)
+                List(selection: $editingID) {
+                    ForEach(list) { c in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(c.name).bold()
+                            Text(c.expr).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                        }.tag(c.id)
+                        .contextMenu { Button("Delete", role: .destructive) { list.removeAll { $0.id == c.id }; ScanCustomStore.all = list } }
+                    }
+                }
+                .frame(width: 220)
+                Button { editingID = nil; name = ""; expr = "" } label: { Label("New", systemImage: "plus") }
+            }
+            // editor
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Custom series").font(.title3.bold())
+                TextField("Name, e.g. Close / SMA50", text: $name).textFieldStyle(.roundedBorder)
+                TextField("close / sma(close, 50)", text: $expr, axis: .vertical).textFieldStyle(.roundedBorder).font(.body.monospaced()).lineLimit(2...5)
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+                HStack {
+                    Text("Try on").font(.caption)
+                    TextField("symbol", text: $sample).textFieldStyle(.roundedBorder).frame(width: 120)
+                    if !preview.isEmpty {
+                        ForEach(preview, id: \.0) { p in
+                            VStack(spacing: 0) {
+                                Text(String(p.0.suffix(5))).font(.caption2).foregroundStyle(.secondary)
+                                Text(p.1.map { CombiEngine.fmt($0) } ?? "na").font(.caption.monospacedDigit())
+                            }
+                        }
+                    }
+                }
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Names: close · dq (delivered qty) · per (Deliv %) · value (dq×close) · vol (traded qty) · hit3 · delsma · dqprank · t3 · t3color · sma22 · sma66")
+                        Text("Functions: sma(x,n) ema(x,n) highest(x,n) lowest(x,n) change(x,n) roc(x,n) % · prank(x,n) · abs(x) max(a,b) min(a,b)  (ta. prefix OK)")
+                        Text("History: x[1] = yesterday · Operators: + - * / ( )")
+                        Text("Ideas: close / sma(close, 50) · roc(close, 5) · dq / sma(dq, 20) · value / highest(value, 300) · close / highest(close, 252)[1]")
+                            .foregroundStyle(.secondary)
+                        Text("Two series: write the difference and compare with 0 — e.g. close - sma(close, 50) crosses above 0.").foregroundStyle(.secondary)
+                    }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Spacer()
+                HStack {
+                    if editingID != nil {
+                        Button("Delete", role: .destructive) { list.removeAll { $0.id == editingID }; ScanCustomStore.all = list; editingID = nil; name = ""; expr = "" }
+                    }
+                    Spacer()
+                    Button("Cancel") { done(nil); dismiss() }.keyboardShortcut(.cancelAction)
+                    Button(start == nil ? "Save & add condition" : "Save & use") { save() }
+                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        .disabled(error != nil || expr.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 820, height: 460)
+        .onAppear {
+            if let e = start?.expr {
+                if let c = list.first(where: { $0.expr == e }) { editingID = c.id; name = c.name } else { name = start?.name ?? "" }
+                expr = e
+            }
+            sample = dc.book.series.keys.sorted().first(where: { $0 == "RELIANCE" }) ?? dc.book.series.keys.sorted().first ?? ""
+        }
+        .onChange(of: editingID) { id in if let c = list.first(where: { $0.id == id }) { name = c.name; expr = c.expr } }
+        .task(id: expr + "|" + sample) { check() }
+    }
+
+    private func check() {
+        let t = expr.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { error = nil; preview = []; return }
+        do {
+            let e = try ScanExpr.parse(t)
+            error = nil
+            if let s = dc.book.series[sample.trimmingCharacters(in: .whitespaces).uppercased()] {
+                var cache: [String: [Double?]] = [:]
+                let v = e.eval(s, cache: &cache)
+                preview = (max(0, s.days.count - 6)..<s.days.count).map { (s.days[$0], $0 < v.count ? v[$0] : nil) }
+            } else { preview = [] }
+        } catch { self.error = error.localizedDescription; preview = [] }
+    }
+
+    private func save() {
+        let t = expr.trimmingCharacters(in: .whitespaces)
+        let n = name.trimmingCharacters(in: .whitespaces).isEmpty ? t : name.trimmingCharacters(in: .whitespaces)
+        var c = ScanCustom(name: n, expr: t)
+        if let id = editingID, let i = list.firstIndex(where: { $0.id == id }) { c.id = id; list[i] = c } else { list.append(c) }
+        ScanCustomStore.all = list
+        done(c)
+        dismiss()
     }
 }
