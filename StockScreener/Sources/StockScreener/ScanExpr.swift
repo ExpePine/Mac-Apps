@@ -20,6 +20,7 @@ struct ScanCustom: Codable, Identifiable, Equatable {
 indirect enum ScanExpr: Sendable {
     case num(Double)
     case variable(String)
+    case column(String)          // a data-sheet column (history = the app's saved daily copies of the sheet)
     case call(String, [ScanExpr])
     case lag(ScanExpr, Int)
     case neg(ScanExpr)
@@ -32,8 +33,8 @@ indirect enum ScanExpr: Sendable {
 
     // MARK: Parsing
 
-    static func parse(_ text: String) throws -> ScanExpr {
-        var p = Parser(tokens: try tokenize(text))
+    static func parse(_ text: String, columns: [String] = []) throws -> ScanExpr {
+        var p = Parser(tokens: try tokenize(text), columns: columns)
         let e = try p.expr()
         guard p.i == p.tokens.count else { throw ParseError(message: "Unexpected “\(p.tokens[p.i])”") }
         return e
@@ -41,19 +42,28 @@ indirect enum ScanExpr: Sendable {
 
     private static func tokenize(_ s: String) throws -> [String] {
         var out: [String] = [], cur = ""
+        var quote: String?                       // inside "…": a column name with any characters
         func flush() { if !cur.isEmpty { out.append(cur); cur = "" } }
-        for ch in s.lowercased() {
+        for ch in s {
+            if var q = quote {
+                if ch == "\"" { out.append("\"" + q); quote = nil } else { q.append(ch); quote = q }
+                continue
+            }
+            if ch == "\"" { flush(); quote = ""; continue }
+            let ch = Character(ch.lowercased())
             if ch.isLetter || ch.isNumber || ch == "_" || ch == "." { cur.append(ch) }
             else if ch == " " || ch == "\t" { flush() }
             else if "+-*/(),[]".contains(ch) { flush(); out.append(String(ch)) }
             else { throw ParseError(message: "Can't use “\(ch)” — use + - * / ( ) [ ]") }
         }
         flush()
+        if quote != nil { throw ParseError(message: "A quoted column name isn't closed — add the ending \"") }
         return out.map { $0.hasPrefix("ta.") ? String($0.dropFirst(3)) : $0 }
     }
 
     private struct Parser {
         let tokens: [String]
+        let columns: [String]
         var i = 0
         var peek: String? { i < tokens.count ? tokens[i] : nil }
         mutating func take() -> String? { defer { i += 1 }; return peek }
@@ -83,6 +93,11 @@ indirect enum ScanExpr: Sendable {
         mutating func primary() throws -> ScanExpr {
             guard let t = take() else { throw ParseError(message: "Formula ends too early") }
             if t == "(" { let e = try expr(); try expect(")"); return e }
+            if t.hasPrefix("\"") {
+                let name = String(t.dropFirst())
+                guard let c = columns.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { throw ParseError(message: "No data-sheet column “\(name)”") }
+                return .column(c)
+            }
             if let v = Double(t) { return .num(v) }
             if peek == "(" {
                 guard ScanExpr.functions.contains(t) else { throw ParseError(message: "Unknown function “\(t)” — use \(ScanExpr.functions.joined(separator: ", "))") }
@@ -100,8 +115,9 @@ indirect enum ScanExpr: Sendable {
                 }
                 return .call(t, args)
             }
-            guard ScanExpr.variables.contains(t) else { throw ParseError(message: "Unknown name “\(t)” — use \(ScanExpr.variables.joined(separator: ", "))") }
-            return .variable(t)
+            if ScanExpr.variables.contains(t) { return .variable(t) }
+            if let c = columns.first(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) { return .column(c) }
+            throw ParseError(message: "Unknown name “\(t)” — use \(ScanExpr.variables.joined(separator: ", ")) or a data-sheet column (put names with spaces or / in quotes: \"C/DL2C\")")
         }
     }
 
@@ -111,6 +127,7 @@ indirect enum ScanExpr: Sendable {
         let n = s.close.count
         switch self {
         case .num(let v): return Array(repeating: v, count: n)
+        case .column(let c): return cache["col:" + c.lowercased()] ?? Array(repeating: nil, count: n)
         case .variable(let name):
             if let c = cache[name] { return c }
             let v: [Double?]
@@ -165,6 +182,17 @@ indirect enum ScanExpr: Sendable {
                 default: return Self.prank(x, k)
                 }
             }
+        }
+    }
+
+    /// Data-sheet columns this expression reads.
+    var columnsUsed: Set<String> {
+        switch self {
+        case .column(let c): return [c]
+        case .num, .variable: return []
+        case .lag(let e, _), .neg(let e): return e.columnsUsed
+        case .bin(_, let a, let b): return a.columnsUsed.union(b.columnsUsed)
+        case .call(_, let a): return a.reduce(into: Set<String>()) { $0.formUnion($1.columnsUsed) }
         }
     }
 
@@ -224,5 +252,37 @@ enum ScanCustomStore {
     static var all: [ScanCustom] {
         get { (UserDefaults.standard.data(forKey: "scan.customs")).flatMap { try? JSONDecoder().decode([ScanCustom].self, from: $0) } ?? [] }
         set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: "scan.customs") }
+    }
+}
+
+
+/// Day-by-day values of data-sheet columns, from the app's saved copies of the sheet (+ today's live sheet).
+/// column (lowercased) → symbol → day → value
+enum SheetHistory {
+    static func load(columns: Set<String>, current: SheetTable, label: Int, liveDay: String) -> [String: [String: [String: Double]]] {
+        guard !columns.isEmpty else { return [:] }
+        var out: [String: [String: [String: Double]]] = [:]
+        func take(_ t: SheetTable, day: String) {
+            for c in columns {
+                guard let i = t.index(of: c) else { continue }
+                let key = c.lowercased()
+                for r in t.rows {
+                    guard let v = r.number(i) else { continue }
+                    let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+                    out[key, default: [:]][sym, default: [:]][day] = v
+                }
+            }
+        }
+        for d in HistoryStore.days() where d != liveDay {
+            if let data = HistoryStore.load(d), let t = ScreenerViewModel.align(data, to: current) { take(t, day: d) }
+        }
+        take(current, day: liveDay)
+        return out
+    }
+
+    /// A column's values on the stock's NSE days (nil on days the sheet wasn't saved).
+    static func series(_ h: [String: [String: [String: Double]]], column: String, symbol: String, days: [String]) -> [Double?] {
+        guard let m = h[column.lowercased()]?[symbol] else { return Array(repeating: nil, count: days.count) }
+        return days.map { m[$0] }
     }
 }

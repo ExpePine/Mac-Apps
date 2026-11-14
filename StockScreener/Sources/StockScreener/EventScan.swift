@@ -47,7 +47,7 @@ struct ScanCond: Codable, Identifiable, Equatable {
 
     /// Parses quick text like "HI/T3 < 1.10", "DELSMA > 99", "close crosses above 500",
     /// a saved custom's name ("Close/SMA50 > 1.1") or any expression ("close / sma(close, 50) crosses above 1.1").
-    static func parse(_ text: String) -> ScanCond? {
+    static func parse(_ text: String, columns: [String] = []) -> ScanCond? {
         let t = text.trimmingCharacters(in: .whitespaces)
         let low = t.lowercased()
         let keys: [(String, ScanEvent)] = [("crosses below", .crossBelow), ("crosses above", .crossAbove), ("last below", .lastBelow), ("last above", .lastAbove),
@@ -70,7 +70,7 @@ struct ScanCond: Codable, Identifiable, Equatable {
         if let c = ScanCustomStore.all.first(where: { $0.name.caseInsensitiveCompare(left) == .orderedSame }) {
             return ScanCond(event: ev, value: v, expr: c.expr, name: c.name)
         }
-        guard (try? ScanExpr.parse(left)) != nil else { return nil }
+        guard (try? ScanExpr.parse(left, columns: columns)) != nil else { return nil }
         return ScanCond(event: ev, value: v, expr: left, name: nil)
     }
 }
@@ -144,13 +144,17 @@ enum ScanEngine {
         return nil
     }
 
-    static func run(_ book: DeliveryBook, symbols: [String]?, conds: [ScanCond], asOf: String) -> [ScanRow] {
+    static func run(_ book: DeliveryBook, symbols: [String]?, conds: [ScanCond], asOf: String,
+                    columns: [String] = [], sheet: (current: SheetTable, label: Int, liveDay: String)? = nil) -> [ScanRow] {
         var exprs: [String: ScanExpr] = [:]
-        for c in conds { if let e = c.expr, exprs[c.seriesKey] == nil { exprs[c.seriesKey] = try? ScanExpr.parse(e) } }
+        for c in conds { if let e = c.expr, exprs[c.seriesKey] == nil { exprs[c.seriesKey] = try? ScanExpr.parse(e, columns: columns) } }
+        let used = exprs.values.reduce(into: Set<String>()) { $0.formUnion($1.columnsUsed) }
+        let hist = sheet.map { SheetHistory.load(columns: used, current: $0.current, label: $0.label, liveDay: $0.liveDay) } ?? [:]
         let keys = Set(conds.map(\.seriesKey))
         return (symbols ?? Array(book.series.keys)).compactMap { sym -> ScanRow? in
             guard let s = book.series[sym], let last = s.days.lastIndex(where: { $0 <= asOf }) else { return nil }
             var cache: [String: [Double?]] = [:], vars: [String: [Double?]] = [:]
+            for c in used { vars["col:" + c.lowercased()] = SheetHistory.series(hist, column: c, symbol: sym, days: s.days) }
             for c in conds where cache[c.seriesKey] == nil {
                 if c.expr != nil { cache[c.seriesKey] = exprs[c.seriesKey]?.eval(s, cache: &vars) ?? [] }
                 else { cache[c.seriesKey] = series(c.metric, s) }
@@ -210,7 +214,7 @@ struct EventScanView: View {
         }
         .onChange(of: conds) { c in condsData = (try? JSONEncoder().encode(c)) ?? Data() }
         .sheet(isPresented: $showCustom) {
-            CustomSeriesEditor(start: editingCond.flatMap { id in conds.first { $0.id == id } }) { custom in
+            CustomSeriesEditor(start: editingCond.flatMap { id in conds.first { $0.id == id } }, columns: vm.headers) { custom in
                 customs = ScanCustomStore.all
                 guard let custom else { return }
                 if let id = editingCond, let i = conds.firstIndex(where: { $0.id == id }) {
@@ -288,7 +292,7 @@ struct EventScanView: View {
     }
 
     private func addQuick() {
-        if let c = ScanCond.parse(quick) { conds.append(c); quick = "" } else { NSSound.beep() }
+        if let c = ScanCond.parse(quick, columns: vm.headers) { conds.append(c); quick = "" } else { NSSound.beep() }
     }
 
     // MARK: Results
@@ -420,7 +424,9 @@ struct EventScanView: View {
         let asOf = book.days.last ?? ""
         sc.running = true
         Task {
-            let rows = await Task.detached(priority: .userInitiated) { ScanEngine.run(book, symbols: list, conds: c, asOf: asOf) }.value
+            let cols = vm.headers
+            let sheet = vm.labelIndex.map { (current: vm.table, label: $0, liveDay: HistoryStore.dayKey(vm.dataDay(of: vm.table))) }
+            let rows = await Task.detached(priority: .userInitiated) { ScanEngine.run(book, symbols: list, conds: c, asOf: asOf, columns: cols, sheet: sheet) }.value
             sc.rows = rows
             sc.running = false
             sc.ranAt = Date()
@@ -461,6 +467,7 @@ struct CustomSeriesEditor: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var dc = DeliveryCenter.shared
     let start: ScanCond?
+    let columns: [String]
     let done: (ScanCustom?) -> Void
     @State private var list = ScanCustomStore.all
     @State private var editingID: UUID?
@@ -508,6 +515,7 @@ struct CustomSeriesEditor: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Names: close · dq (delivered qty) · per (Deliv %) · value (dq×close) · vol (traded qty) · hit3 · delsma · dqprank · t3 · t3color · sma22 · sma66")
+                        Text("Data-sheet columns too: count · ds · d_trigger … — names with spaces or / in quotes: \"C/DL2C\". Their history = the days the app saved the sheet (the preview here shows NSE values only).")
                         Text("Functions: sma(x,n) ema(x,n) highest(x,n) lowest(x,n) change(x,n) roc(x,n) % · prank(x,n) · abs(x) max(a,b) min(a,b)  (ta. prefix OK)")
                         Text("History: x[1] = yesterday · Operators: + - * / ( )")
                         Text("Ideas: close / sma(close, 50) · roc(close, 5) · dq / sma(dq, 20) · value / highest(value, 300) · close / highest(close, 252)[1]")
@@ -545,7 +553,7 @@ struct CustomSeriesEditor: View {
         let t = expr.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { error = nil; preview = []; return }
         do {
-            let e = try ScanExpr.parse(t)
+            let e = try ScanExpr.parse(t, columns: columns)
             error = nil
             if let s = dc.book.series[sample.trimmingCharacters(in: .whitespaces).uppercased()] {
                 var cache: [String: [Double?]] = [:]
