@@ -28,7 +28,8 @@ enum ScanMetric: String, CaseIterable, Codable, Identifiable {
 }
 
 enum ScanEvent: String, CaseIterable, Codable, Identifiable {
-    case crossBelow = "crosses below", crossAbove = "crosses above", lastBelow = "last day below", lastAbove = "last day above"
+    case crossBelow = "crosses below", crossAbove = "crosses above", lastBelow = "last day below", lastAbove = "last day above",
+         becomes = "becomes", lastEqual = "last day equal to"
     var id: String { rawValue }
 }
 
@@ -50,14 +51,17 @@ struct ScanCond: Codable, Identifiable, Equatable {
     static func parse(_ text: String, columns: [String] = []) -> ScanCond? {
         let t = text.trimmingCharacters(in: .whitespaces)
         let low = t.lowercased()
-        let keys: [(String, ScanEvent)] = [("crosses below", .crossBelow), ("crosses above", .crossAbove), ("last below", .lastBelow), ("last above", .lastAbove),
-                                           ("last day below", .lastBelow), ("last day above", .lastAbove),
-                                           ("<=", .crossBelow), (">=", .crossAbove), ("<", .crossBelow), (">", .crossAbove), (" below ", .crossBelow), (" above ", .crossAbove)]
+        let words: [(String, ScanEvent)] = [("crosses below", .crossBelow), ("crosses above", .crossAbove), ("last below", .lastBelow), ("last above", .lastAbove),
+                                            ("last day below", .lastBelow), ("last day above", .lastAbove),
+                                            ("last day equal to", .lastEqual), ("last day equal", .lastEqual), ("last equal", .lastEqual), ("becomes", .becomes)]
+        let symbols: [(String, ScanEvent)] = [("<=", .crossBelow), (">=", .crossAbove), ("==", .becomes), ("=", .becomes), ("<", .crossBelow), (">", .crossAbove)]
+        let bare: [(String, ScanEvent)] = [(" below ", .crossBelow), (" above ", .crossAbove), (" is ", .becomes)]
         // the LAST event keyword splits series | number (expressions may contain other symbols)
         // word events first ("crosses above" beats its own " above "), then symbols, then bare above / below
         var best: (Range<String.Index>, ScanEvent)?
-        for group in [Array(keys[0..<6]), Array(keys[6..<10]), Array(keys[10...])] {
-            for (k, e) in group { if let r = low.range(of: k, options: .backwards), best == nil || r.lowerBound > best!.0.lowerBound || (r.lowerBound == best!.0.lowerBound && r.upperBound > best!.0.upperBound) { best = (r, e) } }
+        for group in [words, symbols, bare] {
+            // rightmost end wins; on a tie the longer one (">=" over "=", "==" over "=")
+            for (k, e) in group { if let r = low.range(of: k, options: .backwards), best == nil || r.upperBound > best!.0.upperBound || (r.upperBound == best!.0.upperBound && r.lowerBound < best!.0.lowerBound) { best = (r, e) } }
             if best != nil { break }
         }
         guard let (r, ev) = best else { return nil }
@@ -123,6 +127,8 @@ enum ScanEngine {
         }
     }
 
+    static func same(_ a: Double, _ b: Double) -> Bool { abs(a - b) <= max(1e-9, abs(b) * 1e-9) }
+
     /// Bars since the event, counted on the stock's NSE rows up to index `last`.
     static func barsSince(_ x: [Double?], _ c: ScanCond, last: Int) -> (Int, Int)? {
         guard last >= 1, last < x.count else { return nil }
@@ -136,6 +142,8 @@ enum ScanEngine {
                 case .crossAbove: hit = a > c.value && (p.map { $0 <= c.value } ?? false)
                 case .lastBelow: hit = a < c.value
                 case .lastAbove: hit = a > c.value
+                case .becomes: hit = Self.same(a, c.value) && (p.map { !Self.same($0, c.value) } ?? false)
+                case .lastEqual: hit = Self.same(a, c.value)
                 }
                 if hit { return (last - i, i) }
             }
@@ -256,7 +264,7 @@ struct EventScanView: View {
                     }.labelsHidden().fixedSize()
                     .help(c.expr ?? c.metric.help)
                     Picker("", selection: $c.event) { ForEach(ScanEvent.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().fixedSize()
-                        .help("crosses below = the day it went from ≥ value to < value (start of the move); last day below = the latest day it was < value")
+                        .help("crosses below = the day it went from ≥ value to < value (start of the move); last day below = the latest day it was < value; becomes = the day it changed to exactly this value (e.g. Trend_ratio becomes 1); last day equal to = the latest day it was exactly this value")
                     TextField("", value: $c.value, format: .number).frame(width: 70).textFieldStyle(.roundedBorder)
                     Text(c.expr ?? c.metric.help).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                     if c.expr != nil {

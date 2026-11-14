@@ -583,6 +583,12 @@ final class EventScanTests: XCTestCase {
         XCTAssertEqual(d.metric, .delSma); XCTAssertEqual(d.event, .crossAbove)
         XCTAssertEqual(ScanCond.parse("close crosses above 500")?.metric, .close)
         XCTAssertNil(ScanCond.parse("nonsense 5"))
+        let e = ScanCond.parse("Trend_ratio == 1", columns: ["Trend_ratio"])
+        XCTAssertEqual(e?.event, .becomes); XCTAssertEqual(e?.value ?? 0, 1, accuracy: 1e-9); XCTAssertEqual(e?.expr, "Trend_ratio")
+        XCTAssertEqual(ScanCond.parse("count >= 5", columns: ["count"])?.event, .crossAbove)
+        let x: [Double?] = [0, 1, 1, 0, 1]
+        XCTAssertEqual(ScanEngine.barsSince(x, ScanCond(event: .becomes, value: 1), last: 4)?.0, 0)
+        XCTAssertEqual(ScanEngine.barsSince(x, ScanCond(event: .becomes, value: 1), last: 2)?.0, 1)
     }
 }
 
