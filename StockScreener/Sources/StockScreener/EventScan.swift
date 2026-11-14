@@ -54,8 +54,12 @@ struct ScanCond: Codable, Identifiable, Equatable {
                                            ("last day below", .lastBelow), ("last day above", .lastAbove),
                                            ("<=", .crossBelow), (">=", .crossAbove), ("<", .crossBelow), (">", .crossAbove), (" below ", .crossBelow), (" above ", .crossAbove)]
         // the LAST event keyword splits series | number (expressions may contain other symbols)
+        // word events first ("crosses above" beats its own " above "), then symbols, then bare above / below
         var best: (Range<String.Index>, ScanEvent)?
-        for (k, e) in keys { if let r = low.range(of: k, options: .backwards), best == nil || r.lowerBound > best!.0.lowerBound || (r.lowerBound == best!.0.lowerBound && r.upperBound > best!.0.upperBound) { best = (r, e) } }
+        for group in [Array(keys[0..<6]), Array(keys[6..<10]), Array(keys[10...])] {
+            for (k, e) in group { if let r = low.range(of: k, options: .backwards), best == nil || r.lowerBound > best!.0.lowerBound || (r.lowerBound == best!.0.lowerBound && r.upperBound > best!.0.upperBound) { best = (r, e) } }
+            if best != nil { break }
+        }
         guard let (r, ev) = best else { return nil }
         let left = String(t[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
         let right = String(t[r.upperBound...]).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
