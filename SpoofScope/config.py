@@ -10,13 +10,13 @@ DEFAULTS = {
     # Folder that contains one sub-folder per material
     "data_root": "",
     # Rules that turn a top-level folder name into a material label (first match wins, case-insensitive)
-    "material_rules": [["finger testing", "finger_In"], ["favicol", "glue_E"],
-                       ["glue", "glue_E"], ["gelatin", "gel"], ["silicon", "sil_R"],
-                       ["latex", "latex_P"], ["clay", "clay"], ["wax", "wax"]],
+    "material_rules": [["finger testing", "Live"], ["favicol", "Material 3"],
+                       ["glue", "Material 3"], ["gelatin", "Material 1"], ["silicon", "Material 2"],
+                       ["latex", "Material 4"], ["clay", "Material 5"], ["wax", "Material 6"]],
     # Materials that are LIVE fingers (leave empty if none)
     "live_materials": [],
     # Materials still used for training but not shown anywhere in the app
-    "hidden_materials": ["clay", "wax"],
+    "hidden_materials": ["Material 5", "Material 6"],
     # Ignore everything at or below this row (640-px image) - removes the sensor's bottom bezel band. 0 = off.
     "mask_max_row": 485,
 }
@@ -27,8 +27,17 @@ N_JOBS = 1 if FROZEN else 2
 
 
 # earlier, longer material names -> current short names (used to update saved settings)
-RENAMED = {"finger_testing_indoor": "finger_In", "transparent_favicol": "glue_E", "fevi_T": "glue_E", "elmers_glue": "glue_E",
-           "gelatin": "gel", "silicone_rubber": "sil_R", "latex_paint": "latex_P"}
+RENAMED = {"finger_testing_indoor": "Live", "finger_In": "Live",
+           "gelatin": "Material 1", "gel": "Material 1",
+           "silicone_rubber": "Material 2", "sil_R": "Material 2",
+           "elmers_glue": "Material 3", "glue_E": "Material 3", "transparent_favicol": "Material 3", "fevi_T": "Material 3",
+           "latex_paint": "Material 4", "latex_P": "Material 4",
+           "clay": "Material 5", "wax": "Material 6"}
+
+
+def display_name(m):
+    """Neutral name shown in the app for any earlier material label."""
+    return RENAMED.get(m, m)
 
 
 def load():

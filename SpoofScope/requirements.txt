@@ -6,5 +6,5 @@ scikit-image>=0.21
 opencv-python-headless
 pillow
 joblib
-streamlit>=1.30
+streamlit>=1.36
 onnxruntime

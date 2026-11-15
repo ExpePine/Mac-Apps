@@ -182,7 +182,7 @@ def main():
     from streamlit.web import cli as stcli
     sys.argv = ["streamlit", "run", _app_path(),
                 "--global.developmentMode=false", "--browser.gatherUsageStats=false",
-                "--server.port=8501", "--server.headless=true"]
+                "--server.port=8501", "--server.headless=true", "--client.toolbarMode=minimal"]
     sys.exit(stcli.main())
 
 
