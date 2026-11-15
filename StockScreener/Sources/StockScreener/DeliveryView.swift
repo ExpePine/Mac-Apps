@@ -536,18 +536,18 @@ struct DeliveryMiniChart: View {
                 .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
-                    ForEach([ChartLayer.candles, .del2c, .hit3, .shade], id: \.self) { layer in
-                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : "Shade")), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                    ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark], id: \.self) { layer in
+                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : "Shade"))), isOn: Binding(get: { L.contains(layer) }, set: { on in
                             var x = L; if on { x.insert(layer) } else { x.remove(layer) }
                             layersRaw = ChartLayer.encode(x)
                         }))
                         .toggleStyle(.button).controlSize(.mini)
                         .help(layer.label(metric.pine, length))
                     }
-                    if L.contains(.shade) {
+                    if L.contains(.shade) || L.contains(.dsmark) {
                         Stepper(String(format: "> %.0f", shadeLevel), value: $shadeLevel, in: 50...99, step: 1)
                             .font(.caption2.monospacedDigit()).controlSize(.mini).fixedSize()
-                            .help("Shade candles (purple) on days DELSMAC is above this")
+                            .help("DELSMAC level for the purple shading and the green ▲DS marks")
                     }
                 }
                 ChartStyleButton().buttonStyle(.borderless).controlSize(.mini)

@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, news, deals
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -26,6 +26,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .del2c: return "DEL2C line — close on the last DEL2 = 100 day (ta.highest \(Del2.length))"
         case .hit3: return "HI/T3 line — ta.highest(ta.sma(delivery, \(DeliveryColumns.hiSma)), 300) / T3 (dashed line at 1.00)"
         case .shade: return "Shade candles where DELSMAC (percentrank) > \(String(format: "%.0f", DelsmacShade.level))"
+        case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%.0f", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
         }
@@ -40,6 +41,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .t3: return .green
         case .del2c: return Color(red: 1, green: 0.77, blue: 0)
         case .shade: return Color(red: 0.7, green: 0.4, blue: 1)
+        case .dsmark: return Color(red: 0, green: 0.9, blue: 0.46)
         case .hit3: return Color(red: 1, green: 0.54, blue: 0.4)
         case .news: return .blue
         case .deals: return .purple
@@ -47,7 +49,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         default: return nil
         }
     }
-    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c, .hit3, .shade]
+    static let defaults: Set<ChartLayer> = [.candles, .deliv, .high, .bands, .markers, .prank, .t3, .del2c, .hit3, .shade, .dsmark]
     /// Stored as "a,b,c" in UserDefaults; "" = the defaults, "none" = nothing.
     static func decode(_ s: String) -> Set<ChartLayer> {
         if s.isEmpty { return defaults }
@@ -58,10 +60,11 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         if !s.contains("v3") && s != "none" { out.insert(.del2c) }
         if !s.contains("v4") && s != "none" { out.insert(.shade); out.insert(.candles) }
         if !s.contains("v5") && s != "none" { out.insert(.hit3) }
+        if !s.contains("v6") && s != "none" { out.insert(.dsmark) }
         return out
     }
     static func encode(_ set: Set<ChartLayer>) -> String {
-        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3", "v4", "v5"]).joined(separator: ",")
+        set.isEmpty ? "none" : (allCases.filter(set.contains).map(\.rawValue) + ["v2", "v3", "v4", "v5", "v6"]).joined(separator: ",")
     }
 }
 
@@ -230,6 +233,12 @@ struct LWChartData: Encodable {
             }
         }
         d.markers += events
+        // green ▲DS on days DELSMAC is above the level
+        if layers.contains(.dsmark), let s = series {
+            for day in DelsmacShade.days(s).sorted() {
+                d.markers.append(Marker(time: day, text: "DS", position: "belowBar", color: "#00E676", shape: "arrowUp"))
+            }
+        }
         return d
     }
 
