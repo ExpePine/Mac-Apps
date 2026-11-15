@@ -10,6 +10,7 @@ struct DeliveryView: View {
     @ObservedObject private var dc = DeliveryCenter.shared
 
     @AppStorage("chart.styleRev") private var mainStyleRev = 0
+    @AppStorage("delsmac.shade2") private var mainShadeLevel = 90.0
     @State private var showRepair = false
     @AppStorage("deliv.length") private var length = 300
     @AppStorage("deliv.metric") private var metricRaw = DeliveryMetric.value.rawValue
@@ -246,6 +247,7 @@ struct DeliveryView: View {
                     Spacer(minLength: 8)
                     if pane == "Chart" {
                         ChartStyleButton().controlSize(.small)
+                        DelsmacLevelControl(level: $mainShadeLevel).controlSize(.small)
                         ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize()
                     }
                     Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
@@ -291,6 +293,7 @@ struct DeliveryView: View {
         .onChange(of: colorScheme) { _ in pushChart() }
         .onChange(of: layersRaw) { _ in pushChart() }
         .onChange(of: mainStyleRev) { _ in pushChart() }
+        .onChange(of: mainShadeLevel) { _ in pushChart() }
         .onChange(of: t3Rev) { _ in pushChart() }
         .onChange(of: newsTL.revision) { _ in pushChart() }
         .onChange(of: dealsC.revision) { _ in pushChart() }
@@ -544,11 +547,7 @@ struct DeliveryMiniChart: View {
                         .toggleStyle(.button).controlSize(.mini)
                         .help(layer.label(metric.pine, length))
                     }
-                    if L.contains(.shade) || L.contains(.dsmark) {
-                        Stepper(String(format: "> %.0f", shadeLevel), value: $shadeLevel, in: 50...99, step: 1)
-                            .font(.caption2.monospacedDigit()).controlSize(.mini).fixedSize()
-                            .help("DELSMAC level for the purple shading and the green ▲DS marks")
-                    }
+                    DelsmacLevelControl(level: $shadeLevel).controlSize(.mini)
                 }
                 ChartStyleButton().buttonStyle(.borderless).controlSize(.mini)
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
@@ -988,4 +987,28 @@ struct DelsmacBadge: View {
             .background(Color.secondary.opacity(0.15), in: Capsule())
             .help("DELSMAC = ta.percentrank(DELSMA − DELSMA[3], 300) — how unusual DELSMA's 3-day rise is (0–100; 100 = fastest in 300 days). As the Filter column, on the day under the cursor (or the latest day)")
     }
+}
+
+
+/// Where the DELSMAC purple shading and green ▲DS marks start: presets (90, 91 … 99.5) or ± 1 steps.
+struct DelsmacLevelControl: View {
+    @Binding var level: Double
+    private static let presets: [Double] = [80, 85, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 99.5]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Menu {
+                ForEach(Self.presets, id: \.self) { v in
+                    Button { level = v } label: { Text(label(v)) + Text(v == level ? "  ✓" : "") }
+                }
+            } label: {
+                Text("DELSMAC > " + label(level)).monospacedDigit()
+            }
+            .fixedSize()
+            Stepper("", value: $level, in: 50...99.5, step: 1).labelsHidden()
+        }
+        .help("Shading and green ▲DS start on days DELSMAC is above this (0–100). Applies to every delivery chart.")
+    }
+
+    private func label(_ v: Double) -> String { v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v) }
 }

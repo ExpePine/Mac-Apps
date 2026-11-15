@@ -25,8 +25,8 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .t3: return "T3 line (green rising / red falling) — \(T3Def.current.pine)"
         case .del2c: return "DEL2C line — close on the last DEL2 = 100 day (ta.highest \(Del2.length))"
         case .hit3: return "HI/T3 line — ta.highest(ta.sma(delivery, \(DeliveryColumns.hiSma)), 300) / T3 (dashed line at 1.00)"
-        case .shade: return "Shade candles where DELSMAC (percentrank) > \(String(format: "%.0f", DelsmacShade.level))"
-        case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%.0f", DelsmacShade.level))"
+        case .shade: return "Shade candles where DELSMAC (percentrank) > \(String(format: "%g", DelsmacShade.level))"
+        case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
         }
