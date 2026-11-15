@@ -230,6 +230,24 @@ with tab_de:
                     d = d.dropna(subset=["time"]).sort_values("time").set_index("time")
                     st.line_chart(d["n_fooled"])
 
+@st.cache_data(show_spinner=False)
+def files_by_name(root):
+    """File name -> current path under the data folder, to find images that were moved or re-extracted."""
+    out = {}
+    if root and os.path.isdir(root):
+        for dp, _, fs in os.walk(root):
+            for f in fs:
+                if f.lower().endswith(config.IMAGE_EXT):
+                    out.setdefault(f, os.path.join(dp, f))
+    return out
+
+
+def find_image(path):
+    if os.path.exists(path):
+        return path
+    return files_by_name(SETTINGS.get("data_root", "")).get(os.path.basename(path))
+
+
 # ------------------------------------------------------------------ Feature types
 with tab_ft:
     if READY:
@@ -240,10 +258,16 @@ with tab_ft:
             mix = scrub(REPORT.get("feature_types", {}).get(c, {}))
             st.markdown(f"**Group {c}** - {mix.get('n_patches', '?')} patches; materials: {mix.get('materials', {})}")
             crops = []
+            missing = 0
             for path, r, cc, mat in [e for e in ex[c] if e[3] not in HIDE][:12]:
+                p2 = find_image(path)
+                if p2 is None:
+                    missing += 1
+                    continue
                 try:
-                    g2 = core.load_gray(path)
+                    g2 = core.load_gray(p2)
                 except Exception:
+                    missing += 1
                     continue
                 y0, x0 = max(0, r * core.GRID - 16), max(0, cc * core.GRID - 16)
                 crop = g2[y0:y0 + 48, x0:x0 + 48]
@@ -251,6 +275,8 @@ with tab_ft:
                 crops.append(crop)
             if crops:
                 st.image(crops, width=96)
+            if missing:
+                st.caption(f"{missing} example image(s) not found in the data folder set in Setup.")
             names[c] = st.text_input(f"Name for group {c}", names.get(c, f"type_{c}"), key=f"name_{c}")
         if st.button("Save names"):
             json.dump(names, open(os.path.join(W, "cluster_names.json"), "w"), indent=1)
