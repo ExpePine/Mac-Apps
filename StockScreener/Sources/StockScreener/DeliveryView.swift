@@ -986,6 +986,6 @@ struct DelsmacBadge: View {
             .foregroundStyle(v == nil ? Color.secondary : (v! >= 90 ? Color.green : (v! < 20 ? Color.red : Color.primary)))
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(Color.secondary.opacity(0.15), in: Capsule())
-            .help("DELSMAC = ta.percentrank(today's % change in \(k.pine), 300) — 0–100, 100 = today's rise beats all of the last 300 days. As the Filter column, on the day under the cursor (or the latest day)")
+            .help("DELSMAC = ta.percentrank(DELSMA − DELSMA[3], 300) — how unusual DELSMA's 3-day rise is (0–100; 100 = fastest in 300 days). As the Filter column, on the day under the cursor (or the latest day)")
     }
 }

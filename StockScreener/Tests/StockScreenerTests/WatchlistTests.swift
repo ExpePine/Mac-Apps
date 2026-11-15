@@ -159,22 +159,21 @@ final class NSEResultsTests: XCTestCase {
 
 final class DelSmaCTests: XCTestCase {
     func testChangePercentRank() throws {
-        // raw series (DELIV_QTY×CLOSE with close = 1): steady +1% a day, one +5% day, then today +2.5%
-        var q: [Double] = [100]
-        for k in 1..<400 { q.append(q[k - 1] * (k == 200 ? 1.05 : 1.01)) }
-        q.append(q.last! * 1.025)
+        // DELSMAC = ta.percentrank(DELSMA - DELSMA[3], 300): one-bar and whole-series versions agree, 0…100,
+        // na with too little history
+        var q: [Double] = []
+        var x = 100.0
+        for k in 0..<900 { x *= 1 + 0.03 * sin(Double(k) * 0.37) + 0.01 * cos(Double(k) * 1.3); q.append(x) }
         let days = q.indices.map { String(format: "D%04d", $0) }
         let s = DeliverySeries(days: days, qty: q, per: q.map { _ in 50 }, close: q.map { _ in 1 })
-        // of the previous 300 changes, 299 were +1 % (≤ 2.5 %) and one was +5 % → 299/300
-        let v = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: q.count - 1, metric: .value, length: 300))
-        XCTAssertEqual(v, 299.0 / 300.0 * 100, accuracy: 1e-9)
-        // a fall today ranks at the bottom
-        var f = q; f.append(f.last! * 0.98)
-        let sf = DeliverySeries(days: f.indices.map { String(format: "D%04d", $0) }, qty: f, per: f.map { _ in 50 }, close: f.map { _ in 1 })
-        XCTAssertEqual(try XCTUnwrap(DeliveryColumns.delSmaC(sf, at: f.count - 1, metric: .value, length: 300)), 0, accuracy: 1e-9)
-        // selected average: EMA 22 — stays within 0…100
-        let e = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: q.count - 1, metric: .ema22, length: 300))
-        XCTAssertGreaterThanOrEqual(e, 0); XCTAssertLessThanOrEqual(e, 100)
+        let all = DeliveryColumns.delSmaCSeries(s, metric: .value)
+        for i in [700, 800, 899] {
+            let one = try XCTUnwrap(DeliveryColumns.delSmaC(s, at: i, metric: .value))
+            XCTAssertEqual(one, try XCTUnwrap(all[i]), accuracy: 1e-9)
+            XCTAssertGreaterThanOrEqual(one, 0); XCTAssertLessThanOrEqual(one, 100)
+        }
+        XCTAssertNil(DeliveryColumns.delSmaC(s, at: 500, metric: .value))     // needs ~21 + 300 + 3 + 300 bars
+        XCTAssertNil(all[500])
     }
 }
 

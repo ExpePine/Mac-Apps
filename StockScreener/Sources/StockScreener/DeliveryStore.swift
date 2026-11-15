@@ -543,7 +543,7 @@ struct DeliveryColumns {
     var streak: Int? = nil       // STREAK = consecutive days passing StreakDef (0 = not passing today)
     var t3Color: Int? = nil      // 1 = T3 rising (green), 0 = not rising (red), nil = not enough data
     var hiT3: Double? = nil      // HI/T3 = ta.highest(ta.sma(DELIV_QTY*close, 22|66), 300) / T3
-    var delSmaC: Double? = nil   // DELSMAC = ta.percentrank(today's % change in the selected signal, 300)
+    var delSmaC: Double? = nil   // DELSMAC = ta.percentrank(DELSMA - DELSMA[3], 300)
     var del2: Double? = nil      // DEL2 = DELI × 100 / ta.highest(DELI, 100 or 300), DELI = DELIV_QTY × CLOSE
     var del2c: Double? = nil     // DEL2C = ta.valuewhen(DEL2 == 100, close, 0)
     var delsmaDays: Int? = nil   // DAYS_DELSMA = ta.barssince(DELSMA > threshold) (0 = true today, nil = never / not enough data)
@@ -611,56 +611,55 @@ struct DeliveryColumns {
         return percentRank(valid, length: length, at: valid.count - 1)
     }
 
-    /// DELSMAC on bar i — the selected Delivery signal series S (Delivery Analysis: DELIV_QTY×CLOSE, DELIV_QTY,
-    /// or its SMA / EMA 22…300):
-    ///   chg     = (S / S[1] − 1) × 100          (today's % change)
-    ///   DELSMAC = ta.percentrank(chg, 300)      (0–100: % of the previous 300 changes that were ≤ today's;
-    ///                                            100 = today's rise beats every day of the last 300)
-    /// Pine rules: na until the average exists and 300 earlier changes are there (with "full" history on);
-    /// days whose previous S is 0 have no % change and are skipped.
+    /// DELSMAC on bar i:
+    ///   DELSMA  = ta.percentrank(ta.sma|ema(DELIV_QTY*CLOSE, 22|66 — the Delivery signal's length), 300)
+    ///   DELSMAC = ta.percentrank(DELSMA - DELSMA[3], 300)
+    /// i.e. how unusual DELSMA's 3-day rise is versus its own 3-day moves over the last 300 days (0–100;
+    /// 100 = the fastest 3-day rise in 300 days). Pine rules: na until DELSMA exists (n − 1 + 300 bars) plus
+    /// 3 + 300 more bars — about 625 trading days of history — and na if any value in the window is na.
     static func delSmaC(_ s: DeliverySeries, at i: Int, metric k: DeliveryMetric = .current, length: Int = 300) -> Double? {
-        guard i < s.qty.count, i > 0 else { return nil }
-        let raw: [Double] = k == .qty ? Array(s.qty[...i]) : Array(s.metric(value: true)[...i])
-        var start = 0
-        var x = raw
-        if let n = k.smaLength {
-            guard raw.count >= n + 1 else { return nil }
-            x = DeliverySignal.avg(raw, n, ema: k.isEMA)
-            start = n - 1                                     // the average is na before this bar
-        }
-        let end = x.count - 1
-        guard end >= start + 1, x[end - 1] > 0 else { return nil }
-        let now = (x[end] / x[end - 1] - 1) * 100
-        let from = max(start + 1, end - length)               // the `length` changes before today
-        var prev: [Double] = []
-        prev.reserveCapacity(length)
-        if from <= end - 1 { for j in from...(end - 1) where x[j - 1] > 0 { prev.append((x[j] / x[j - 1] - 1) * 100) } }
-        if full && end - from < length { return nil }
-        guard !prev.isEmpty else { return nil }
-        return Double(prev.filter { $0 <= now }.count) / Double(prev.count) * 100
+        let lag = 3
+        guard i < s.qty.count, i >= 0 else { return nil }
+        let first = i - length - lag                  // earliest DELSMA we need
+        let n = k.smaLength ?? 22
+        guard first >= n - 1 + length else { return nil }
+        let m = Array(s.metric(value: true)[...i])
+        let sm = DeliverySignal.avg(m, n, ema: k.isEMA)
+        var ds = [Double?](repeating: nil, count: i + 1)
+        for j in first...i { ds[j] = Self.rankAt(sm, j, from: n - 1, length: length) }
+        func chg(_ j: Int) -> Double? { guard let a = ds[j], let b = ds[j - lag] else { return nil }; return a - b }
+        guard let now = chg(i) else { return nil }
+        var c = 0
+        for j in (i - length)..<i { guard let v = chg(j) else { return nil }; if v <= now { c += 1 } }
+        return Double(c) / Double(length) * 100
+    }
+
+    /// ta.percentrank(x, length) at j, using x only from index `from` on (na before) — nil when the window isn't full.
+    private static func rankAt(_ x: [Double], _ j: Int, from: Int, length: Int) -> Double? {
+        guard j - length >= from, j < x.count else { return nil }
+        var c = 0
+        for k in (j - length)..<j where x[k] <= x[j] { c += 1 }
+        return Double(c) / Double(length) * 100
     }
 
     /// DELSMAC for every bar at once (same rule as delSmaC(at:), much faster for scans and shading).
     static func delSmaCSeries(_ s: DeliverySeries, metric k: DeliveryMetric = .current, length L: Int = 300) -> [Double?] {
-        let raw: [Double] = k == .qty ? s.qty : s.metric(value: true)
-        let n = raw.count
-        var out = [Double?](repeating: nil, count: n)
-        var x = raw, start = 0
-        if let m = k.smaLength {
-            guard n >= m + 1 else { return out }
-            x = DeliverySignal.avg(raw, m, ema: k.isEMA); start = m - 1
-        }
-        guard start + 1 < n else { return out }
-        var chg = [Double?](repeating: nil, count: n)
-        for j in (start + 1)..<n where x[j - 1] > 0 { chg[j] = (x[j] / x[j - 1] - 1) * 100 }
-        let isFull = full
-        for i in (start + 1)..<n {
+        let lag = 3
+        let m = s.metric(value: true)
+        let count = m.count
+        var out = [Double?](repeating: nil, count: count)
+        let n = k.smaLength ?? 22
+        guard count > n - 1 + L + lag + L else { return out }
+        let sm = DeliverySignal.avg(m, n, ema: k.isEMA)
+        var ds = [Double?](repeating: nil, count: count)
+        for j in (n - 1 + L)..<count { ds[j] = rankAt(sm, j, from: n - 1, length: L) }
+        var chg = [Double?](repeating: nil, count: count)
+        for j in lag..<count { if let a = ds[j], let b = ds[j - lag] { chg[j] = a - b } }
+        for i in L..<count {
             guard let now = chg[i] else { continue }
-            let from = max(start + 1, i - L)
-            if isFull && i - from < L { continue }
-            var c = 0, t = 0
-            for j in from..<i { if let v = chg[j] { t += 1; if v <= now { c += 1 } } }
-            if t > 0 { out[i] = Double(c) / Double(t) * 100 }
+            var c = 0, ok = true
+            for j in (i - L)..<i { guard let v = chg[j] else { ok = false; break }; if v <= now { c += 1 } }
+            if ok { out[i] = Double(c) / Double(L) * 100 }
         }
         return out
     }
