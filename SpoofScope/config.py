@@ -10,7 +10,7 @@ DEFAULTS = {
     # Folder that contains one sub-folder per material
     "data_root": "",
     # Rules that turn a top-level folder name into a material label (first match wins, case-insensitive)
-    "material_rules": [["finger testing", "Live"], ["favicol", "Material 3"],
+    "material_rules": [["finger testing", "Common finger"], ["favicol", "Material 3"],
                        ["glue", "Material 3"], ["gelatin", "Material 1"], ["silicon", "Material 2"],
                        ["latex", "Material 4"], ["clay", "Material 5"], ["wax", "Material 6"]],
     # Materials that are LIVE fingers (leave empty if none)
@@ -27,7 +27,7 @@ N_JOBS = 1 if FROZEN else 2
 
 
 # earlier, longer material names -> current short names (used to update saved settings)
-RENAMED = {"finger_testing_indoor": "Live", "finger_In": "Live",
+RENAMED = {"finger_testing_indoor": "Common finger", "finger_In": "Common finger", "Live": "Common finger",
            "gelatin": "Material 1", "gel": "Material 1",
            "silicone_rubber": "Material 2", "sil_R": "Material 2",
            "elmers_glue": "Material 3", "glue_E": "Material 3", "transparent_favicol": "Material 3", "fevi_T": "Material 3",
