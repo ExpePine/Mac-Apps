@@ -157,6 +157,7 @@ enum FilterCompiler {
 final class CellPainter {
     private var rules: [Int: [(RowPredicate, NSColor)]] = [:]
     private var onlyNew: [Int: [Bool]] = [:]
+    private var weights: [Int: [Double]] = [:]
     /// The same stock's row on the previous stored day (for "only when it just became true").
     var previous: ((SheetRow) -> SheetRow?)?
 
@@ -176,6 +177,7 @@ final class CellPainter {
                                                       table: table, issues: &ignored) {
                         rules[col, default: []].append((p, .clear))
                         onlyNew[col, default: []].append(false)
+                        weights[col, default: []].append(rule.weight ?? 0)
                     }
                 }
                 continue
@@ -185,11 +187,37 @@ final class CellPainter {
                                               table: table, issues: &ignored) {
                 rules[col, default: []].append((p, color))
                 onlyNew[col, default: []].append(rule.onlyNew ?? false)
+                weights[col, default: []].append(rule.weight ?? 0)
             }
         }
     }
 
     var isEmpty: Bool { rules.isEmpty }
+
+    /// Any rule has a weight?
+    var hasWeights: Bool { weights.values.contains { $0.contains { $0 > 0 } } }
+
+    /// WEIGHTS for a row: for every painted column, the weight of the rule that colours it (first match, like
+    /// the colour itself — "only when it just became true" included); 0 when no rule colours it.
+    func weight(for row: SheetRow) -> Double {
+        var total = 0.0
+        for col in rules.keys { if let k = matching(row, column: col), let w = weights[col], k < w.count { total += w[k] } }
+        return total
+    }
+
+    /// Index of the rule that decides this cell's colour (nil = none).
+    private func matching(_ row: SheetRow, column: Int) -> Int? {
+        guard let list = rules[column] else { return nil }
+        let fresh = onlyNew[column] ?? []
+        for (k, (test, _)) in list.enumerated() where test(row) {
+            if k < fresh.count, fresh[k] {
+                guard let previous, let old = previous(row) else { continue }
+                if test(old) { continue }
+            }
+            return k
+        }
+        return nil
+    }
 
     func color(for row: SheetRow, column: Int) -> NSColor? {
         guard let list = rules[column] else { return nil }

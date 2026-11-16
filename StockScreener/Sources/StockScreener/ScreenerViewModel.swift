@@ -624,6 +624,28 @@ final class ScreenerViewModel: ObservableObject {
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 
+    static let weightsColumn = "WEIGHTS"
+
+    /// WEIGHTS = sum of the weights of the colour rules that colour this row's cells (0 when none do).
+    func withWeights(_ t: SheetTable) -> SheetTable {
+        var t = t
+        if let i = t.index(of: Self.weightsColumn) {             // recomputing: drop the old column
+            t = SheetTable(headers: t.headers.enumerated().filter { $0.offset != i }.map(\.element),
+                           rows: t.rows.map { r in
+                               SheetRow(id: r.id, cells: r.cells.enumerated().filter { $0.offset != i }.map(\.element),
+                                        numbers: r.numbers.enumerated().filter { $0.offset != i }.map(\.element))
+                           },
+                           originalHeaders: t.originalHeaders.enumerated().filter { $0.offset != i }.map(\.element))
+        }
+        guard settings.cellRules.contains(where: { ($0.weight ?? 0) > 0 && $0.condition.isEnabled }) else { return t }
+        let p = makePainter(t)
+        let rows = t.rows.map { r -> SheetRow in
+            let w = p.weight(for: r)
+            return SheetRow(id: r.id, cells: r.cells + [String(format: "%g", w)], numbers: r.numbers + [w])
+        }
+        return SheetTable(headers: t.headers + [Self.weightsColumn], rows: rows, originalHeaders: t.originalHeaders + [Self.weightsColumn])
+    }
+
     /// Cell colours, with the previous stored day for rules ticked "only when it just became true".
     func makePainter(_ t: SheetTable) -> CellPainter {
         CellPainter(settings.cellRules, table: t, previous: { [weak self] row in
@@ -634,7 +656,8 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let newTable = withScores(withEarningsColumns(withPriceT3Columns(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))))))
+        let base = withScores(withEarningsColumns(withPriceT3Columns(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))))))
+        let newTable = withWeights(base)
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }
         painter = makePainter(newTable)
@@ -683,6 +706,12 @@ final class ScreenerViewModel: ObservableObject {
             scheduleFilterRecompute(delayMs: 200)
         }
         if old.cellRules != settings.cellRules {
+            let hadW = old.cellRules.contains { ($0.weight ?? 0) > 0 }, hasW = settings.cellRules.contains { ($0.weight ?? 0) > 0 }
+            if hadW || hasW {
+                table = withWeights(table)               // WEIGHTS follows the rules
+                if hasW, !settings.filterColumns.isEmpty, !settings.filterColumns.contains(Self.weightsColumn) { settings.filterColumns.append(Self.weightsColumn) }
+                scheduleFilterRecompute(delayMs: 300)
+            }
             painter = makePainter(table)
             filterVersion += 1                           // repaint
         }

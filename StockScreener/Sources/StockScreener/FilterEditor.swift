@@ -295,7 +295,15 @@ struct CellRuleRow: View {
                         .textFieldStyle(.roundedBorder)
                 }
             }
-            RuleColorPicker(rule: $rule)
+            HStack(spacing: 6) {
+                RuleColorPicker(rule: $rule)
+                Spacer()
+                Text("Weight").font(.caption).foregroundStyle(.secondary)
+                TextField("0", value: Binding(get: { rule.weight ?? 0 }, set: { rule.weight = $0 <= 0 ? nil : min(100, $0) }), format: .number)
+                    .textFieldStyle(.roundedBorder).frame(width: 48)
+                Stepper("", value: Binding(get: { rule.weight ?? 0 }, set: { rule.weight = $0 <= 0 ? nil : min(100, $0) }), in: 0...100, step: 5).labelsHidden()
+            }
+            .help("0–100 points added to the WEIGHTS column for every stock where this rule colours its cell (0 = not counted)")
             let others = columns.filter { $0 != rule.condition.column }
             if !others.isEmpty || rule.paint != nil {
                 HStack(spacing: 6) {

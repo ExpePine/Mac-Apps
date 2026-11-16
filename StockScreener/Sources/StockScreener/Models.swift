@@ -435,6 +435,8 @@ struct CellRule: Identifiable, Codable, Equatable {
     var custom: RGBA? = nil
     /// Transparency for a preset shade (0–1); nil = the shade's own.
     var alpha: Double? = nil
+    /// Points (0–100) added to the WEIGHTS column when this rule colours its cell; nil / 0 = none.
+    var weight: Double? = nil
 
     /// The colour to paint, or nil for "neutral".
     var resolvedColor: NSColor? {
