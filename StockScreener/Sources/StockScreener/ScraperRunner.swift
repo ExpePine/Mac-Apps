@@ -241,7 +241,7 @@ struct ScraperView: View {
             .controlSize(.small)
             .padding(.horizontal, 12).padding(.vertical, 8)
             ScraperHealthSettings().controlSize(.small).padding(.horizontal, 12).padding(.bottom, 6)
-            ScraperHealthBanner()
+            ScraperHealthBanner(always: true)
             Divider()
             if tab == 1 { ChainsView() } else { RepositoriesView(hasShared: hasShared) }
         }

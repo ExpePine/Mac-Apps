@@ -59,6 +59,9 @@ struct ScraperIssue: Identifiable, Equatable {
 
     var showBanner: Bool { enabled && !issues.isEmpty && dismissedDay != AlertSchedule.today() }
     func dismissToday() { UserDefaults.standard.set(AlertSchedule.today(), forKey: "health.dismissed"); objectWillChange.send() }
+    func undismiss() { UserDefaults.standard.removeObject(forKey: "health.dismissed"); objectWillChange.send() }
+    /// Hidden for today but there are still problems → a small badge brings it back.
+    var hiddenWithIssues: Bool { enabled && !issues.isEmpty && dismissedDay == AlertSchedule.today() }
 
     /// From the app's refresh loop: weekdays after the set time, every 20 minutes until midnight.
     func checkIfDue() {
@@ -155,9 +158,11 @@ struct ScraperIssue: Identifiable, Equatable {
 struct ScraperHealthBanner: View {
     @ObservedObject private var h = ScraperHealth.shared
     @Environment(\.openWindow) private var openWindow
+    /// The Scraper window shows the list even after "Hide until tomorrow".
+    var always = false
 
     var body: some View {
-        if h.showBanner {
+        if h.showBanner || (always && h.enabled && !h.issues.isEmpty) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -168,7 +173,10 @@ struct ScraperHealthBanner: View {
                         Button("Run all of them") { h.runAll() }
                     }
                     Button { Task { await h.check() } } label: { if h.checking { ProgressView().controlSize(.mini) } else { Text("Recheck") } }
-                    Button { h.dismissToday() } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Hide until tomorrow")
+                    if !always {
+                        Button { h.dismissToday() } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                            .help("Hide until tomorrow — it stays in the Scraper window, and the ⚠︎ Scraper button in the toolbar brings it back")
+                    }
                 }
                 // one grid: each row's buttons sit right after its status, in a column that lines up
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
@@ -219,6 +227,19 @@ struct ScraperHealthSettings: View {
                 .labelsHidden().fixedSize().disabled(!on)
             Text("on weekdays, check that every repository's ticked workflows ran today — banner + notification if one didn't, failed or is disabled")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+
+/// Toolbar badge after "Hide until tomorrow": ⚠︎ 6 — click to show the banner again.
+struct ScraperHealthBadge: View {
+    @ObservedObject private var h = ScraperHealth.shared
+    var body: some View {
+        if h.hiddenWithIssues {
+            Button { h.undismiss() } label: { Label("Scraper \(h.issues.count)", systemImage: "exclamationmark.triangle.fill") }
+                .foregroundStyle(.orange)
+                .help("\(h.issues.count) scraper workflow\(h.issues.count == 1 ? "" : "s") need attention — show the list again")
         }
     }
 }

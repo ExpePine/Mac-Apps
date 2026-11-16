@@ -28,6 +28,7 @@ struct GainersView: View {
         VStack(spacing: 0) {
             ScraperHealthBanner()
             indexStrip
+                .overlay(alignment: .trailing) { ScraperHealthBadge().controlSize(.small).padding(.trailing, 6) }
             Divider()
             MarketStrip()
             Divider()

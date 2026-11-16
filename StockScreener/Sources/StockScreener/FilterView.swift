@@ -230,6 +230,7 @@ struct FilterView: View {
                     .help("How many stocks meet each F formula (notes, F alerts, F combinations), day by day")
                 Toggle(isOn: $showCondCounts) { Label("✓ counts", systemImage: "number") }
                     .help("Show in each column header how many of all stocks meet that column's Filter condition(s) alone (✓123)")
+                ScraperHealthBadge()
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()
