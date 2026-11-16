@@ -24,7 +24,7 @@ enum ScanMetric: String, CaseIterable, Codable, Identifiable {
         case .sma22: return "ta.sma(DQ*close, 22)"
         case .sma66: return "ta.sma(DQ*close, 66)"
         case .per: return "Delivery % of traded quantity"
-        case .delSmaC: return "ta.percentrank(DELSMA - DELSMA[3], 300)"
+        case .delSmaC: return "ta.percentrank(% change of the Delivery signal, 300)"
         case .del2: return "DQ*close × 100 / ta.highest(DQ*close, 100|300)"
         case .del2c: return "ta.valuewhen(DEL2 == 100, close, 0)"
         case .cdl2c: return "close / DEL2C (NSE close of that day)"
