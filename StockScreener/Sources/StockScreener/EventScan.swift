@@ -209,6 +209,7 @@ struct EventScanView: View {
     @AppStorage("scan.asc") private var ascending = true
     @AppStorage("scan.onlyHits") private var onlyHits = true
     @AppStorage("scan.within") private var within = 0             // 0 = any time
+    @AppStorage("scan.matchAll") private var matchAll = false      // all conditions (AND) vs any (OR)
     @State private var quick = ""
     @State private var conds: [ScanCond] = []
     @State private var centreOn: UUID?
@@ -286,7 +287,7 @@ struct EventScanView: View {
                 }
             }
             HStack(spacing: 6) {
-                TextField("Add: e.g. HI/T3 < 1.10 · DELSMA > 99 · close / sma(close, 50) crosses above 1.1 · roc(close, 5) > 20", text: $quick)
+                TextField("Add: e.g. DELSMAC > 98 + DELSMA > 90 · HI/T3 < 1.10 · close / sma(close, 50) crosses above 1.1", text: $quick)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 460).onSubmit(addQuick)
                 Button("Add") { addQuick() }
                 Button { conds.append(ScanCond()) } label: { Label("Condition", systemImage: "plus") }
@@ -310,8 +311,21 @@ struct EventScanView: View {
         })
     }
 
+    /// One condition, or several joined with + / and / & / ; — e.g. "DELSMAC > 98 + DELSMA > 90".
     private func addQuick() {
-        if let c = ScanCond.parse(quick, columns: vm.headers) { conds.append(c); quick = "" } else { NSSound.beep() }
+        if let c = ScanCond.parse(quick, columns: vm.headers) { conds.append(c); quick = ""; return }
+        func split(_ bare: Bool) -> [ScanCond]? {
+            var t = quick.replacingOccurrences(of: " and ", with: "|", options: .caseInsensitive)
+                .replacingOccurrences(of: "&", with: "|").replacingOccurrences(of: ";", with: "|").replacingOccurrences(of: " + ", with: "|")
+            if bare { t = t.replacingOccurrences(of: "+", with: "|") }      // "A>20+B>10" (expressions with + need spaces around the joining +)
+            let parts = t.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let parsed = parts.compactMap { ScanCond.parse($0, columns: vm.headers) }
+            return parts.count > 1 && parsed.count == parts.count ? parsed : nil
+        }
+        guard let many = split(false) ?? split(true) else { NSSound.beep(); return }
+        conds += many
+        matchAll = true                                      // A + B means both
+        quick = ""
     }
 
     // MARK: Results
@@ -319,8 +333,13 @@ struct EventScanView: View {
     private var shown: [ScanRow] {
         var r = sc.rows
         let ids = conds.map(\.id)
-        if onlyHits { r = r.filter { row in ids.contains { row.hits[$0] != nil } } }
-        if within > 0 { r = r.filter { row in ids.contains { (row.hits[$0]?.bars ?? .max) <= within } } }
+        if matchAll {
+            if onlyHits || within > 0 { r = r.filter { row in ids.allSatisfy { row.hits[$0] != nil } } }
+            if within > 0 { r = r.filter { row in ids.allSatisfy { (row.hits[$0]?.bars ?? .max) <= within } } }
+        } else {
+            if onlyHits { r = r.filter { row in ids.contains { row.hits[$0] != nil } } }
+            if within > 0 { r = r.filter { row in ids.contains { (row.hits[$0]?.bars ?? .max) <= within } } }
+        }
         if sortBy == "symbol" { r.sort { ascending ? $0.symbol < $1.symbol : $0.symbol > $1.symbol } }
         else if let id = UUID(uuidString: sortBy) ?? conds.first?.id {
             r.sort { a, b in
@@ -344,6 +363,9 @@ struct EventScanView: View {
                     }.labelsHidden().fixedSize()
                     Picker("", selection: $ascending) { Text("fewest days first").tag(true); Text("most days first").tag(false) }.labelsHidden().fixedSize()
                 }.fixedSize()
+                Picker("", selection: $matchAll) { Text("Any condition").tag(false); Text("All conditions").tag(true) }
+                    .pickerStyle(.segmented).fixedSize()
+                    .help("All conditions = every condition must have happened (and, with “within”, all within that many days) — e.g. A > 20 + B > 10")
                 Toggle("Only stocks where it happened", isOn: $onlyHits).toggleStyle(.checkbox).fixedSize()
                 HStack(spacing: 4) {
                     Text("within").font(.caption)
