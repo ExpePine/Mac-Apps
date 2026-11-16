@@ -24,6 +24,8 @@ import SwiftUI
         var avgRet = 0.0              // average % change after (fraction)
         var coef = 0.0                // model coefficient (log-odds)
         var auto = 0.0                // 0…100
+        var share: Double? = nil      // share of all stock-days it coloured
+        var skipped: String? = nil    // why it couldn't be learned (fires on almost every / almost no stock)
     }
     struct Check: Codable {
         var testDays = 0, testSamples = 0
@@ -41,7 +43,10 @@ import SwiftUI
     var weights: [UUID: Double] { saved?.weights ?? [:] }
 
     private init() {
-        if let d = UserDefaults.standard.data(forKey: "weights.auto"), let s = try? JSONDecoder().decode(Saved.self, from: d) { saved = s }
+        if let d = UserDefaults.standard.data(forKey: "weights.auto"), let s = try? JSONDecoder().decode(Saved.self, from: d),
+           s.stats.contains(where: { $0.share != nil }) {          // older trainings (before the always-on fix) are dropped
+            saved = s
+        } else { UserDefaults.standard.removeObject(forKey: "weights.auto") }
     }
     func clear() { saved = nil; UserDefaults.standard.removeObject(forKey: "weights.auto") }
 
@@ -96,9 +101,22 @@ import SwiftUI
                 let s = idx.sorted { samples[$0].ret > samples[$1].ret }
                 for i in s.prefix(max(1, Int((Double(s.count) * 0.2).rounded(.up)))) where samples[i].ret > 0 { samples[i].gainer = true }
             }
+            // a rule that colours almost every stock (or almost none) can't be told apart from the baseline —
+            // with it in, the model can hand it any weight (that's what made every row 100). Leave such rules out.
+            let total = Double(samples.count)
+            var learnable = [Bool](repeating: true, count: feats.count)
+            var shares = [Double](repeating: 0, count: feats.count)
+            for j in feats.indices {
+                let on = Double(samples.filter { $0.mask[j] }.count)
+                shares[j] = on / total
+                if shares[j] > 0.9 || on < 30 { learnable[j] = false }
+            }
+            let fitSamples = samples.map { x -> Sample in
+                var y = x; y = Sample(mask: zip(x.mask, learnable).map { $0 && $1 }, ret: x.ret, day: x.day, gainer: x.gainer, userScore: x.userScore); return y
+            }
             let nDays = (samples.map(\.day).max() ?? 0) + 1
             let cut = Int(Double(nDays) * 0.7)
-            let train = samples.filter { $0.day < cut }, test = samples.filter { $0.day >= cut }
+            let train = fitSamples.filter { $0.day < cut }, test = fitSamples.filter { $0.day >= cut }
             let F = feats.count
             let wTrain = Self.fit(train, F: F)
             // check on unseen days
@@ -115,8 +133,8 @@ import SwiftUI
             check.topBase = test.isEmpty ? 0 : test.map(\.ret).reduce(0, +) / Double(test.count)
             progress = 0.95
             // final weights: all days
-            let w = Self.fit(samples, F: F)
-            let maxPos = w.dropFirst().max() ?? 0
+            let w = Self.fit(fitSamples, F: F)
+            let maxPos = zip(w.dropFirst(), learnable).filter { $0.1 }.map(\.0).max() ?? 0
             var stats: [RuleStat] = []
             var weights: [UUID: Double] = [:]
             for (j, r) in feats.enumerated() {
@@ -125,8 +143,12 @@ import SwiftUI
                 st.fires = on.count
                 st.gainerRate = on.isEmpty ? 0 : Double(on.filter(\.gainer).count) / Double(on.count)
                 st.avgRet = on.isEmpty ? 0 : on.map(\.ret).reduce(0, +) / Double(on.count)
-                st.coef = w[j + 1]
-                st.auto = maxPos > 0 && w[j + 1] > 0 ? (w[j + 1] / maxPos * 100).rounded() : 0
+                st.coef = learnable[j] ? w[j + 1] : 0
+                st.share = shares[j]
+                if !learnable[j] {
+                    st.skipped = shares[j] > 0.9 ? String(format: "colours %.0f%% of stocks — tells nothing apart", shares[j] * 100) : "coloured fewer than 30 times"
+                }
+                st.auto = learnable[j] && maxPos > 0 && w[j + 1] > 0 ? (w[j + 1] / maxPos * 100).rounded() : 0
                 weights[r.id] = st.auto
                 stats.append(st)
             }
@@ -297,11 +319,15 @@ struct WeightsView: View {
                         }
                         Text(String(format: "%g", rule?.weight ?? 0)).monospacedDigit()
                         Text(String(format: "%g", st.auto)).monospacedDigit().bold().foregroundStyle(st.auto > 0 ? Color.green : Color.secondary)
-                        Text("\(st.fires)").monospacedDigit()
+                        Text("\(st.fires)" + (st.share.map { String(format: " (%.0f%%)", $0 * 100) } ?? "")).monospacedDigit()
                         Text(String(format: "%.0f%% (all: %.0f%%)", st.gainerRate * 100, (s.check?.baseRate ?? 0.2) * 100)).monospacedDigit()
                         Text(FSuccessMath.pct(st.avgRet)).monospacedDigit().foregroundStyle(FSuccessMath.color(st.avgRet))
-                        Text(st.coef > 0.05 ? "helps" : (st.coef < -0.05 ? "hurts" : "little")).font(.caption)
-                            .foregroundStyle(st.coef > 0.05 ? Color.green : (st.coef < -0.05 ? Color.red : Color.secondary))
+                        if let why = st.skipped {
+                            Text("left out: " + why).font(.caption).foregroundStyle(.orange)
+                        } else {
+                            Text(st.coef > 0.05 ? "helps" : (st.coef < -0.05 ? "hurts" : "little")).font(.caption)
+                                .foregroundStyle(st.coef > 0.05 ? Color.green : (st.coef < -0.05 ? Color.red : Color.secondary))
+                        }
                     }
                 }
                 let missing = vm.settings.cellRules.filter { r in r.condition.isEnabled && r.resolvedColor != nil && !s.stats.contains { $0.id == r.id } }
