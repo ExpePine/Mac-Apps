@@ -301,6 +301,10 @@ struct CellRuleRow: View {
                 TextField("0", value: Binding(get: { rule.weight ?? 0 }, set: { rule.weight = $0 <= 0 ? nil : min(100, $0) }), format: .number)
                     .textFieldStyle(.roundedBorder).frame(width: 52)
                 Stepper("", value: Binding(get: { rule.weight ?? 0 }, set: { rule.weight = $0 <= 0 ? nil : min(100, $0) }), in: 0...100, step: 5).labelsHidden()
+                if let a = WeightsAuto.shared.weights[rule.id] {
+                    Text("auto \(String(format: "%g", a))").font(.caption2.bold()).foregroundStyle(a > 0 ? Color.green : Color.secondary)
+                        .help("Learned weight (WEIGHTS_AUTO) — see Filter → Weights")
+                }
                 Text("points to WEIGHTS when coloured").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 Spacer(minLength: 0)
             }

@@ -629,7 +629,8 @@ final class ScreenerViewModel: ObservableObject {
     /// WEIGHTS = sum of the weights of the colour rules that colour this row's cells (0 when none do).
     func withWeights(_ t: SheetTable) -> SheetTable {
         var t = t
-        if let i = t.index(of: Self.weightsColumn) {             // recomputing: drop the old column
+        for name in [Self.weightsColumn, Self.weightsAutoColumn] {     // recomputing: drop the old columns
+            guard let i = t.index(of: name) else { continue }
             t = SheetTable(headers: t.headers.enumerated().filter { $0.offset != i }.map(\.element),
                            rows: t.rows.map { r in
                                SheetRow(id: r.id, cells: r.cells.enumerated().filter { $0.offset != i }.map(\.element),
@@ -637,18 +638,40 @@ final class ScreenerViewModel: ObservableObject {
                            },
                            originalHeaders: t.originalHeaders.enumerated().filter { $0.offset != i }.map(\.element))
         }
-        guard settings.cellRules.contains(where: { ($0.weight ?? 0) > 0 && $0.condition.isEnabled }) else { return t }
-        let p = makePainter(t)
-        let rows = t.rows.map { r -> SheetRow in
-            let w = p.weight(for: r)
-            return SheetRow(id: r.id, cells: r.cells + [String(format: "%g", w)], numbers: r.numbers + [w])
+        var extra: [(String, CellPainter)] = []
+        if settings.cellRules.contains(where: { ($0.weight ?? 0) > 0 && $0.condition.isEnabled }) {
+            extra.append((Self.weightsColumn, makePainter(t)))
         }
-        return SheetTable(headers: t.headers + [Self.weightsColumn], rows: rows, originalHeaders: t.originalHeaders + [Self.weightsColumn])
+        let auto = WeightsAuto.shared.weights
+        if !auto.isEmpty {
+            let rules = settings.cellRules.map { r -> CellRule in var r = r; r.weight = auto[r.id] ?? 0; return r }
+            extra.append((Self.weightsAutoColumn, makePainter(t, rules: rules)))
+        }
+        guard !extra.isEmpty else { return t }
+        let rows = t.rows.map { r -> SheetRow in
+            let ws = extra.map { $0.1.weight(for: r) }
+            return SheetRow(id: r.id, cells: r.cells + ws.map { String(format: "%g", $0) }, numbers: r.numbers + ws.map { Optional($0) })
+        }
+        let names = extra.map(\.0)
+        return SheetTable(headers: t.headers + names, rows: rows, originalHeaders: t.originalHeaders + names)
+    }
+
+    static let weightsAutoColumn = "WEIGHTS_AUTO"
+
+    /// Recompute WEIGHTS / WEIGHTS_AUTO (after training or rule edits).
+    func refreshWeights() {
+        table = withWeights(table)
+        for n in [Self.weightsColumn, Self.weightsAutoColumn] where table.index(of: n) != nil && !settings.filterColumns.isEmpty && !settings.filterColumns.contains(n) {
+            settings.filterColumns.append(n)
+        }
+        painter = makePainter(table)
+        scheduleFilterRecompute(delayMs: 100)
+        filterVersion += 1
     }
 
     /// Cell colours, with the previous stored day for rules ticked "only when it just became true".
-    func makePainter(_ t: SheetTable) -> CellPainter {
-        CellPainter(settings.cellRules, table: t, previous: { [weak self] row in
+    func makePainter(_ t: SheetTable, rules: [CellRule]? = nil) -> CellPainter {
+        CellPainter(rules ?? settings.cellRules, table: t, previous: { [weak self] row in
             guard let self, self.timelineIndex == nil, let label = self.labelIndex, let prev = self.previousDayRows() else { return nil }
             return prev.rows[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
         })
@@ -707,8 +730,8 @@ final class ScreenerViewModel: ObservableObject {
         }
         if old.cellRules != settings.cellRules {
             let hadW = old.cellRules.contains { ($0.weight ?? 0) > 0 }, hasW = settings.cellRules.contains { ($0.weight ?? 0) > 0 }
-            if hadW || hasW {
-                table = withWeights(table)               // WEIGHTS follows the rules
+            if hadW || hasW || !WeightsAuto.shared.weights.isEmpty {
+                table = withWeights(table)               // WEIGHTS / WEIGHTS_AUTO follow the rules
                 if hasW, !settings.filterColumns.isEmpty, !settings.filterColumns.contains(Self.weightsColumn) { settings.filterColumns.append(Self.weightsColumn) }
                 scheduleFilterRecompute(delayMs: 300)
             }

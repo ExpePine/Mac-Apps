@@ -231,6 +231,8 @@ struct FilterView: View {
                 Toggle(isOn: $showCondCounts) { Label("✓ counts", systemImage: "number") }
                     .help("Show in each column header how many of all stocks meet that column's Filter condition(s) alone (✓123)")
                 ScraperHealthBadge()
+                Button { openWindow(id: "weights") } label: { Label("Weights", systemImage: "scalemass") }
+                    .help("Your colour-rule weights (WEIGHTS) and learned ones (WEIGHTS_AUTO) — what each rule is worth")
                 AlertsButton()
                 AnimateButton()
                 FreezeMenu()
