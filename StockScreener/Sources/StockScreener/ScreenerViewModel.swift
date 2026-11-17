@@ -484,7 +484,9 @@ final class ScreenerViewModel: ObservableObject {
         let dc = DeliveryCenter.shared
         guard !dc.storedDays.isEmpty else { return t }
         // Same day as the sheet's data (or the last NSE day before it), not each stock's own last row
-        let cols = dc.columns(asOf: HistoryStore.dayKey(dataDay(of: t)))
+        let asOf = HistoryStore.dayKey(dataDay(of: t))
+        let cols = dc.columns(asOf: asOf)
+        let book = dc.book
         guard !cols.isEmpty, let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
         let dName = t.index(of: "DLVR") == nil ? "DLVR" : "DLVR (NSE)"
         let sName = t.index(of: "Safety") == nil ? "Safety" : "Safety (NSE)"
@@ -498,6 +500,7 @@ final class ScreenerViewModel: ObservableObject {
         let cName = t.index(of: "DELSMAC") == nil ? "DELSMAC" : "DELSMAC (NSE)"
         func nm(_ n: String) -> String { t.index(of: n) == nil ? n : n + " (NSE)" }
         let d2Names = ["DEL2", "DEL2C", "C/DL2C"].map(nm)
+        let serName = nm("NSE_SERIES")
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
             let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump, ms = c?.delSma, sk = c?.streak.map(Double.init), t3 = c?.t3Color.map(Double.init), ht = c?.hiT3      // DLVR 0 = no new 300-day high today
@@ -508,6 +511,9 @@ final class ScreenerViewModel: ObservableObject {
             let now = priceBook.series(for: sym)?.closes.last ?? dc_close(sym)
             let d2 = c?.del2, d2c = c?.del2c
             let cdl: Double? = (now != nil && d2c != nil && d2c! > 0) ? now! / d2c! : nil
+            // NSE SERIES on that day (EQ, BE, BZ, SM …)
+            var code = ""
+            if let bs = book.series[sym], let i = bs.days.lastIndex(where: { $0 <= asOf }), i < bs.seriesCode.count { code = bs.seriesCode[i] }
             return SheetRow(id: row.id,
                             cells: row.cells + [d == 0 ? "0" : String(format: "%.2f", d), sf.map { String(format: "%.0f", $0) } ?? "",
                                                 pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? "",
@@ -515,10 +521,10 @@ final class ScreenerViewModel: ObservableObject {
                                                 t3.map { String(format: "%.0f", $0) } ?? "", ht.map { String(format: "%.2f", $0) } ?? "",
                                                 dd.map { String(format: "%.0f", $0) } ?? "", dc.map { String(format: "%.1f", $0) } ?? "",
                                                 d2.map { String(format: "%.1f", $0) } ?? "", d2c.map { String(format: "%.2f", $0) } ?? "",
-                                                cdl.map { String(format: "%.3f", $0) } ?? ""],
-                            numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3, ht, dd, dc, d2, d2c, cdl])
+                                                cdl.map { String(format: "%.3f", $0) } ?? "", code],
+                            numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3, ht, dd, dc, d2, d2c, cdl, nil])
         }
-        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names
+        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 

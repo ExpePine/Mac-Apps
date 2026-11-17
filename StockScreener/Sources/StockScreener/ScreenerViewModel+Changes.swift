@@ -38,7 +38,7 @@ extension ScreenerViewModel {
     /// Every column the app computes from NSE delivery data (stored snapshots hold only the sheet, so these are
     /// empty for past days until recomputed here).
     static let deliveryColumnNames = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3",
-                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C"]
+                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES"]
     static func isDeliveryColumn(_ h: String) -> Bool {
         let base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
         return deliveryColumnNames.contains(base)
@@ -56,6 +56,12 @@ extension ScreenerViewModel {
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
             let c = cols[sym]
             for (n, i) in idx where i < cells.count {
+                if n == "NSE_SERIES" {
+                    var code = ""
+                    if let bs = dc.book.series[sym], let k = bs.days.lastIndex(where: { $0 <= day }), k < bs.seriesCode.count { code = bs.seriesCode[k] }
+                    cells[i] = code; nums[i] = nil
+                    continue
+                }
                 let v: Double?, f: String
                 switch n {
                 case "DLVR": v = c?.dlvr ?? 0; f = "%.2f"
