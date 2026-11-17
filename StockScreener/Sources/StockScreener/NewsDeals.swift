@@ -213,13 +213,14 @@ enum CSVLine {
         loadIfNeeded()
         guard !busy else { return }
         let last = UserDefaults.standard.object(forKey: "deals.updatedAt") as? Date ?? .distantPast
-        guard force || Date().timeIntervalSince(last) > 3600 else { return }
-        busy = true
-        status = "Bulk / block deals: contacting NSE…"
         let cal = Calendar(identifier: .gregorian)
         let today = Date()
         let start = cal.date(byAdding: .day, value: -days, to: today)!
         let wantFrom = Self.ymd(start)
+        // also when a longer history is wanted than what was downloaded so far
+        guard force || Date().timeIntervalSince(last) > 3600 || coveredFrom.isEmpty || wantFrom < coveredFrom else { return }
+        busy = true
+        status = "Bulk / block deals: contacting NSE…"
         Task {
             var all = deals
             var fails: [String] = []
