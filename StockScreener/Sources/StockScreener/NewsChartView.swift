@@ -239,7 +239,7 @@ struct NewsChartView: View {
                                                basis: UserDefaults.standard.string(forKey: DeliveryChartBasis.key) ?? "")
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
                                  full: true, onlyRises: true, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
-                                 layers: layers, events: LWChartData.eventMarkers(s, layers: layers)))
+                                 layers: layers, events: LWChartData.eventMarkers(s, layers: layers), deals: LWChartData.dealBars(s, layers: layers)))
     }
 }
 

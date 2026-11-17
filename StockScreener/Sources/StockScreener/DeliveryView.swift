@@ -297,6 +297,7 @@ struct DeliveryView: View {
         .onChange(of: t3Rev) { _ in pushChart() }
         .onChange(of: newsTL.revision) { _ in pushChart() }
         .onChange(of: dealsC.revision) { _ in pushChart() }
+        .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1300) } }
     }
 
     /// One-line summary of the stock's delivery pattern.
@@ -332,7 +333,7 @@ struct DeliveryView: View {
         guard let s = selected else { return }
         lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
-                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(s, layers: ChartLayer.decode(layersRaw))))
+                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(s, layers: ChartLayer.decode(layersRaw)), deals: LWChartData.dealBars(s, layers: ChartLayer.decode(layersRaw))))
     }
 
     /// Pine Script that paints the same signal days on your TradingView charts (for the stocks in scope).
@@ -540,9 +541,9 @@ struct DeliveryMiniChart: View {
                 .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
-                    ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark], id: \.self) { layer in
-                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : "Shade"))), isOn: Binding(get: { L.contains(layer) }, set: { on in
-                            var x = L; if on { x.insert(layer) } else { x.remove(layer) }
+                    ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals], id: \.self) { layer in
+                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : "Shade")))), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                            var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1300) } } else { x.remove(layer) }
                             layersRaw = ChartLayer.encode(x)
                         }))
                         .toggleStyle(.button).controlSize(.mini)
@@ -579,6 +580,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: syncOffset) { _ in lw.refollow() }
         .onChange(of: news.revision) { _ in push() }
         .onChange(of: deals.revision) { _ in push() }
+        .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1300) } }
     }
 
     private func push() {
@@ -589,7 +591,7 @@ struct DeliveryMiniChart: View {
         if lower == "chart3" { lw.show(c3); centre(); return }
         lw.show(LWChartData.make(symbol: sym, series: s, candles: CandleCache.shared.candles(sym) ?? Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
-                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw))))
+                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw)), deals: LWChartData.dealBars(sym, layers: ChartLayer.decode(layersRaw))))
         centre()
     }
 

@@ -28,7 +28,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .shade: return "Shade candles where DELSMAC (percentrank) > \(String(format: "%g", DelsmacShade.level))"
         case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
-        case .deals: return "Bulk / block deals (B▲ buy · S▼ sell)"
+        case .deals: return "Bulk / block deals — total buy (green) / sell (red) ₹ Cr per day, strip at the top"
         }
     }
     var color: Color? {
@@ -132,6 +132,8 @@ struct LWChartData: Encodable {
     var bands: [Point] = []
     var markers: [Marker] = []
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
+    var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
+    var dealSell: [Point] = []        // … sells per day, ₹ Cr as negative values (red bars)
     var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
     var dsmac: [Point] = []           // DELSMAC per day (legend)
     var seriesCodes: [String: String] = [:]   // day → NSE SERIES (EQ / BE / BZ …), for the legend
@@ -153,8 +155,10 @@ struct LWChartData: Encodable {
     /// Builds the chart data for one stock from its delivery series and (optional) Yahoo candles.
     static func make(symbol: String, series: DeliverySeries?, candles: [YahooClient.Candle], metric: DeliveryMetric,
                      length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool, calendar: [String] = [],
-                     layers: Set<ChartLayer> = ChartLayer.defaults, events: [Marker] = []) -> LWChartData {
+                     layers: Set<ChartLayer> = ChartLayer.defaults, events: [Marker] = [],
+                     deals: (buy: [Point], sell: [Point]) = ([], [])) -> LWChartData {
         var d = LWChartData()
+        d.dealBuy = deals.buy; d.dealSell = deals.sell
         d.title = symbol
         d.metric = metric.smaLength == nil ? metric.pine : "smooth QTY"
         d.range = range
@@ -292,6 +296,21 @@ struct LWChartData: Encodable {
         return (try? String(data: JSONEncoder().encode(d), encoding: .utf8)) ?? "{}"
     }
 
+    /// Bulk + block deals of one stock as total buy / sell ₹ Cr per day (no client names).
+    @MainActor static func dealBars(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> (buy: [Point], sell: [Point]) {
+        guard layers.contains(.deals) else { return ([], []) }
+        DealsCenter.shared.loadIfNeeded()
+        let byDay = Dictionary(grouping: DealsCenter.shared.bySymbol[symbol.uppercased()] ?? [], by: \.day)
+        var buy: [Point] = [], sell: [Point] = []
+        for day in byDay.keys.sorted() where day >= from {
+            let ds = byDay[day]!
+            let b = ds.filter(\.isBuy).reduce(0) { $0 + $1.valueCr }, sl = ds.filter { !$0.isBuy }.reduce(0) { $0 + $1.valueCr }
+            if b > 0 { buy.append(Point(time: day, value: b)) }
+            if sl > 0 { sell.append(Point(time: day, value: -sl)) }
+        }
+        return (buy, sell)
+    }
+
     /// News and bulk / block deal markers for one stock (shared by every delivery / news chart).
     @MainActor static func eventMarkers(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> [Marker] {
         var out: [Marker] = []
@@ -307,18 +326,6 @@ struct LWChartData: Encodable {
                                   full: nd.headlines.prefix(6).map { h in
                                       "\(nd.day) · \(h.title)" + (h.source.isEmpty ? "" : " — \(h.source)")
                                   }))
-            }
-        }
-        if layers.contains(.deals) {
-            DealsCenter.shared.loadIfNeeded()
-            let byDay = Dictionary(grouping: DealsCenter.shared.bySymbol[sym] ?? [], by: \.day)
-            for (day, ds) in byDay where day >= from {
-                let buy = ds.filter(\.isBuy).reduce(0) { $0 + $1.valueCr }, sell = ds.filter { !$0.isBuy }.reduce(0) { $0 + $1.valueCr }
-                let lines = ds.map { d in "\(d.day) · \(d.kind) \(d.isBuy ? "BUY" : "SELL") · \(d.client) · \(DeliveryView.short(d.qty)) shares @ \(String(format: "%.2f", d.price)) (\(String(format: "%.2f", d.valueCr)) Cr)" }
-                if buy > 0 { out.append(Marker(time: day, text: "B", position: "belowBar", color: "#26a69a", shape: "arrowUp",
-                                               info: String(format: "B · deal buys %.2f Cr", buy), full: lines.filter { $0.contains(" BUY ") })) }
-                if sell > 0 { out.append(Marker(time: day, text: "S", position: "aboveBar", color: "#ef5350", shape: "arrowDown",
-                                                info: String(format: "S · deal sells %.2f Cr", sell), full: lines.filter { $0.contains(" SELL ") })) }
             }
         }
         return out
@@ -420,7 +427,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
+    var chart=null, dbuy, dsell, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -439,6 +446,10 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('bands').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       candle=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
       hist=chart.addHistogramSeries({priceScaleId:'deliv',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:fmt}});
+      var crf={type:'custom',formatter:function(v){ return '₹'+Math.abs(v).toFixed(1)+' Cr'; }};
+      dbuy=chart.addHistogramSeries({priceScaleId:'deals',color:'rgba(38,166,154,0.85)',lastValueVisible:false,priceLineVisible:false,priceFormat:crf});
+      dsell=chart.addHistogramSeries({priceScaleId:'deals',color:'rgba(239,83,80,0.85)',lastValueVisible:false,priceLineVisible:false,priceFormat:crf});
+      chart.priceScale('deals').applyOptions({scaleMargins:{top:0.02,bottom:0.84},visible:false});
       fband=chart.addHistogramSeries({priceScaleId:'fband',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       prank=chart.addLineSeries({priceScaleId:'prank',color:'#90CAF9',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
@@ -546,6 +557,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(dv!=null) s+=' &nbsp;<span style="color:#00E676">DELSMAC '+dv.toFixed(1)+'</span>';
       var sc=tk&&window._sc?window._sc[tk]:null;
       if(sc) s+=' &nbsp;<span style="color:'+(sc==='EQ'?'#9E9E9E':'#FFB74D')+'">'+sc+'</span>';
+      var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null;
+      if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
       if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
       if(d2v&&d2v.value!=null){ s+=' &nbsp;<span style="color:#FFC400">DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):'')+'</span>'; }
@@ -579,6 +592,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
                            wickVisible:S.wicks!==false, borderVisible:S.borders===true, borderUpColor:S.up||'#26a69a', borderDownColor:S.down||'#ef5350'});
       d2c.applyOptions({color:S.d2c||'#FFC400', lineWidth:S.d2cWidth||2});
       fband.setData(d.filledBand||[]);
+      dbuy.setData(d.dealBuy||[]); dsell.setData(d.dealSell||[]);
+      window._db={}; (d.dealBuy||[]).forEach(function(x){ window._db[x.time]=x.value; });
+      window._dsl={}; (d.dealSell||[]).forEach(function(x){ window._dsl[x.time]=-x.value; });
       window._fb={}; (d.filledBand||[]).forEach(function(x){ window._fb[x.time]=1; });
       window._sc=d.seriesCodes||{};
       window._ds={}; (d.dsmac||[]).forEach(function(x){ window._ds[x.time]=x.value; });
