@@ -279,7 +279,11 @@ struct Gradients {
         w2 = w2.map { $0.map { $0 * s } }; b2 = b2.map { $0 * s }
         w3 = w3.map { $0 * s }; b3 *= s
     }
-    var flat: [Double] { w1.flatMap { $0 } + b1 + w2.flatMap { $0 } + b2 + w3 + [b3] }
+    var flat: [Double] {
+        var out: [Double] = w1.flatMap { $0 }
+        out += b1; out += w2.flatMap { $0 }; out += b2; out += w3; out.append(b3)
+        return out
+    }
 }
 
 /// Adam optimizer over the flattened weights.
@@ -294,7 +298,8 @@ struct Adam {
 
     mutating func step(_ net: inout TinyNet, _ g: Gradients) {
         t += 1
-        var params = net.w1.flatMap { $0 } + net.b1 + net.w2.flatMap { $0 } + net.b2 + net.w3 + [net.b3]
+        var params: [Double] = net.w1.flatMap { $0 }
+        params += net.b1; params += net.w2.flatMap { $0 }; params += net.b2; params += net.w3; params.append(net.b3)
         let grads = g.flat
         let c1 = 1 - pow(beta1, Double(t)), c2 = 1 - pow(beta2, Double(t))
         for i in params.indices {

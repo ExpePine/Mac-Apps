@@ -326,26 +326,37 @@ struct GainersView: View {
 
     // MARK: Table
 
+    private func gainerRow(_ g: GainerRow, day: String, sc: Int?, periodCol: String?) -> SheetRow {
+        let why: String = vm.reason(g.symbol, day: day) ?? ""
+        let rot = sc.flatMap { vm.sectorRotation(g.row.text($0), day: day) }
+        let dayCh: Double? = periodCol == nil ? g.change : vm.priceBook.series(for: g.symbol)?.dailyChange(on: day)
+        let dayText: String = dayCh.map { String(format: "%+.2f%%", $0) } ?? ""
+        let closeText: String = g.close.map { String(format: "%.2f", $0) } ?? ""
+        let quad: String = rot.map { ScreenerViewModel.quadrantLabel($0.quadrant) } ?? ""
+        let trend: String = rot?.trend.rawValue ?? ""
+        var score: String = ""
+        if let r = rot {
+            score = String(format: "%.0f", r.score)
+            if let k = r.rank { score += " (#\(k))" }
+        }
+        var cells: [String] = g.row.cells
+        cells += [dayText, closeText, why, quad, trend, score]
+        var nums: [Double?] = g.row.numbers
+        nums += [dayCh, g.close, nil, nil, nil, rot?.score]
+        if periodCol != nil {
+            cells.append(String(format: "%+.2f%%", g.change))
+            nums.append(g.change)
+        }
+        return SheetRow(id: g.row.id, cells: cells, numbers: nums)
+    }
+
     private func table(day: String, gainers: [GainerRow]) -> some View {
         let base = vm.table
         let periodCol: String? = period == .daily ? nil : period.column
         let extraNames = ["Day %", "Close", "Why (news)", "Sector rotation", "Sector trend", "Sector score"] + (periodCol.map { [$0] } ?? [])
         let sc = vm.sectorColumnIndex
         let derived = SheetTable(headers: base.headers + extraNames,
-                                 rows: gainers.map { g in
-                                     let why = vm.reason(g.symbol, day: day) ?? ""
-                                     let rot = sc.flatMap { vm.sectorRotation(g.row.text($0), day: day) }
-                                     let dayCh: Double? = periodCol == nil ? g.change : vm.priceBook.series(for: g.symbol)?.dailyChange(on: day)
-                                     let extraCells: [String] = periodCol == nil ? [] : [String(format: "%+.2f%%", g.change)]
-                                     let extraNums: [Double?] = periodCol == nil ? [] : [g.change]
-                                     return SheetRow(id: g.row.id,
-                                                     cells: g.row.cells + [dayCh.map { String(format: "%+.2f%%", $0) } ?? "",
-                                                                           g.close.map { String(format: "%.2f", $0) } ?? "", why,
-                                                                           rot.map { ScreenerViewModel.quadrantLabel($0.quadrant) } ?? "",
-                                                                           rot?.trend.rawValue ?? "",
-                                                                           rot.map { String(format: "%.0f", $0.score) + ($0.rank.map { " (#\($0))" } ?? "") } ?? ""] + extraCells,
-                                                     numbers: g.row.numbers + [dayCh, g.close, nil, nil, nil, rot?.score] + extraNums)
-                                 },
+                                 rows: gainers.map { g in gainerRow(g, day: day, sc: sc, periodCol: periodCol) },
                                  originalHeaders: base.originalHeaders + extraNames)
         let n = base.headers.count
         let dayCol = n, closeCol = n + 1, whyCol = n + 2, rotCol = n + 3, trendCol = n + 4, scoreCol = n + 5

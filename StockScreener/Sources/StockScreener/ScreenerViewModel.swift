@@ -503,7 +503,14 @@ final class ScreenerViewModel: ObservableObject {
         let serName = nm("NSE_SERIES")
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
-            let d = c?.dlvr ?? 0, sf = c?.safety, pr = c?.pctRank, jp = c?.jump, ms = c?.delSma, sk = c?.streak.map(Double.init), t3 = c?.t3Color.map(Double.init), ht = c?.hiT3      // DLVR 0 = no new 300-day high today
+            let d: Double = c?.dlvr ?? 0                 // DLVR 0 = no new 300-day high today
+            let sf: Double? = c?.safety
+            let pr: Double? = c?.pctRank
+            let jp: Double? = c?.jump
+            let ms: Double? = c?.delSma
+            let sk: Double? = c?.streak.map(Double.init)
+            let t3: Double? = c?.t3Color.map(Double.init)
+            let ht: Double? = c?.hiT3
             let dd: Double? = c?.delsmaDays.map(Double.init)
             let dc = c?.delSmaC
             // C/DL2C = current close (Yahoo, live while NSE is open; else NSE's close) ÷ DEL2C
@@ -514,15 +521,16 @@ final class ScreenerViewModel: ObservableObject {
             // NSE SERIES on that day (EQ, BE, BZ, SM …)
             var code = ""
             if let bs = book.series[sym], let i = bs.days.lastIndex(where: { $0 <= asOf }), i < bs.seriesCode.count { code = bs.seriesCode[i] }
-            return SheetRow(id: row.id,
-                            cells: row.cells + [d == 0 ? "0" : String(format: "%.2f", d), sf.map { String(format: "%.0f", $0) } ?? "",
-                                                pr.map { String(format: "%.1f", $0) } ?? "", jp.map { String(format: "%.2f", $0) } ?? "",
-                                                ms.map { String(format: "%.1f", $0) } ?? "", sk.map { String(format: "%.0f", $0) } ?? "",
-                                                t3.map { String(format: "%.0f", $0) } ?? "", ht.map { String(format: "%.2f", $0) } ?? "",
-                                                dd.map { String(format: "%.0f", $0) } ?? "", dc.map { String(format: "%.1f", $0) } ?? "",
-                                                d2.map { String(format: "%.1f", $0) } ?? "", d2c.map { String(format: "%.2f", $0) } ?? "",
-                                                cdl.map { String(format: "%.3f", $0) } ?? "", code],
-                            numbers: row.numbers + [d, sf, pr, jp, ms, sk, t3, ht, dd, dc, d2, d2c, cdl, nil])
+            func f(_ v: Double?, _ fmtS: String) -> String { v.map { String(format: fmtS, $0) } ?? "" }
+            var cells: [String] = row.cells
+            cells.append(d == 0 ? "0" : String(format: "%.2f", d))
+            cells += [f(sf, "%.0f"), f(pr, "%.1f"), f(jp, "%.2f"), f(ms, "%.1f"), f(sk, "%.0f")]
+            cells += [f(t3, "%.0f"), f(ht, "%.2f"), f(dd, "%.0f"), f(dc, "%.1f"), f(d2, "%.1f")]
+            cells += [f(d2c, "%.2f"), f(cdl, "%.3f"), code]
+            var nums: [Double?] = row.numbers
+            nums += [d, sf, pr, jp, ms, sk, t3]
+            nums += [ht, dd, dc, d2, d2c, cdl, nil]
+            return SheetRow(id: row.id, cells: cells, numbers: nums)
         }
         let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)

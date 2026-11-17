@@ -333,6 +333,17 @@ struct RuleColorPicker: View {
     @Binding var rule: CellRule
     @State private var open = false
 
+    private var currentAlpha: Double {
+        if let a = rule.custom?.a { return a }
+        if let a = rule.alpha { return a }
+        let c: CGFloat = rule.resolvedColor?.alphaComponent ?? 0.4
+        return Double(c)
+    }
+    private var transparencyText: String {
+        let pct: Double = ((1 - currentAlpha) * 100).rounded()
+        return "\(Int(pct))%"
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             ShadePicker(selection: Binding(get: { rule.custom == nil ? rule.shade : .none },
@@ -355,13 +366,13 @@ struct RuleColorPicker: View {
                         set: { rule.custom = RGBA($0) }), supportsOpacity: true)
                     HStack {
                         Text("Transparency").font(.callout)
-                        Slider(value: Binding(get: { 1 - (rule.custom?.a ?? rule.alpha ?? Double(rule.resolvedColor?.alphaComponent ?? 0.4)) },
+                        Slider(value: Binding(get: { 1 - currentAlpha },
                                               set: { t in
                                                   let a = max(0.03, 1 - t)
                                                   if rule.custom != nil { rule.custom!.a = a } else { rule.alpha = a }
                                               }), in: 0...0.97)
                             .frame(width: 180)
-                        Text("\(Int(((1 - (rule.custom?.a ?? rule.alpha ?? Double(rule.resolvedColor?.alphaComponent ?? 0.4))) * 100).rounded()))%")
+                        Text(transparencyText)
                             .font(.caption.monospacedDigit()).frame(width: 36, alignment: .trailing)
                     }
                     HStack(spacing: 6) {
