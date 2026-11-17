@@ -42,7 +42,10 @@ mkdir -p "$STAGING"
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 DMG="$DIST/StockScreener-$VERSION.dmg"
-hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+# hdiutil's own size guess can be too small for a large universal binary ("No space left on device"):
+# give it the folder size + 30 % + 20 MB.
+SIZE_MB=$(( $(du -sm "$STAGING" | cut -f1) * 13 / 10 + 20 ))
+hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO -size "${SIZE_MB}m" "$DMG"
 rm -rf "$STAGING"
 
 echo "==> Done: $DMG"
