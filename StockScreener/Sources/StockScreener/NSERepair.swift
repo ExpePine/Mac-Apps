@@ -225,7 +225,11 @@ import SwiftUI
                         if priced.count >= 50 {
                             try? DeliveryFiles.save(priced, day: d); res.saved += 1; res.viaMTO.append(d); done += 1
                             note("\(d): saved from the MTO file (\(priced.count) stocks with a Yahoo close)")
-                        } else { next.append(d); note("\(d): MTO file found but too few Yahoo closes — will retry the full file") }
+                        } else {
+                            // the full file isn't on NSE any more and Yahoo has no prices that far back — retrying won't help
+                            noFile.append(d); done += 1
+                            note("\(d): only NSE's MTO file exists and there are no Yahoo prices for that day — skipped")
+                        }
                     case .noFile:
                         noFile.append(d); done += 1; note("\(d): no file on any NSE source")
                     case .blocked(let m):
@@ -425,7 +429,7 @@ struct NSERepairView: View {
         }
         .padding(18)
         .frame(width: 620)
-        .onAppear { if !r.running && r.finishedAt == nil && !UserDefaults.standard.bool(forKey: "repair.noAuto") { start() } }
+        // nothing starts by itself — choose Check now or Fill all
     }
 
     private func start() {
