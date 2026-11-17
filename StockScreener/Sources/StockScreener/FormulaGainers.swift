@@ -108,6 +108,7 @@ import SwiftUI
             suggest()
             progress = 1
             running = false
+            MemoryRelief.giveBack()
         }
     }
 

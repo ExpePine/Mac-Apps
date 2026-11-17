@@ -42,6 +42,7 @@ import SwiftUI
             running = false
             finishedAt = Date()
             dc.reload()
+            MemoryRelief.giveBack()                    // the day files read during the repair
         }
     }
 
@@ -101,6 +102,7 @@ import SwiftUI
             running = false
             finishedAt = Date()
             dc.reload()
+            MemoryRelief.giveBack()                    // the day files read during the repair
         }
     }
 

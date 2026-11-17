@@ -152,6 +152,7 @@ struct FFormula: Identifiable, Hashable {
             }
             counts = result
             running = false
+            MemoryRelief.giveBack()
         }
     }
 

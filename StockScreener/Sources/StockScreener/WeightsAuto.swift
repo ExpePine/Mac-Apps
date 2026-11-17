@@ -158,6 +158,7 @@ import SwiftUI
             progress = 1
             running = false
             vm.refreshWeights()
+            MemoryRelief.giveBack()                    // the saved days read for training
         }
     }
 
