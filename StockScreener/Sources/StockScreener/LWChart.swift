@@ -427,7 +427,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, dbuy, dsell, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
+    var chart=null, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -449,6 +449,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var crf={type:'custom',formatter:function(v){ return '₹'+Math.abs(v).toFixed(1)+' Cr'; }};
       dbuy=chart.addHistogramSeries({priceScaleId:'deals',color:'rgba(38,166,154,0.85)',lastValueVisible:false,priceLineVisible:false,priceFormat:crf});
       dsell=chart.addHistogramSeries({priceScaleId:'deals',color:'rgba(239,83,80,0.85)',lastValueVisible:false,priceLineVisible:false,priceFormat:crf});
+      dshade=chart.addHistogramSeries({priceScaleId:'dshade',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
+      chart.priceScale('dshade').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       chart.priceScale('deals').applyOptions({scaleMargins:{top:0.02,bottom:0.84},visible:false});
       fband=chart.addHistogramSeries({priceScaleId:'fband',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
@@ -593,6 +595,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       d2c.applyOptions({color:S.d2c||'#FFC400', lineWidth:S.d2cWidth||2});
       fband.setData(d.filledBand||[]);
       dbuy.setData(d.dealBuy||[]); dsell.setData(d.dealSell||[]);
+      // full-height background shade on deal days: green = net buying, red = net selling
+      var net={}; (d.dealBuy||[]).forEach(function(x){ net[x.time]=(net[x.time]||0)+x.value; }); (d.dealSell||[]).forEach(function(x){ net[x.time]=(net[x.time]||0)+x.value; });
+      dshade.setData(Object.keys(net).sort().map(function(t){ return {time:t,value:1,color:net[t]>=0?'rgba(38,166,154,0.16)':'rgba(239,83,80,0.16)'}; }));
       function cr(v){ v=Math.abs(v); return '₹'+(v>=100?v.toFixed(0):v.toFixed(1))+' Cr'; }
       dbuy.setMarkers((d.dealBuy||[]).map(function(x){ return {time:x.time,position:'aboveBar',color:'#26a69a',shape:'arrowUp',text:'Buy '+cr(x.value)}; }));
       dsell.setMarkers((d.dealSell||[]).map(function(x){ return {time:x.time,position:'belowBar',color:'#ef5350',shape:'arrowDown',text:'Sell '+cr(x.value)}; }));
