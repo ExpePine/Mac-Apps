@@ -196,18 +196,19 @@ struct GainersView: View {
     }
 
     private func controls(day: String, gainers: [GainerRow]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 10) {
             Picker("Day", selection: $vm.gainersDay) {
                 Text("Latest (\(vm.gainerDays.first ?? "—"))").tag(String?.none)
                 ForEach(vm.gainerDays.dropFirst(), id: \.self) { d in Text(d).tag(String?.some(d)) }
             }
-            .frame(width: 210)
+            .frame(width: 210).fixedSize()
             Picker("", selection: $periodRaw) {
                 ForEach(GainerPeriod.allCases) { Text($0.title).tag($0.rawValue) }
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             .help("Daily = % on the day · Weekly = last 5 trading days · Monthly = last 21 trading days (or week / month to date). Each keeps its own threshold.")
-            Text("Up at least").font(.callout)
+            Text("Up at least").font(.callout).fixedSize()
             TextField("5", value: threshold, format: .number).textFieldStyle(.roundedBorder).frame(width: 50)
             Menu {
                 ForEach(presets, id: \.self) { v in Button("\(fmt(v))%") { threshold.wrappedValue = v } }
@@ -232,14 +233,17 @@ struct GainersView: View {
                 .onSubmit { if let v = Double(customCap.replacingOccurrences(of: ",", with: "")), v >= 0 { mcapMin = v; customCap = "" } }
                 .help("Your own minimum market cap in ₹ crore — type and press Return")
             if universe.busy { ProgressView().controlSize(.small) }
-            if let st = universe.status { Text(st).font(.caption).foregroundStyle(.orange).lineLimit(1) }
             if period != .daily {
-                Toggle("To date", isOn: $calendarOn).toggleStyle(.switch).controlSize(.small)
+                Toggle("To date", isOn: $calendarOn).toggleStyle(.switch).controlSize(.small).fixedSize()
                     .help("On: week-to-date / month-to-date (vs the last close before the week or month began). Off: rolling 5 / 21 trading days.")
             }
-            Toggle("Filter columns & colours", isOn: $vm.settings.gainersShowFilterColumns).toggleStyle(.switch).controlSize(.small)
+            if let st = universe.status { Text(st).font(.caption).foregroundStyle(.orange).lineLimit(1).truncationMode(.tail) }
+            Spacer(minLength: 0)
+        }
+        HStack(spacing: 10) {
+            Toggle("Filter columns & colours", isOn: $vm.settings.gainersShowFilterColumns).toggleStyle(.switch).controlSize(.small).fixedSize()
                 .help("Show the Filter screen's columns next to each gainer, painted with your cell colours")
-            Toggle("Only my Filter list", isOn: $vm.settings.gainersOnlyFilterList).toggleStyle(.switch).controlSize(.small)
+            Toggle("Only my Filter list", isOn: $vm.settings.gainersOnlyFilterList).toggleStyle(.switch).controlSize(.small).fixedSize()
                 .help("Only gainers that also pass the Filter screen's conditions")
             Spacer()
             if let p = vm.explainProgress {
@@ -275,6 +279,8 @@ struct GainersView: View {
             } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
         }
+        }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
