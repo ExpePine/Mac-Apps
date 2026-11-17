@@ -867,8 +867,9 @@ struct ChartStyle: Codable, Equatable {
         guard !loading.contains(sym) else { return nil }
         loading.insert(sym)
         Task {
-            if let c = try? await YahooClient.candles(sym, range: "2y"), !c.isEmpty {
-                store[sym] = c; order.append(sym)
+            // 5 years from Yahoo, kept to the last 1,000 trading days — covers the 900 NSE delivery days in memory
+            if let c = try? await YahooClient.candles(sym, range: "5y"), !c.isEmpty {
+                store[sym] = Array(c.suffix(1_000)); order.append(sym)
                 while order.count > 24 { store[order.removeFirst()] = nil }     // a couple of reels' worth
                 revision += 1
             }
