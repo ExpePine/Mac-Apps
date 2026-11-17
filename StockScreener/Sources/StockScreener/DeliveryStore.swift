@@ -15,6 +15,9 @@ struct DeliveryRow {
     let tradedQty: Double
     let delivQty: Double
     let delivPer: Double
+    /// BE / BZ (trade-for-trade) rows where NSE prints "-" for DELIV_QTY: every trade is delivered, so
+    /// DELIV_QTY = TTL_TRD_QNTY and DELIV_PER = 100 — filled by the app, shown grey on the charts.
+    var filled = false
 }
 
 enum DeliveryFiles {
@@ -30,10 +33,10 @@ enum DeliveryFiles {
     }
 
     static func save(_ rows: [DeliveryRow], day: String) throws {
-        var s = "SYMBOL,SERIES,CLOSE,TTL_TRD_QNTY,DELIV_QTY,DELIV_PER\n"
-        s.reserveCapacity(rows.count * 48)
+        var s = "SYMBOL,SERIES,CLOSE,TTL_TRD_QNTY,DELIV_QTY,DELIV_PER,FILLED\n"
+        s.reserveCapacity(rows.count * 50)
         for r in rows {
-            s += "\(r.symbol),\(r.series),\(r.close),\(Int(r.tradedQty)),\(Int(r.delivQty)),\(r.delivPer)\n"
+            s += "\(r.symbol),\(r.series),\(r.close),\(Int(r.tradedQty)),\(Int(r.delivQty)),\(r.delivPer)\(r.filled ? ",1" : "")\n"
         }
         let data = try (Data(s.utf8) as NSData).compressed(using: .lzfse) as Data
         try data.write(to: url(day), options: .atomic)
@@ -48,7 +51,8 @@ enum DeliveryFiles {
             let f = line.split(separator: ",", omittingEmptySubsequences: false)
             guard f.count >= 6 else { continue }
             out.append(DeliveryRow(symbol: String(f[0]), series: String(f[1]), close: Double(f[2]) ?? 0,
-                                   tradedQty: Double(f[3]) ?? 0, delivQty: Double(f[4]) ?? 0, delivPer: Double(f[5]) ?? 0))
+                                   tradedQty: Double(f[3]) ?? 0, delivQty: Double(f[4]) ?? 0, delivPer: Double(f[5]) ?? 0,
+                                   filled: f.count > 6 && f[6] == "1"))
         }
         return out
     }
@@ -127,10 +131,15 @@ enum NSEDeliveryClient {
         out.reserveCapacity(lines.count)
         for line in lines {
             let f = line.split(separator: ",", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard f.count > max(sym, dq), let q = Double(f[dq]) else { continue }
+            guard f.count > max(sym, dq) else { continue }
             func num(_ i: Int?) -> Double { i.flatMap { $0 < f.count ? Double(f[$0]) : nil } ?? 0 }
-            out.append(DeliveryRow(symbol: f[sym].uppercased(), series: ser.map { $0 < f.count ? f[$0] : "" } ?? "",
-                                   close: num(cl), tradedQty: num(tq), delivQty: q, delivPer: num(dp)))
+            let series = ser.map { $0 < f.count ? f[$0].uppercased() : "" } ?? ""
+            if let q = Double(f[dq]) {
+                out.append(DeliveryRow(symbol: f[sym].uppercased(), series: series, close: num(cl), tradedQty: num(tq), delivQty: q, delivPer: num(dp)))
+            } else if series == "BE" || series == "BZ", num(tq) > 0 {
+                // trade-for-trade: NSE prints "-" but every share traded is delivered
+                out.append(DeliveryRow(symbol: f[sym].uppercased(), series: series, close: num(cl), tradedQty: num(tq), delivQty: num(tq), delivPer: 100, filled: true))
+            }
         }
         return out
     }
@@ -143,6 +152,8 @@ struct DeliverySeries {
     var qty: [Double] = []
     var per: [Double] = []
     var close: [Double] = []
+    /// Days whose delivery was filled by the app (BE / BZ "-" rows: DELIV_QTY = traded qty).
+    var filled: [Bool] = []
 
     /// What the signal is computed on: DELIV_QTY × CLOSE_PRICE (delivered value, ₹) or DELIV_QTY alone.
     func metric(value: Bool) -> [Double] {
@@ -181,6 +192,7 @@ struct DeliveryBook {
                 book.series[s]!.qty.append(r.delivQty)
                 book.series[s]!.per.append(r.delivPer)
                 book.series[s]!.close.append(r.close)
+                book.series[s]!.filled.append(r.filled)
             }
         }
         return book

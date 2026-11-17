@@ -498,7 +498,8 @@ struct DeliveryMiniChart: View {
                         .help("DEL2 = DELI × 100 / ta.highest(DELI, 100 or 300) — also used by the Filter's DEL2, DEL2C and C/DL2C")
                 }
                 Text("Delivery").font(.caption.bold())
-                Text(metric.pine).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(metric.smaLength == nil ? metric.pine : "smooth QTY").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .help(metric.pine)
                 if let s, let last = sig.last {
                     let ago = dc.book.days.count - 1 - (dc.book.days.firstIndex(of: s.days[last]) ?? dc.book.days.count - 1)
                     Text("last \(length)-day high: \(s.days[last]) (\(ago == 0 ? "today" : "\(ago)d ago")) · \(sig.count) in history")

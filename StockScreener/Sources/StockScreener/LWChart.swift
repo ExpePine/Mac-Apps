@@ -132,6 +132,8 @@ struct LWChartData: Encodable {
     var bands: [Point] = []
     var markers: [Marker] = []
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
+    var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
+    var dsmac: [Point] = []           // DELSMAC per day (legend)
     var sma22: [Point] = []
     var sma66: [Point] = []
     var per: [Point] = []             // DELIV_PER, 0–100
@@ -153,7 +155,7 @@ struct LWChartData: Encodable {
                      layers: Set<ChartLayer> = ChartLayer.defaults, events: [Marker] = []) -> LWChartData {
         var d = LWChartData()
         d.title = symbol
-        d.metric = metric.pine
+        d.metric = metric.smaLength == nil ? metric.pine : "smooth QTY"
         d.range = range
         d.dark = dark
         var seen = Set<String>()
@@ -219,6 +221,11 @@ struct LWChartData: Encodable {
                 }
             }
             if !layers.contains(.high) { d.high = [] }
+            for i in s.days.indices where i < s.filled.count && s.filled[i] {
+                d.filledBand.append(Point(time: s.days[i], value: 1, color: "rgba(158,158,158,0.28)"))
+            }
+            let ds = DeliveryColumns.delSmaCSeries(s, metric: DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value)
+            for i in s.days.indices where i < ds.count { if let v = ds[i] { d.dsmac.append(Point(time: s.days[i], value: v)) } }
             // Trading days with no NSE row for this stock: keep their place on the date axis (empty bar)
             if let first = s.days.first, let last = s.days.last {
                 let have = Set(s.days)
@@ -402,7 +409,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
+    var chart=null, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -421,7 +428,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('bands').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       candle=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
       hist=chart.addHistogramSeries({priceScaleId:'deliv',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:fmt}});
-      prank=chart.addLineSeries({priceScaleId:'prank',color:'#AB47BC',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
+      fband=chart.addHistogramSeries({priceScaleId:'fband',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
+      chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+      prank=chart.addLineSeries({priceScaleId:'prank',color:'#90CAF9',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
         title:'%rank',autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
       per=chart.addLineSeries({priceScaleId:'per',color:'#8BC34A',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,
         autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
@@ -520,7 +529,11 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(x&&x.value!=null) s+=' &nbsp;<span style="color:#2962FF">highest '+fmt(x.value)+'</span>';
       if(s22&&s22.value!=null) s+=' &nbsp;<span style="color:#00BCD4">sma22 '+fmt(s22.value)+'</span>';
       if(s66&&s66.value!=null) s+=' &nbsp;<span style="color:#E91E63">sma66 '+fmt(s66.value)+'</span>';
-      if(pr&&pr.value!=null) s+=' &nbsp;<span style="color:#AB47BC">percentrank '+pr.value.toFixed(1)+'</span>';
+      if(pr&&pr.value!=null) s+=' &nbsp;<span style="color:#90CAF9">percentrank '+pr.value.toFixed(1)+'</span>';
+      var tk=t?(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'))):(lastOf(last.dsmac)||{}).time;
+      var dv=tk&&window._ds?window._ds[tk]:null;
+      if(dv!=null) s+=' &nbsp;<span style="color:#00E676">DELSMAC '+dv.toFixed(1)+'</span>';
+      if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
       if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
       if(d2v&&d2v.value!=null){ s+=' &nbsp;<span style="color:#FFC400">DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):'')+'</span>'; }
       if(hv&&hv.value!=null) s+=' &nbsp;<span style="color:#FF8A65">HI/T3 '+hv.value.toFixed(2)+'</span>';
@@ -552,6 +565,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       candle.applyOptions({upColor:S.up||'#26a69a', downColor:S.down||'#ef5350', wickUpColor:S.up||'#26a69a', wickDownColor:S.down||'#ef5350',
                            wickVisible:S.wicks!==false, borderVisible:S.borders===true, borderUpColor:S.up||'#26a69a', borderDownColor:S.down||'#ef5350'});
       d2c.applyOptions({color:S.d2c||'#FFC400', lineWidth:S.d2cWidth||2});
+      fband.setData(d.filledBand||[]);
+      window._fb={}; (d.filledBand||[]).forEach(function(x){ window._fb[x.time]=1; });
+      window._ds={}; (d.dsmac||[]).forEach(function(x){ window._ds[x.time]=x.value; });
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]);
       sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
       t3s.applyOptions({priceScaleId:d.t3Own?'t3':'deliv'});

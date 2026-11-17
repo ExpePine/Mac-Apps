@@ -265,8 +265,11 @@ import SwiftUI
                     for r in Self.parseMTO(d) { mto[r.symbol + "|" + r.series] = r }
                 }
             }
-            for d in dashes {
-                if let m = mto[d.symbol + "|" + d.series] {
+            for d in dashes where !withNumber.contains(d.symbol) {
+                if d.series == "BE" || d.series == "BZ", d.tradedQty > 0 {
+                    stored.append(DeliveryRow(symbol: d.symbol, series: d.series, close: d.close, tradedQty: d.tradedQty, delivQty: d.tradedQty, delivPer: 100, filled: true))
+                    withNumber.insert(d.symbol); res.filled += 1
+                } else if let m = mto[d.symbol + "|" + d.series] {
                     stored.append(DeliveryRow(symbol: d.symbol, series: d.series, close: d.close, tradedQty: d.tradedQty, delivQty: m.delivQty, delivPer: m.delivPer))
                     withNumber.insert(d.symbol); res.filled += 1
                 } else { res.noNumber += 1 }
