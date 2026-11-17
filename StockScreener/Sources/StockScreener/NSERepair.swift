@@ -340,7 +340,7 @@ import SwiftUI
                 } else { res.noNumber += 1 }
             }
         }
-        if !withNumber.isEmpty { try? DeliveryFiles.save(stored, day: day); note("\(day): filled \(withNumber.sorted().prefix(6).joined(separator: ", "))\(withNumber.count > 6 ? "…" : "")") }
+        if !withNumber.isEmpty { try? DeliveryFiles.save(stored, day: day); note("\(day): filled \(withNumber.count) stocks — \(withNumber.sorted().prefix(6).joined(separator: ", "))\(withNumber.count > 6 ? " +\(withNumber.count - 6) more" : "")") }
         let dashSyms = Set(dashes.map(\.symbol))
         res.notTraded = symbols.subtracting(withNumber).subtracting(dashSyms).count
         return res
