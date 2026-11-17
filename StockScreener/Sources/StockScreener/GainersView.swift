@@ -231,10 +231,6 @@ struct GainersView: View {
             stat("My picks · OK", "\(mine.filter { $0.grade == .pick }.count) · \(mine.filter { $0.grade == .ok }.count)", .green,
                  note: "click P in the table")
             if !bySector.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Sectors among gainers").font(.caption).foregroundStyle(.secondary)
-                    FlowChips(items: bySector.sorted { $0.value > $1.value }.prefix(10).map { "\($0.key) \($0.value)" })
-                }
                 if !byQuadrant.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Gainers by sector rotation").font(.caption).foregroundStyle(.secondary)
