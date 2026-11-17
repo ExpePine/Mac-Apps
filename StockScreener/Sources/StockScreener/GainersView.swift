@@ -26,6 +26,11 @@ struct GainersView: View {
     @AppStorage("gainers.th.weekly") private var thWeekly = 10.0
     @AppStorage("gainers.th.monthly") private var thMonthly = 30.0
     private var period: GainerPeriod { GainerPeriod(rawValue: periodRaw) ?? .daily }
+    @AppStorage(GainerUniverse.key) private var universeRaw = GainerUniverse.all.rawValue
+    @AppStorage(GainerUniverse.mcapKey) private var mcapMin = 0.0
+    @ObservedObject private var universe = UniverseStore.shared
+    @State private var customCap = ""
+    private var uni: GainerUniverse { GainerUniverse(rawValue: universeRaw) ?? .all }
     private var threshold: Binding<Double> {
         switch period {
         case .daily: return $vm.settings.gainersThreshold
@@ -43,7 +48,7 @@ struct GainersView: View {
 
     var body: some View {
         let day = vm.currentGainerDay
-        let _ = (periodRaw, calendarOn, thWeekly, thMonthly)       // redraw when these change
+        let _ = (periodRaw, calendarOn, thWeekly, thMonthly, universeRaw, mcapMin)       // redraw when these change
         let gainers = vm.gainers(on: day)
         VStack(spacing: 0) {
             ScraperHealthBanner()
@@ -77,6 +82,14 @@ struct GainersView: View {
             }
         }
         .onChange(of: live.tick) { _ in version += 1 }
+        .task(id: "\(universeRaw)|\(mcapMin)|\(day)|\(periodRaw)|\(calendarOn)|\(threshold.wrappedValue)|\(universe.members.count)") {
+            await universe.ensure(uni, needMcap: mcapMin > 0)
+            guard mcapMin > 0 else { return }
+            let cands = vm.yahooGainers(on: day, min: vm.gainerThreshold, period: period, calendar: calendarOn)
+                .filter { uni == .all || universe.isMember($0.symbol, of: uni) == true }
+                .map(\.symbol)
+            await universe.fillShares(cands)
+        }
         .sheet(isPresented: $showSettings) { NewsAISettings().environmentObject(vm) }
         .sheet(isPresented: $showColumnChooser) {
             GainersColumnChooser(all: chooserHeaders, defaults: chooserDefault, orderRaw: $colOrderRaw, hiddenRaw: $colHiddenRaw)
@@ -201,6 +214,25 @@ struct GainersView: View {
             } label: { Text("%") }
             .menuStyle(.borderlessButton).fixedSize()
             .help("Pick a preset or type any number")
+            Picker("", selection: $universeRaw) {
+                ForEach(GainerUniverse.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            .labelsHidden().fixedSize()
+            .help("Only stocks in this Nifty index (members from NSE, refreshed weekly). Only your sheet's stocks are ever shown.")
+            Menu {
+                ForEach(GainerUniverse.mcapPresets, id: \.self) { v in
+                    Button(v == 0 ? "Any market cap" : "≥ ₹" + GainerUniverse.crore(v)) { mcapMin = v }
+                }
+                Divider()
+                Button("Refresh index list & market caps from NSE") { Task { await universe.refresh(uni, needMcap: true) } }
+            } label: { Text(mcapMin == 0 ? "Any mcap" : "Mcap ≥ ₹" + GainerUniverse.crore(mcapMin)) }
+            .fixedSize()
+            .help("Market cap = issued shares (NSE) × that day's close. Type your own below the presets, or pick one.")
+            TextField("Cr", text: $customCap).textFieldStyle(.roundedBorder).frame(width: 60)
+                .onSubmit { if let v = Double(customCap.replacingOccurrences(of: ",", with: "")), v >= 0 { mcapMin = v; customCap = "" } }
+                .help("Your own minimum market cap in ₹ crore — type and press Return")
+            if universe.busy { ProgressView().controlSize(.small) }
+            if let st = universe.status { Text(st).font(.caption).foregroundStyle(.orange).lineLimit(1) }
             if period != .daily {
                 Toggle("To date", isOn: $calendarOn).toggleStyle(.switch).controlSize(.small)
                     .help("On: week-to-date / month-to-date (vs the last close before the week or month began). Off: rolling 5 / 21 trading days.")
@@ -262,7 +294,8 @@ struct GainersView: View {
         let inFilter = gainers.filter { filterSet.contains($0.row.id) }.count
         let explained = gainers.filter { vm.reason($0.symbol, day: day) != nil }.count
         return HStack(alignment: .top, spacing: 20) {
-            stat("\(period.title) gainers ≥ \(fmt(threshold.wrappedValue))%", "\(gainers.count)", .green, note: periodText)
+            stat("\(period.title) gainers ≥ \(fmt(threshold.wrappedValue))%", "\(gainers.count)", .green,
+                 note: periodText + (uni == .all ? "" : " · " + uni.title) + (mcapMin > 0 ? " · mcap ≥ ₹" + GainerUniverse.crore(mcapMin) : ""))
             stat("Average gain", String(format: "%+.1f%%", avg), .green)
             stat("Advancers / decliners", "\(br.up) / \(br.down)", br.up >= br.down ? .green : .red,
                  note: br.up + br.down > 0 ? String(format: "%.0f%% up", Double(br.up) / Double(br.up + br.down) * 100) : "")

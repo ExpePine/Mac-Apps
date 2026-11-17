@@ -82,7 +82,19 @@ extension ScreenerViewModel {
     /// Sheet stocks up ≥ threshold on `day`, from Yahoo prices only (today = the live price vs yesterday's close).
     func gainers(on day: String) -> [GainerRow] {
         let p = GainerPeriod.current
-        return yahooGainers(on: day, min: gainerThreshold, period: p, calendar: GainerPeriod.calendar)
+        let all = yahooGainers(on: day, min: gainerThreshold, period: p, calendar: GainerPeriod.calendar)
+        return Self.inUniverse(all)
+    }
+
+    /// Keeps gainers in the chosen Nifty index and above the chosen market cap (₹ Cr, shares × that day's close).
+    static func inUniverse(_ rows: [GainerRow]) -> [GainerRow] {
+        let u = GainerUniverse.current, minCap = GainerUniverse.mcapMin, store = UniverseStore.shared
+        guard u != .all || minCap > 0 else { return rows }
+        return rows.filter { g in
+            if u != .all, store.isMember(g.symbol, of: u) != true { return false }
+            if minCap > 0 { guard let m = store.mcap(g.symbol, close: g.close), m >= minCap else { return false } }
+            return true
+        }
     }
 
     /// The threshold of the period chosen in Daily Gainers.

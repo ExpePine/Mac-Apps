@@ -23,3 +23,17 @@ final class GainerPeriodTests: XCTestCase {
         XCTAssertNil(GainerPeriod.monthly.change(s, on: "2025-11-07", calendar: false))   // needs 21 trading days
     }
 }
+
+final class GainerUniverseTests: XCTestCase {
+    func testIndexCSV() {
+        let csv = "Company Name,Industry,Symbol,Series,ISIN Code\nReliance Industries Ltd.,Oil,RELIANCE,EQ,INE002A01018\nTCS,IT,TCS,EQ,INE467B01029\n"
+        XCTAssertEqual(UniverseStore.symbols(fromCSV: csv), ["RELIANCE", "TCS"])
+    }
+    func testMcapCSV() {
+        let csv = "Trade Date,Symbol,Series,Security Name,Category,Last Trade Date,Face Value(Rs.),Issue Size,Close Price,Market Cap(Rs.)\n17-Nov-2026,ABC,EQ,ABC Ltd,Listed,17-Nov-2026,10,1000000,250,250000000\n17-Nov-2026,XYZ,N1,XYZ bond,Listed,17-Nov-2026,100,5,100,500\n17-Nov-2026,DEF,EQ,DEF Ltd,Listed,17-Nov-2026,10,,50,500000000\n"
+        let t = UniverseStore.parseMcap(csv)
+        XCTAssertEqual(t["ABC"], 1_000_000)
+        XCTAssertNil(t["XYZ"])
+        XCTAssertEqual(t["DEF"], 10_000_000)
+    }
+}
