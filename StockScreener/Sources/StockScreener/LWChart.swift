@@ -444,13 +444,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         crosshair:{mode:0}});
       bands=chart.addHistogramSeries({priceScaleId:'bands',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'price'}});
       chart.priceScale('bands').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+      dshade=chart.addHistogramSeries({priceScaleId:'dshade',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
+      chart.priceScale('dshade').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       candle=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
       hist=chart.addHistogramSeries({priceScaleId:'deliv',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       var crf={type:'custom',formatter:function(v){ return '₹'+Math.abs(v).toFixed(1)+' Cr'; }};
       dbuy=chart.addHistogramSeries({priceScaleId:'deals',color:'rgba(38,166,154,0.85)',lastValueVisible:false,priceLineVisible:false,priceFormat:crf});
       dsell=chart.addHistogramSeries({priceScaleId:'deals',color:'rgba(239,83,80,0.85)',lastValueVisible:false,priceLineVisible:false,priceFormat:crf});
-      dshade=chart.addHistogramSeries({priceScaleId:'dshade',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
-      chart.priceScale('dshade').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       chart.priceScale('deals').applyOptions({scaleMargins:{top:0.02,bottom:0.84},visible:false});
       fband=chart.addHistogramSeries({priceScaleId:'fband',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
