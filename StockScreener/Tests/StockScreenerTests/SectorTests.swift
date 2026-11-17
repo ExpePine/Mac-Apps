@@ -13,10 +13,15 @@ final class SectorTests: XCTestCase {
         book.series["^NSEI"] = PriceSeries(days: d, closes: (0..<n).map { 1000 * pow(1.0005, Double($0)) })
         // Strong sector: accelerates in the last 40 days; weak sector: falls steadily
         for k in 0..<4 {
-            book.series["UP\(k)"] = PriceSeries(days: d, closes: (0..<n).map { t in
-                100 * pow(1.001, Double(t)) * (t > 160 ? pow(1.01, Double(t - 160)) : 1) * (1 + Double(k) * 0.01)
-            })
-            book.series["DN\(k)"] = PriceSeries(days: d, closes: (0..<n).map { t in 100 * pow(0.997, Double(t)) * (1 + Double(k) * 0.01) })
+            let lift: Double = 1 + Double(k) * 0.01
+            let up: [Double] = (0..<n).map { (t: Int) -> Double in
+                let base: Double = 100 * pow(1.001, Double(t))
+                let accel: Double = t > 160 ? pow(1.01, Double(t - 160)) : 1
+                return base * accel * lift
+            }
+            let dn: [Double] = (0..<n).map { (t: Int) -> Double in 100 * pow(0.997, Double(t)) * lift }
+            book.series["UP\(k)"] = PriceSeries(days: d, closes: up)
+            book.series["DN\(k)"] = PriceSeries(days: d, closes: dn)
         }
         let r = SectorEngine.compute(members: ["Strong": (0..<4).map { "UP\($0)" }, "Weak": (0..<4).map { "DN\($0)" }],
                                      book: book, minMembers: 3)
