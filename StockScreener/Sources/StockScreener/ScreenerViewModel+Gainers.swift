@@ -8,6 +8,50 @@ struct GainerRow {
     let fromYahoo: Bool
 }
 
+/// Daily / Weekly / Monthly gainers, each with its own threshold.
+/// Weekly / Monthly = % change over the last 5 / 21 trading days ending on the chosen day (rolling),
+/// or — with "calendar" on — week-to-date / month-to-date (vs the last close before the week / month began).
+enum GainerPeriod: String, CaseIterable, Identifiable {
+    case daily, weekly, monthly
+    var id: String { rawValue }
+    static let key = "gainers.period", calendarKey = "gainers.calendar"
+    static var current: GainerPeriod { GainerPeriod(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .daily }
+    static var calendar: Bool { UserDefaults.standard.bool(forKey: calendarKey) }
+    var title: String { switch self { case .daily: return "Daily"; case .weekly: return "Weekly"; case .monthly: return "Monthly" } }
+    var column: String { switch self { case .daily: return "Day %"; case .weekly: return "Week %"; case .monthly: return "Month %" } }
+    var tradingDays: Int { switch self { case .daily: return 1; case .weekly: return 5; case .monthly: return 21 } }
+    var defaultThreshold: Double { switch self { case .daily: return 5; case .weekly: return 10; case .monthly: return 30 } }
+    var thresholdKey: String { "gainers.th." + rawValue }
+    /// Weekly / monthly thresholds (the daily one is the Settings value used app-wide).
+    var storedThreshold: Double { UserDefaults.standard.object(forKey: thresholdKey) as? Double ?? defaultThreshold }
+
+    private static let weekCal: Calendar = { var c = Calendar(identifier: .iso8601); c.timeZone = TimeZone(identifier: "Asia/Kolkata")!; return c }()
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+    private func bucket(_ day: String) -> String {
+        if self == .monthly { return String(day.prefix(7)) }
+        guard let d = Self.dayFmt.date(from: day) else { return day }
+        let c = Self.weekCal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: d)
+        return "\(c.yearForWeekOfYear ?? 0)-\(c.weekOfYear ?? 0)"
+    }
+
+    /// % change of `s` for this period ending on `day` (nil when the stock has no close on `day`).
+    func change(_ s: PriceSeries, on day: String, calendar: Bool) -> Double? {
+        if self == .daily { return s.dailyChange(on: day) }
+        guard let i = s.index(onOrBefore: day), s.days[i] == day else { return nil }
+        var b = i - tradingDays
+        if calendar {
+            let key = bucket(day)
+            var k = i
+            while k > 0 && bucket(s.days[k - 1]) == key { k -= 1 }
+            b = k - 1
+        }
+        guard b >= 0, s.closes[b] > 0 else { return nil }
+        return (s.closes[i] / s.closes[b] - 1) * 100
+    }
+}
+
 extension ScreenerViewModel {
     static let sensexSymbol = "^BSESN"
 
@@ -36,14 +80,23 @@ extension ScreenerViewModel {
     }
 
     /// Sheet stocks up ≥ threshold on `day`, from Yahoo prices only (today = the live price vs yesterday's close).
-    func gainers(on day: String) -> [GainerRow] { yahooGainers(on: day, min: settings.gainersThreshold) }
+    func gainers(on day: String) -> [GainerRow] {
+        let p = GainerPeriod.current
+        return yahooGainers(on: day, min: gainerThreshold, period: p, calendar: GainerPeriod.calendar)
+    }
 
-    func yahooGainers(on day: String, min: Double) -> [GainerRow] {
+    /// The threshold of the period chosen in Daily Gainers.
+    var gainerThreshold: Double {
+        let p = GainerPeriod.current
+        return p == .daily ? settings.gainersThreshold : p.storedThreshold
+    }
+
+    func yahooGainers(on day: String, min: Double, period: GainerPeriod = .daily, calendar: Bool = false) -> [GainerRow] {
         guard let label = labelIndex else { return [] }
         var seen = Set<String>()
         return table.rows.compactMap { r in
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
-            guard !sym.isEmpty, let s = priceBook.series(for: sym), let c = s.dailyChange(on: day), c >= min,
+            guard !sym.isEmpty, let s = priceBook.series(for: sym), let c = period.change(s, on: day, calendar: calendar), c >= min,
                   seen.insert(sym).inserted else { return nil }
             let close = s.index(onOrBefore: day).map { s.closes[$0] }
             return GainerRow(row: r, symbol: sym, change: c, close: close, fromYahoo: true)

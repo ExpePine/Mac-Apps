@@ -323,7 +323,7 @@ struct ChartReelView: View {
 
     private var emptyText: String {
         switch ReelSource(rawValue: source) ?? .gainers {
-        case .gainers: return "No daily gainers on \(vm.currentGainerDay) at ≥ \(CombiEngine.fmt(vm.settings.gainersThreshold))%.\nPick another day, or fetch Yahoo prices in Daily Gainers."
+        case .gainers: return "No \(GainerPeriod.current.title.lowercased()) gainers on \(vm.currentGainerDay) at ≥ \(CombiEngine.fmt(vm.gainerThreshold))%.\nPick another day, or fetch Yahoo prices in Daily Gainers."
         case .filter: return "Your Filter shows no stocks."
         case .column: return column.isEmpty || vm.table.index(of: column) == nil ? "Pick a column." : "No stock has \(column) \(op) \(value)."
         case .all: return "No data yet — import the sheet first."
@@ -351,7 +351,7 @@ struct ChartReelView: View {
                     if !vm.gainerDays.contains(vm.currentGainerDay) { Text(vm.currentGainerDay).tag(vm.currentGainerDay) }
                 }
                 .frame(width: 170)
-                Text("≥ \(CombiEngine.fmt(vm.settings.gainersThreshold))%").font(.caption).foregroundStyle(.secondary)
+                Text("\(GainerPeriod.current.title) ≥ \(CombiEngine.fmt(vm.gainerThreshold))%").font(.caption).foregroundStyle(.secondary)
             case .column:
                 columnControls
             case .filter:

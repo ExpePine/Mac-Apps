@@ -21,9 +21,29 @@ struct GainersView: View {
     @ObservedObject private var live = LiveQuotes.shared
     @AppStorage("live.enabled") private var liveOn = true
     @AppStorage("live.interval") private var liveInterval = 60.0
+    @AppStorage(GainerPeriod.key) private var periodRaw = GainerPeriod.daily.rawValue
+    @AppStorage(GainerPeriod.calendarKey) private var calendarOn = false
+    @AppStorage("gainers.th.weekly") private var thWeekly = 10.0
+    @AppStorage("gainers.th.monthly") private var thMonthly = 30.0
+    private var period: GainerPeriod { GainerPeriod(rawValue: periodRaw) ?? .daily }
+    private var threshold: Binding<Double> {
+        switch period {
+        case .daily: return $vm.settings.gainersThreshold
+        case .weekly: return $thWeekly
+        case .monthly: return $thMonthly
+        }
+    }
+    private var periodText: String {
+        switch period {
+        case .daily: return "on the day"
+        case .weekly: return calendarOn ? "this week (week-to-date)" : "over 5 trading days"
+        case .monthly: return calendarOn ? "this month (month-to-date)" : "over 21 trading days"
+        }
+    }
 
     var body: some View {
         let day = vm.currentGainerDay
+        let _ = (periodRaw, calendarOn, thWeekly, thMonthly)       // redraw when these change
         let gainers = vm.gainers(on: day)
         VStack(spacing: 0) {
             ScraperHealthBanner()
@@ -39,7 +59,7 @@ struct GainersView: View {
             if gainers.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 40)).foregroundStyle(.secondary)
-                    Text("No stocks up ≥ \(fmt(vm.settings.gainersThreshold))% on \(day)").font(.title3)
+                    Text("No stocks up ≥ \(fmt(threshold.wrappedValue))% \(periodText) (\(day))").font(.title3)
                     Text(live.lastUpdate == nil ? "Waiting for the first live Yahoo pass (\(live.progress.done)/\(live.progress.total))…" : "Lower the threshold or pick another day.")
                         .foregroundStyle(.secondary)
                 }
@@ -154,6 +174,14 @@ struct GainersView: View {
 
     // MARK: Controls
 
+    private var presets: [Double] {
+        switch period {
+        case .daily: return [1, 2, 3, 5, 10, 15, 20]
+        case .weekly: return [5, 10, 15, 20, 30]
+        case .monthly: return [10, 20, 30, 50, 100]
+        }
+    }
+
     private func controls(day: String, gainers: [GainerRow]) -> some View {
         HStack(spacing: 10) {
             Picker("Day", selection: $vm.gainersDay) {
@@ -161,9 +189,22 @@ struct GainersView: View {
                 ForEach(vm.gainerDays.dropFirst(), id: \.self) { d in Text(d).tag(String?.some(d)) }
             }
             .frame(width: 210)
+            Picker("", selection: $periodRaw) {
+                ForEach(GainerPeriod.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help("Daily = % on the day · Weekly = last 5 trading days · Monthly = last 21 trading days (or week / month to date). Each keeps its own threshold.")
             Text("Up at least").font(.callout)
-            TextField("5", value: $vm.settings.gainersThreshold, format: .number).textFieldStyle(.roundedBorder).frame(width: 50)
-            Text("%").font(.callout)
+            TextField("5", value: threshold, format: .number).textFieldStyle(.roundedBorder).frame(width: 50)
+            Menu {
+                ForEach(presets, id: \.self) { v in Button("\(fmt(v))%") { threshold.wrappedValue = v } }
+            } label: { Text("%") }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Pick a preset or type any number")
+            if period != .daily {
+                Toggle("To date", isOn: $calendarOn).toggleStyle(.switch).controlSize(.small)
+                    .help("On: week-to-date / month-to-date (vs the last close before the week or month began). Off: rolling 5 / 21 trading days.")
+            }
             Toggle("Filter columns & colours", isOn: $vm.settings.gainersShowFilterColumns).toggleStyle(.switch).controlSize(.small)
                 .help("Show the Filter screen's columns next to each gainer, painted with your cell colours")
             Toggle("Only my Filter list", isOn: $vm.settings.gainersOnlyFilterList).toggleStyle(.switch).controlSize(.small)
@@ -221,7 +262,7 @@ struct GainersView: View {
         let inFilter = gainers.filter { filterSet.contains($0.row.id) }.count
         let explained = gainers.filter { vm.reason($0.symbol, day: day) != nil }.count
         return HStack(alignment: .top, spacing: 20) {
-            stat("Gainers ≥ \(fmt(vm.settings.gainersThreshold))%", "\(gainers.count)", .green)
+            stat("\(period.title) gainers ≥ \(fmt(threshold.wrappedValue))%", "\(gainers.count)", .green, note: periodText)
             stat("Average gain", String(format: "%+.1f%%", avg), .green)
             stat("Advancers / decliners", "\(br.up) / \(br.down)", br.up >= br.down ? .green : .red,
                  note: br.up + br.down > 0 ? String(format: "%.0f%% up", Double(br.up) / Double(br.up + br.down) * 100) : "")
@@ -248,25 +289,29 @@ struct GainersView: View {
 
     private func table(day: String, gainers: [GainerRow]) -> some View {
         let base = vm.table
-        let extraNames = ["Day %", "Close", "Why (news)", "Sector rotation", "Sector trend", "Sector score"]
+        let periodCol: String? = period == .daily ? nil : period.column
+        let extraNames = ["Day %", "Close", "Why (news)", "Sector rotation", "Sector trend", "Sector score"] + (periodCol.map { [$0] } ?? [])
         let sc = vm.sectorColumnIndex
         let derived = SheetTable(headers: base.headers + extraNames,
                                  rows: gainers.map { g in
                                      let why = vm.reason(g.symbol, day: day) ?? ""
                                      let rot = sc.flatMap { vm.sectorRotation(g.row.text($0), day: day) }
+                                     let dayCh: Double? = periodCol == nil ? g.change : vm.priceBook.series(for: g.symbol)?.dailyChange(on: day)
+                                     let extraCells: [String] = periodCol == nil ? [] : [String(format: "%+.2f%%", g.change)]
+                                     let extraNums: [Double?] = periodCol == nil ? [] : [g.change]
                                      return SheetRow(id: g.row.id,
-                                                     cells: g.row.cells + [String(format: "%+.2f%%", g.change),
+                                                     cells: g.row.cells + [dayCh.map { String(format: "%+.2f%%", $0) } ?? "",
                                                                            g.close.map { String(format: "%.2f", $0) } ?? "", why,
                                                                            rot.map { ScreenerViewModel.quadrantLabel($0.quadrant) } ?? "",
                                                                            rot?.trend.rawValue ?? "",
-                                                                           rot.map { String(format: "%.0f", $0.score) + ($0.rank.map { " (#\($0))" } ?? "") } ?? ""],
-                                                     numbers: g.row.numbers + [g.change, g.close, nil, nil, nil, rot?.score])
+                                                                           rot.map { String(format: "%.0f", $0.score) + ($0.rank.map { " (#\($0))" } ?? "") } ?? ""] + extraCells,
+                                                     numbers: g.row.numbers + [dayCh, g.close, nil, nil, nil, rot?.score] + extraNums)
                                  },
                                  originalHeaders: base.originalHeaders + extraNames)
         let n = base.headers.count
         let dayCol = n, closeCol = n + 1, whyCol = n + 2, rotCol = n + 3, trendCol = n + 4, scoreCol = n + 5
         let byID = Dictionary(gainers.map { ($0.row.id, $0) }, uniquingKeysWith: { a, _ in a })
-        var cols: [Int] = [vm.labelIndex ?? 0, dayCol, closeCol, whyCol]
+        var cols: [Int] = [vm.labelIndex ?? 0] + (periodCol == nil ? [] : [n + 6]) + [dayCol, closeCol, whyCol]
         if let sc { cols += [sc, rotCol, trendCol, scoreCol] }
         if vm.settings.gainersShowFilterColumns {
             cols += vm.filterColumnIndices.filter { !cols.contains($0) }
@@ -280,6 +325,9 @@ struct GainersView: View {
             names.append(nm)
         }
         names.removeAll { $0 == labelName }
+        if let pc = periodCol, !GainersColumnChooser.split(colOrderRaw).contains(pc), let k = names.firstIndex(of: pc) {
+            names.remove(at: k); names.insert(pc, at: 0)                 // Week % / Month % next to the symbol
+        }
         cols = [vm.labelIndex ?? 0] + names.compactMap { derived.index(of: $0) }
         var rows = derived.rows
         if vm.settings.gainersOnlyFilterList {
