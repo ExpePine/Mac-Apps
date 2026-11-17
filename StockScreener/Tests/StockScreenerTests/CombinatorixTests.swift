@@ -76,8 +76,12 @@ final class DeliveryTests: XCTestCase {
         ABC, BE, 19-Oct-2026, 10.00, 10.00, 10.50, 9.90, 10.20, 10.25, 10.10, 5000, 0.50, 40, -, -
         """
         let rows = NSEDeliveryClient.parse(Data(csv.utf8))
-        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.count, 2)
         XCTAssertEqual(rows[0].symbol, "20MICRONS")
+        XCTAssertFalse(rows[0].filled)
+        // BE with "-": trade-for-trade → DELIV_QTY = TTL_TRD_QNTY, 100 %, marked filled
+        XCTAssertEqual(rows[1].symbol, "ABC"); XCTAssertEqual(rows[1].delivQty, 5000); XCTAssertEqual(rows[1].delivPer, 100)
+        XCTAssertTrue(rows[1].filled)
         XCTAssertEqual(rows[0].delivQty, 90000)
         XCTAssertEqual(rows[0].close, 204.5)
         XCTAssertEqual(rows[0].delivPer, 60)
