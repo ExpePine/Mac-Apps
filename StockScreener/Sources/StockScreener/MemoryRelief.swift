@@ -102,8 +102,8 @@ struct MemoryPanel: View {
         let _ = tick
         let pricePts = points(vm.priceBook), mbPts = points(mb.book)
         let delPts = dc.book.series.values.reduce(0) { $0 + $1.qty.count }
-        // rough sizes: a price day ≈ 5 numbers + a date ≈ 56 B; a delivery day ≈ 3 numbers + a date ≈ 40 B
-        let priceMB = Double(pricePts) * 56 / 1_048_576, mbMB = Double(mbPts) * 56 / 1_048_576, delMB = Double(delPts) * 40 / 1_048_576
+        // rough sizes: a price day ≈ 5 numbers + a date ≈ 56 B; a delivery day ≈ 3 numbers + a date + 2 flags ≈ 42 B
+        let priceMB = Double(pricePts) * 56 / 1_048_576, mbMB = Double(mbPts) * 56 / 1_048_576, delMB = Double(delPts) * 42 / 1_048_576
         let cells = vm.table.rows.count * max(1, vm.table.headers.count)
         let tableMB = Double(cells) * 26 / 1_048_576
         return VStack(alignment: .leading, spacing: 6) {
@@ -115,7 +115,7 @@ struct MemoryPanel: View {
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 3) {
                 row("Yahoo prices (2 years)", "\(vm.priceBook.series.count) stocks · \(pricePts.formatted()) days", priceMB)
-                row("NSE delivery history", "\(dc.book.series.count) stocks · \(dc.storedDays.count) days", delMB)
+                row("NSE delivery history", "\(dc.book.series.count) stocks · \(dc.book.days.count) days in memory (\(dc.storedDays.count) on disk)", delMB)
                 row("5-year multibagger prices", mb.book.series.isEmpty ? "not loaded" : "\(mb.book.series.count) stocks · \(mbPts.formatted()) days", mbMB)
                 row("The sheet (today)", "\(vm.table.rows.count) rows × \(vm.table.headers.count) columns", tableMB * 2)
                 row("Past days kept for the timeline", "\(vm.timelineCache.count) of 3", tableMB * Double(vm.timelineCache.count))

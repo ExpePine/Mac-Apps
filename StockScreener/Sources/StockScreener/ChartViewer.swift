@@ -454,6 +454,18 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
 
     func dropPreloaded() { spares.values.forEach(Self.close); spares = [:]; spareOrder = [] }
 
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(freeMemory), name: ReelPool.freeMemory, object: nil)
+    }
+
+    /// "Free memory" / memory pressure / 3 min in the background: close preloaded pages and pages of
+    /// TradingView accounts not on screen (they reload when shown again).
+    @objc private func freeMemory() {
+        dropPreloaded()
+        for (a, v) in views where a != account && v.superview == nil { Self.close(v); views[a] = nil }
+    }
+
     private static func close(_ v: WKWebView) {
         v.stopLoading()
         v.navigationDelegate = nil; v.uiDelegate = nil

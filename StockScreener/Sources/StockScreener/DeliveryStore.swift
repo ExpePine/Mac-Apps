@@ -154,8 +154,8 @@ struct DeliverySeries {
     var close: [Double] = []
     /// Days whose delivery was filled by the app (BE / BZ "-" rows: DELIV_QTY = traded qty).
     var filled: [Bool] = []
-    /// NSE SERIES of each day's row (EQ, BE, BZ, SM …).
-    var seriesCode: [String] = []
+    /// NSE SERIES of each day's row (EQ, BE, BZ, SM …) — 1 byte a day instead of a 16-byte String.
+    var seriesCode = SeriesCodes()
 
     /// What the signal is computed on: DELIV_QTY × CLOSE_PRICE (delivered value, ₹) or DELIV_QTY alone.
     func metric(value: Bool) -> [Double] {
@@ -170,6 +170,15 @@ struct DeliverySeries {
             return DeliverySignal.avg(metric(value: true), k.smaLength ?? 22, ema: k.isEMA)
         }
     }
+}
+
+/// NSE SERIES codes stored compactly: the book only keeps equity series, so a 1-byte index into a fixed list.
+struct SeriesCodes {
+    static let names = ["EQ", "BE", "BZ", "SM", "ST", "IV", "RR"]
+    private var raw: [UInt8] = []
+    var count: Int { raw.count }
+    subscript(i: Int) -> String { let k = Int(raw[i]); return k < Self.names.count ? Self.names[k] : "" }
+    mutating func append(_ s: String) { raw.append(UInt8(Self.names.firstIndex(of: s) ?? 255)) }
 }
 
 struct DeliveryBook {

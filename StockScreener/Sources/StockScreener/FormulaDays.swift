@@ -143,7 +143,10 @@ struct FFormula: Identifiable, Hashable {
                     for p in todo {
                         guard let t = table else { result[p.orig.key, default: [:]][d] = .some(nil); continue }
                         let r = Self.evaluate(p.eff, table: t, label: label)
-                        if !isLive { cache[d + "|" + p.eff.key] = .some(r) }
+                        if !isLive {
+                            if cache.count > 5000 { cache.removeAll() }      // bounded: re-evaluated on demand
+                            cache[d + "|" + p.eff.key] = .some(r)
+                        }
                         result[p.orig.key, default: [:]][d] = .some(r)
                     }
                 }
