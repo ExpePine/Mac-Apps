@@ -172,6 +172,11 @@ struct ChartReelView: View {
     var body: some View {
         let list = items
         let current = list.indices.contains(shown) ? list[shown] : nil
+        return keys(lifecycle2(lifecycle(content(list, current), list, current), list, current), list)
+    }
+
+    // split up so the compiler can type-check the body in time (Intel CI runners)
+    private func content(_ list: [ReelItem], _ current: ReelItem?) -> some View {
         VStack(spacing: 0) {
             if !expanded {
                 sourceBar
@@ -230,6 +235,10 @@ struct ChartReelView: View {
             .opacity(0).frame(width: 0, height: 0)
         }
         .navigationTitle(current.map { "Chart Reel — \($0.symbol)" } ?? "Chart Reel")
+    }
+
+    private func lifecycle<V: View>(_ v: V, _ list: [ReelItem], _ current: ReelItem?) -> some View {
+        v
         .onAppear {
             if column.isEmpty { column = vm.settings.triggerColumn }
             vm.refreshChartLinksIfStale()
@@ -263,6 +272,10 @@ struct ChartReelView: View {
             let s = centreContext.map { ChartCentre.title($0, vm) } ?? ""
             if s != centreSig { centreSig = s; refresh += 1; let l = items; show(min(shown, max(0, l.count - 1)), l) }
         }
+    }
+
+    private func lifecycle2<V: View>(_ v: V, _ list: [ReelItem], _ current: ReelItem?) -> some View {
+        v
         .onChange(of: mbc.events.count) { _ in restart() }
         .onChange(of: vm.gainersDay) { _ in restart() }
         .onChange(of: layout) { _ in phase = 0; show(shown, items) }
@@ -300,6 +313,10 @@ struct ChartReelView: View {
                 }
             }
         }
+    }
+
+    private func keys<V: View>(_ v: V, _ list: [ReelItem]) -> some View {
+        v
         .onReceive(timer) { _ in
             guard playing, !dragging else { return }
             let isSeq = ReelLayout(rawValue: layout) == .sequence
