@@ -593,6 +593,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       d2c.applyOptions({color:S.d2c||'#FFC400', lineWidth:S.d2cWidth||2});
       fband.setData(d.filledBand||[]);
       dbuy.setData(d.dealBuy||[]); dsell.setData(d.dealSell||[]);
+      function cr(v){ v=Math.abs(v); return '₹'+(v>=100?v.toFixed(0):v.toFixed(1))+' Cr'; }
+      dbuy.setMarkers((d.dealBuy||[]).map(function(x){ return {time:x.time,position:'aboveBar',color:'#26a69a',shape:'arrowUp',text:'Buy '+cr(x.value)}; }));
+      dsell.setMarkers((d.dealSell||[]).map(function(x){ return {time:x.time,position:'belowBar',color:'#ef5350',shape:'arrowDown',text:'Sell '+cr(x.value)}; }));
       window._db={}; (d.dealBuy||[]).forEach(function(x){ window._db[x.time]=x.value; });
       window._dsl={}; (d.dealSell||[]).forEach(function(x){ window._dsl[x.time]=-x.value; });
       window._fb={}; (d.filledBand||[]).forEach(function(x){ window._fb[x.time]=1; });
