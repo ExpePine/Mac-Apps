@@ -154,6 +154,8 @@ struct DeliverySeries {
     var close: [Double] = []
     /// Days whose delivery was filled by the app (BE / BZ "-" rows: DELIV_QTY = traded qty).
     var filled: [Bool] = []
+    /// NSE SERIES of each day's row (EQ, BE, BZ, SM …).
+    var seriesCode: [String] = []
 
     /// What the signal is computed on: DELIV_QTY × CLOSE_PRICE (delivered value, ₹) or DELIV_QTY alone.
     func metric(value: Bool) -> [Double] {
@@ -193,6 +195,7 @@ struct DeliveryBook {
                 book.series[s]!.per.append(r.delivPer)
                 book.series[s]!.close.append(r.close)
                 book.series[s]!.filled.append(r.filled)
+                book.series[s]!.seriesCode.append(r.series)
             }
         }
         return book

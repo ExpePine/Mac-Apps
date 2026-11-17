@@ -134,6 +134,7 @@ struct LWChartData: Encodable {
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
     var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
     var dsmac: [Point] = []           // DELSMAC per day (legend)
+    var seriesCodes: [String: String] = [:]   // day → NSE SERIES (EQ / BE / BZ …), for the legend
     var sma22: [Point] = []
     var sma66: [Point] = []
     var per: [Point] = []             // DELIV_PER, 0–100
@@ -221,6 +222,16 @@ struct LWChartData: Encodable {
                 }
             }
             if !layers.contains(.high) { d.high = [] }
+            // NSE SERIES: legend on every day, a small grey label where it changes (e.g. EQ → BE)
+            var prevCode: String?
+            for i in s.days.indices where i < s.seriesCode.count {
+                let code = s.seriesCode[i]
+                d.seriesCodes[s.days[i]] = code
+                if let p = prevCode, p != code {
+                    d.markers.append(Marker(time: s.days[i], text: code, position: "aboveBar", color: "#9E9E9E", shape: "square"))
+                }
+                prevCode = code
+            }
             for i in s.days.indices where i < s.filled.count && s.filled[i] {
                 d.filledBand.append(Point(time: s.days[i], value: 1, color: "rgba(158,158,158,0.28)"))
             }
@@ -533,6 +544,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var tk=t?(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'))):(lastOf(last.dsmac)||{}).time;
       var dv=tk&&window._ds?window._ds[tk]:null;
       if(dv!=null) s+=' &nbsp;<span style="color:#00E676">DELSMAC '+dv.toFixed(1)+'</span>';
+      var sc=tk&&window._sc?window._sc[tk]:null;
+      if(sc) s+=' &nbsp;<span style="color:'+(sc==='EQ'?'#9E9E9E':'#FFB74D')+'">'+sc+'</span>';
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
       if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
       if(d2v&&d2v.value!=null){ s+=' &nbsp;<span style="color:#FFC400">DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):'')+'</span>'; }
@@ -567,6 +580,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       d2c.applyOptions({color:S.d2c||'#FFC400', lineWidth:S.d2cWidth||2});
       fband.setData(d.filledBand||[]);
       window._fb={}; (d.filledBand||[]).forEach(function(x){ window._fb[x.time]=1; });
+      window._sc=d.seriesCodes||{};
       window._ds={}; (d.dsmac||[]).forEach(function(x){ window._ds[x.time]=x.value; });
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]);
       sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
