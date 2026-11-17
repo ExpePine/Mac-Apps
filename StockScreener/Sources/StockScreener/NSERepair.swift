@@ -45,6 +45,67 @@ import SwiftUI
         }
     }
 
+    // MARK: Bulk: every saved day, every stock — BE / BZ "-" rows filled (resumable)
+
+    private static let doneKey = "repair.bebz.done"
+    var bulkDone: Int { (UserDefaults.standard.stringArray(forKey: Self.doneKey) ?? []).count }
+
+    /// Re-reads every saved day from NSE and adds the BE / BZ rows NSE printed with "-" (DELIV_QTY = traded qty).
+    /// Days already done are skipped next time, so it can be stopped and resumed.
+    func startBulk() {
+        let dc = DeliveryCenter.shared
+        guard !running, !dc.isFetching else { return }
+        running = true; finishedAt = nil; log = []
+        steps = [Step(title: "Re-read every saved day for BE / BZ fills"), Step(title: "Rebuild")]
+        task = Task {
+            var done = Set(UserDefaults.standard.stringArray(forKey: Self.doneKey) ?? [])
+            let todo = DeliveryFiles.days().filter { !done.contains($0) }.sorted(by: >)        // newest first
+            var added = 0, refused: [String] = [], k = 0, streak = 0
+            progress = (0, todo.count)
+            set(0, .running, "\(todo.count) day\(todo.count == 1 ? "" : "s") to re-read (\(done.count) done before)")
+            while k < todo.count && !Task.isCancelled {
+                let d = todo[k]
+                let f = NSEDeliveryClient.fileName(d)
+                var data: Data?
+                if let u = URL(string: "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_\(f).csv") {
+                    data = try? await NSEDealsClient.raw(u, referer: "https://www.nseindia.com/all-reports")
+                }
+                if let data {
+                    streak = 0
+                    let fresh = NSEDeliveryClient.parse(data).filter(\.filled)
+                    var stored = DeliveryFiles.load(d)
+                    let have = Set(stored.map { $0.symbol + "|" + $0.series })
+                    let new = fresh.filter { !have.contains($0.symbol + "|" + $0.series) }
+                    if !new.isEmpty { stored += new; try? DeliveryFiles.save(stored, day: d); added += new.count; note("\(d): +\(new.count) BE/BZ (\(new.prefix(5).map(\.symbol).joined(separator: ", "))\(new.count > 5 ? "…" : ""))") }
+                    done.insert(d)
+                    if done.count % 10 == 0 { UserDefaults.standard.set(Array(done), forKey: Self.doneKey) }
+                    k += 1
+                } else {
+                    streak += 1
+                    if streak >= 4 {                                   // NSE is refusing: pause, then carry on
+                        set(0, .running, "NSE is busy — pausing 60 s (\(k)/\(todo.count))")
+                        try? await Task.sleep(nanoseconds: 60_000_000_000); streak = 0
+                        if refused.last != d { refused.append(d) }
+                        if refused.count > 20 { note("NSE kept refusing — stopped; press again later to resume"); break }
+                    } else { try? await Task.sleep(nanoseconds: 3_000_000_000) }
+                    continue
+                }
+                progress = (k, todo.count)
+                set(0, .running, "\(k)/\(todo.count) days · \(added) stock-days filled")
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            UserDefaults.standard.set(Array(done), forKey: Self.doneKey)
+            let left = todo.count - k
+            set(0, left == 0 ? .done : .warn, "\(added) BE/BZ stock-days filled · \(k) days re-read" + (left > 0 ? " · \(left) left — press again to resume" : ""))
+            set(1, .done, "Indicators recalculated")
+            running = false
+            finishedAt = Date()
+            dc.reload()
+        }
+    }
+
+    func resetBulk() { UserDefaults.standard.removeObject(forKey: Self.doneKey) }
+
     private func set(_ i: Int, _ state: Step.State, _ detail: String) { steps[i].state = state; steps[i].detail = detail }
     private func note(_ s: String) { log.append(s); if log.count > 400 { log.removeFirst(log.count - 400) } }
 
@@ -323,6 +384,18 @@ struct NSERepairView: View {
             }
             Text("Re-reads NSE's trading calendar, then fetches every missing day from four NSE sources with retries, then fills single-stock holes in your Filter's stocks. It can take several minutes when NSE is slow — you can keep working.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            GroupBox {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Bulk: BE / BZ fills for all stocks, all saved days").font(.callout.bold())
+                        Text("Re-downloads every saved day (\(DeliveryFiles.days().count)) and adds the trade-for-trade rows NSE printed with “-” (DELIV_QTY = traded qty, shown grey). About 1–2 s a day — roughly \(max(1, DeliveryFiles.days().count / 40))–\(max(1, DeliveryFiles.days().count / 25)) min. Stop any time; it resumes where it left off (\(r.bulkDone) done).")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Button("Fill all") { r.startBulk() }.disabled(r.running || dc.isFetching)
+                    Menu("") { Button("Start over (re-read every day again)") { r.resetBulk() } }.menuStyle(.borderlessButton).fixedSize()
+                }
+            }
             if dc.isFetching { Text("An NSE download is running — wait for it to finish.").font(.caption).foregroundStyle(.orange) }
             if r.running && r.progress.total > 0 {
                 ProgressView(value: Double(r.progress.done), total: Double(r.progress.total))
@@ -352,7 +425,7 @@ struct NSERepairView: View {
         }
         .padding(18)
         .frame(width: 620)
-        .onAppear { if !r.running && r.finishedAt == nil { start() } }
+        .onAppear { if !r.running && r.finishedAt == nil && !UserDefaults.standard.bool(forKey: "repair.noAuto") { start() } }
     }
 
     private func start() {
