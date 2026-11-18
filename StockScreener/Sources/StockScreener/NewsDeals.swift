@@ -183,6 +183,13 @@ enum CSVLine {
         return out
     }
 
+    /// DEALSIZE: total bulk + block traded (buy + sell, ₹ Cr) per day for one stock.
+    func sizeByDay(_ symbol: String) -> [String: Double] {
+        var out: [String: Double] = [:]
+        for d in bySymbol[symbol.uppercased()] ?? [] { out[d.day, default: 0] += d.valueCr }
+        return out
+    }
+
     /// BUY_PRANK = ta.percentrank(B, 300) on each NSE trading day of `axis`, where B = that day's total bulk + block buy
     /// (₹ Cr, 0 on days without). Pine's percentrank = % of the previous 300 values ≤ today's.
     /// Days without a buy are 0 here (Pine would give the share of no-deal days, ~95–100, which says nothing).
