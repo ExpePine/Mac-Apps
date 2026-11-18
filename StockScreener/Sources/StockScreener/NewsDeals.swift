@@ -40,7 +40,7 @@ enum NSEDealsClient {
         r.setValue(ua, forHTTPHeaderField: "User-Agent")
         r.setValue(json ? "application/json, text/plain, */*" : "text/html,*/*", forHTTPHeaderField: "Accept")
         r.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-        r.setValue("https://www.nseindia.com/report-detail/display-bulk-and-block-deals", forHTTPHeaderField: "Referer")
+        r.setValue("https://www.nseindia.in/report-detail/display-bulk-and-block-deals", forHTTPHeaderField: "Referer")
         return r
     }
 
@@ -62,13 +62,35 @@ enum NSEDealsClient {
         return obj
     }
 
+    /// NSE moved its website from www.nseindia.com to www.nseindia.in (Nov 2026); the old address now answers 503.
+    /// API calls go to the host that last worked (nseindia.in first), and fall back to the other one.
+    private static var hosts = ["www.nseindia.in", "www.nseindia.com"]
+    static func onHost(_ s: String, _ host: String) -> String {
+        s.replacingOccurrences(of: "www.nseindia.com", with: host).replacingOccurrences(of: "www.nseindia.in", with: host)
+    }
+
     /// Any NSE file or API response as bytes (PDFs on nsearchives too), with NSE's cookies.
     static func raw(_ url: URL, referer: String, json: Bool = false) async throws -> Data {
-        if Date().timeIntervalSince(warmedAt) > 600 {
-            for u in ["https://www.nseindia.com/", referer] {
+        let isSite = url.host == "www.nseindia.com" || url.host == "www.nseindia.in"
+        var lastError: Error = Failure(message: "NSE unavailable")
+        for host in (isSite ? hosts : [url.host ?? ""]) {
+            let u = isSite ? (URL(string: onHost(url.absoluteString, host)) ?? url) : url
+            let ref = onHost(referer, isSite ? host : (hosts.first ?? "www.nseindia.in"))
+            do {
+                let d = try await rawOnce(u, referer: ref, json: json, home: "https://\(isSite ? host : (hosts.first ?? "www.nseindia.in"))/")
+                if isSite, hosts.first != host { hosts.removeAll { $0 == host }; hosts.insert(host, at: 0); warmedAt = .distantPast }
+                return d
+            } catch { lastError = error }
+        }
+        throw lastError
+    }
+
+    private static func rawOnce(_ url: URL, referer: String, json: Bool, home: String) async throws -> Data {
+        if Date().timeIntervalSince(warmedAt) > 600 || warmedHome != home {
+            for u in [home, referer] {
                 if let w = URL(string: u) { _ = try? await session.data(for: request(w, json: false)) }
             }
-            warmedAt = Date()
+            warmedAt = Date(); warmedHome = home
         }
         func call() async throws -> (Data, Int) {
             var r = request(url, json: json)
@@ -78,7 +100,6 @@ enum NSEDealsClient {
         }
         var (data, status) = try await call()
         if status == 401 || status == 403 {
-            warmedAt = .distantPast
             if let w = URL(string: referer) { _ = try? await session.data(for: request(w, json: false)) }
             warmedAt = Date()
             (data, status) = try await call()
@@ -86,23 +107,26 @@ enum NSEDealsClient {
         guard (200..<300).contains(status) else { throw Failure(message: "NSE HTTP \(status)") }
         return data
     }
+    private static var warmedHome = ""
 
-    /// Deals between two days (inclusive), from NSE's history API.
+    /// Deals between two days (inclusive), from NSE's history API
+    /// (api/historicalOR/bulk-block-short-deals?optionType=bulk_deals|block_deals; older: api/historical/bulk-deals).
     static func history(kind: String, from: Date, to: Date) async throws -> [BulkDeal] {
-        await warmUp()
-        let path = kind == "Block" ? "block-deals" : "bulk-deals"
-        guard let url = URL(string: "https://www.nseindia.com/api/historical/\(path)?from=\(api.string(from: from))&to=\(api.string(from: to))") else { return [] }
-        var (data, resp) = try await session.data(for: request(url, json: true))
-        var status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 || status == 403 {          // cookies expired: once more after a fresh warm-up
-            warmedAt = .distantPast; await warmUp()
-            (data, resp) = try await session.data(for: request(url, json: true))
-            status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let ref = "https://www.nseindia.in/report-detail/display-bulk-and-block-deals"
+        let f = api.string(from: from), t = api.string(from: to)
+        let urls = ["https://www.nseindia.in/api/historicalOR/bulk-block-short-deals?optionType=\(kind == "Block" ? "block_deals" : "bulk_deals")&from=\(f)&to=\(t)",
+                    "https://www.nseindia.in/api/historical/\(kind == "Block" ? "block-deals" : "bulk-deals")?from=\(f)&to=\(t)"]
+        var lastError: Error = Failure(message: "NSE unavailable")
+        for s in urls {
+            guard let url = URL(string: s) else { continue }
+            do {
+                let data = try await raw(url, referer: ref, json: true)
+                guard let obj = try? JSONSerialization.jsonObject(with: data) else { throw Failure(message: "NSE sent no JSON (blocked?)") }
+                let rows = (obj as? [String: Any])?["data"] as? [[String: Any]] ?? (obj as? [[String: Any]]) ?? []
+                return rows.compactMap { parse($0, kind: kind) }
+            } catch { lastError = error }
         }
-        guard (200..<300).contains(status) else { throw Failure(message: "NSE HTTP \(status)") }
-        guard let obj = try? JSONSerialization.jsonObject(with: data) else { throw Failure(message: "NSE sent no JSON (blocked?)") }
-        let rows = (obj as? [String: Any])?["data"] as? [[String: Any]] ?? (obj as? [[String: Any]]) ?? []
-        return rows.compactMap { parse($0, kind: kind) }
+        throw lastError
     }
 
     /// Today's deals from the archive CSV (works without cookies).
@@ -128,6 +152,8 @@ enum NSEDealsClient {
     static func day(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespaces)
         for f in dayIns { if let d = f.date(from: t) { return dayOut.string(from: d) } }
+        let c = t.capitalized                                  // "01-DEC-2025" → "01-Dec-2025"
+        for f in dayIns { if let d = f.date(from: c) { return dayOut.string(from: d) } }
         return nil
     }
 

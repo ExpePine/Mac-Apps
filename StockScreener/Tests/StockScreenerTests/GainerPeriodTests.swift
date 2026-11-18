@@ -37,3 +37,19 @@ final class GainerUniverseTests: XCTestCase {
         XCTAssertEqual(t["DEF"], 10_000_000)
     }
 }
+
+final class DealsParseTests: XCTestCase {
+    func testHistoryRow() {
+        let row: [String: Any] = ["BD_DT_DATE": "01-DEC-2025", "BD_SYMBOL": "ASTEC", "BD_CLIENT_NAME": "HRTI PRIVATE LIMITED",
+                                  "BD_BUY_SELL": "BUY", "BD_QTY_TRD": 108709, "BD_TP_WATP": 826.15]
+        let d = NSEDealsClient.parse(row, kind: "Bulk")
+        XCTAssertEqual(d?.day, "2025-12-01")
+        XCTAssertEqual(d?.symbol, "ASTEC")
+        XCTAssertEqual(d?.isBuy, true)
+        XCTAssertEqual(d?.qty, 108709)
+        XCTAssertEqual(d?.price ?? 0, 826.15, accuracy: 1e-9)
+    }
+    func testHostSwap() {
+        XCTAssertEqual(NSEDealsClient.onHost("https://www.nseindia.com/api/x", "www.nseindia.in"), "https://www.nseindia.in/api/x")
+    }
+}
