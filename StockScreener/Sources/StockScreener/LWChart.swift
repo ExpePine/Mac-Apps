@@ -135,7 +135,7 @@ struct LWChartData: Encodable {
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
     var dealSell: [Point] = []
     var dealGold: [String] = []
-    var bprank: [Point] = []          // BUY_PRANK = ta.percentrank(buy, 300), only on days with a buy (legend + dotted line)       // deal days whose buy or sell total = ta.highest(…, 300) → golden        // … sells per day, ₹ Cr as negative values (red bars)
+    var bprank: [Point] = []          // BUY_PRANK = ta.percentrank(daily buy, 300): gold bars on the percentrank scale
     var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
     var dsmac: [Point] = []           // DELSMAC per day (legend)
     var seriesCodes: [String: String] = [:]   // day → NSE SERIES (EQ / BE / BZ …), for the legend
@@ -289,7 +289,7 @@ struct LWChartData: Encodable {
             var bv: [String: Double] = [:]
             for p in deals.buy { bv[p.time, default: 0] += p.value ?? 0 }
             let pr = DealsCenter.buyPRank(bv, axis: axis)
-            for (i, v) in pr.enumerated() { if let v, v > 0 { d.bprank.append(Point(time: axis[i], value: v)) } }
+            for (i, v) in pr.enumerated() { if let v { d.bprank.append(Point(time: axis[i], value: v)) } }
         }
         d.dealGold = Array(goldB.union(goldS)).sorted()
         let goldBar = "rgba(255,215,0,0.95)"
@@ -522,7 +522,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('deals').applyOptions({scaleMargins:{top:0.02,bottom:0.84},visible:false});
       fband=chart.addHistogramSeries({priceScaleId:'fband',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
-      bpr=chart.addLineSeries({priceScaleId:'prank',color:'#FFD54F',lineWidth:2,lineStyle:0,lineVisible:false,pointMarkersVisible:true,pointMarkersRadius:3,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
+      bpr=chart.addHistogramSeries({priceScaleId:'prank',color:'rgba(255,213,79,0.9)',lastValueVisible:true,priceLineVisible:false,title:'BUY_PRANK',base:0});
       prank=chart.addLineSeries({priceScaleId:'prank',color:'#90CAF9',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
         title:'%rank',autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
       per=chart.addLineSeries({priceScaleId:'per',color:'#8BC34A',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,
@@ -629,6 +629,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var sc=tk&&window._sc?window._sc[tk]:null;
       if(sc) s+=' &nbsp;<span style="color:'+(sc==='EQ'?'#9E9E9E':'#FFB74D')+'">'+sc+'</span>';
       var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null, bpv=tk&&window._bp?window._bp[tk]:null;
+      if(bpv==null && !t && last && last.bprank && last.bprank.length) bpv=last.bprank[last.bprank.length-1].value;
       if(bpv!=null) s+=' &nbsp;<span style="color:#FFD54F">BUY_PRANK '+bpv.toFixed(1)+'</span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
