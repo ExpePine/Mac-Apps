@@ -257,8 +257,8 @@ struct LWChartData: Encodable {
         d.markers += events
         // Deals: one letter at the candle — B (green, below) on net-buying days, S (red, above) on net-selling days
         var net: [String: Double] = [:]
-        for p in deals.buy { net[p.time, default: 0] += p.value }
-        for p in deals.sell { net[p.time, default: 0] += p.value }
+        for p in deals.buy { net[p.time, default: 0] += p.value ?? 0 }
+        for p in deals.sell { net[p.time, default: 0] += p.value ?? 0 }
         for (day, v) in net {
             d.markers.append(v >= 0 ? Marker(time: day, text: "B", position: "belowBar", color: "#26a69a", shape: "arrowUp")
                                     : Marker(time: day, text: "S", position: "aboveBar", color: "#ef5350", shape: "arrowDown"))
