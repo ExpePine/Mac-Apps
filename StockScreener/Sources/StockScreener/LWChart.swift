@@ -133,7 +133,8 @@ struct LWChartData: Encodable {
     var markers: [Marker] = []
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
-    var dealSell: [Point] = []        // … sells per day, ₹ Cr as negative values (red bars)
+    var dealSell: [Point] = []
+    var dealGold: [String] = []       // deal days whose buy or sell total = ta.highest(…, 300) → golden        // … sells per day, ₹ Cr as negative values (red bars)
     var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
     var dsmac: [Point] = []           // DELSMAC per day (legend)
     var seriesCodes: [String: String] = [:]   // day → NSE SERIES (EQ / BE / BZ …), for the legend
@@ -255,13 +256,47 @@ struct LWChartData: Encodable {
             }
         }
         d.markers += events
-        // Deals: one letter at the candle — B (green, below) on net-buying days, S (red, above) on net-selling days
-        var net: [String: Double] = [:]
-        for p in deals.buy { net[p.time, default: 0] += p.value ?? 0 }
-        for p in deals.sell { net[p.time, default: 0] += p.value ?? 0 }
-        for (day, v) in net {
-            d.markers.append(v >= 0 ? Marker(time: day, text: "B", position: "belowBar", color: "#26a69a", shape: "arrowUp")
-                                    : Marker(time: day, text: "S", position: "aboveBar", color: "#ef5350", shape: "arrowDown"))
+        // Deals: one letter at the candle — B (green, below) on net-buying days, S (red, above) on net-selling days.
+        // Golden when that day's total buy (or sell) is the highest of the last 300 trading days (ta.highest(B, 300)).
+        let axis: [String] = series?.days ?? []
+        func goldDays(_ pts: [Point]) -> Set<String> {
+            var v: [String: Double] = [:]
+            for p in pts { v[p.time, default: 0] += abs(p.value ?? 0) }
+            let ds = v.keys.sorted()
+            var out = Set<String>()
+            for (k, day) in ds.enumerated() {
+                guard let x = v[day], x > 0 else { continue }
+                var lo = 0, hi = axis.count                    // first axis day ≥ deal day
+                while lo < hi { let m = (lo + hi) / 2; if axis[m] < day { lo = m + 1 } else { hi = m } }
+                guard lo >= 299, lo < axis.count else { continue }   // needs a full 300-day window
+                let start = axis[lo - 299]
+                var best = 0.0
+                for j in stride(from: k - 1, through: 0, by: -1) {
+                    if ds[j] < start { break }
+                    best = max(best, v[ds[j]] ?? 0)
+                }
+                if x >= best { out.insert(day) }
+            }
+            return out
+        }
+        let goldB = goldDays(deals.buy), goldS = goldDays(deals.sell)
+        d.dealGold = Array(goldB.union(goldS)).sorted()
+        let goldBar = "rgba(255,215,0,0.95)"
+        d.dealBuy = d.dealBuy.map { goldB.contains($0.time) ? Point(time: $0.time, value: $0.value, color: goldBar) : $0 }
+        d.dealSell = d.dealSell.map { goldS.contains($0.time) ? Point(time: $0.time, value: $0.value, color: goldBar) : $0 }
+        var buyV: [String: Double] = [:], sellV: [String: Double] = [:]
+        for p in deals.buy { buyV[p.time, default: 0] += p.value ?? 0 }
+        for p in deals.sell { sellV[p.time, default: 0] += abs(p.value ?? 0) }
+        for day in Set(buyV.keys).union(sellV.keys) {
+            let b = buyV[day] ?? 0, sl = sellV[day] ?? 0, netBuy = b >= sl
+            if b > 0 && (netBuy || goldB.contains(day)) {
+                d.markers.append(Marker(time: day, text: "B", position: "belowBar",
+                                        color: goldB.contains(day) ? "#FFD700" : "#26a69a", shape: "arrowUp"))
+            }
+            if sl > 0 && (!netBuy || goldS.contains(day)) {
+                d.markers.append(Marker(time: day, text: "S", position: "aboveBar",
+                                        color: goldS.contains(day) ? "#FFD700" : "#ef5350", shape: "arrowDown"))
+            }
         }
         // green ▲DS on days DELSMAC is above the level
         if layers.contains(.dsmark), let s = series {
@@ -609,8 +644,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       function cr(v){ v=Math.abs(v); return v>=10?v.toFixed(0):v.toFixed(1); }
       // top strip: one number per deal day (net ₹ Cr) — green above the bar = net buy, red below = net sell
       var nb=[], ns=[];
+      var gold={}; (d.dealGold||[]).forEach(function(t){ gold[t]=1; });
       Object.keys(net).sort().forEach(function(t){ var v=net[t], m={time:t,shape:'circle',size:0,text:cr(v)};
-        if(v>=0){ m.position='aboveBar'; m.color='#26a69a'; nb.push(m); } else { m.position='belowBar'; m.color='#ef5350'; ns.push(m); } });
+        if(v>=0){ m.position='aboveBar'; m.color=gold[t]?'#FFD700':'#26a69a'; nb.push(m); } else { m.position='belowBar'; m.color=gold[t]?'#FFD700':'#ef5350'; ns.push(m); } });
       dbuy.setMarkers(nb); dsell.setMarkers(ns);
       window._db={}; (d.dealBuy||[]).forEach(function(x){ window._db[x.time]=x.value; });
       window._dsl={}; (d.dealSell||[]).forEach(function(x){ window._dsl[x.time]=-x.value; });
