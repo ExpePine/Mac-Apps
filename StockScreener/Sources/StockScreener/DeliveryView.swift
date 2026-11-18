@@ -478,18 +478,17 @@ struct DeliveryMiniChart: View {
     private var dealsNote: some View {
         let n = deals.bySymbol[symbol.uppercased()]?.count ?? 0
         let text: String
-        if deals.busy { text = deals.status ?? "Deals: downloading from NSE…" }
-        else if let st = deals.status { text = st }
-        else if deals.deals.isEmpty { text = "Deals: none downloaded — click" }
-        else if n == 0 { text = "No bulk/block deals for \(symbol) (\(deals.summary))" }
-        else { text = "\(n) deals for \(symbol)" }
+        if deals.busy { text = "⟳" }
+        else if deals.status != nil { text = "⚠︎" }
+        else if deals.deals.isEmpty { text = "↓" }
+        else { text = "\(n)" }
         return Button { deals.update(days: 1300, force: true) } label: {
-            Text(text).font(.caption2).lineLimit(1).truncationMode(.tail)
+            Text(text).font(.caption2.monospacedDigit()).lineLimit(1)
         }
         .buttonStyle(.borderless)
         .foregroundStyle(deals.status != nil && !deals.busy ? Color.orange : Color.secondary)
-        .frame(maxWidth: 260, alignment: .leading)
-        .help("Bulk + block deals come from NSE's deals history (nseindia.com/api/historical/bulk-deals and block-deals) and today's nsearchives bulk.csv / block.csv. Most stocks have few or no deals. Click to download / refresh now.")
+        .fixedSize()
+        .help((deals.status.map { $0 + "\n\n" } ?? "") + "\(n) bulk/block deals for \(symbol). Bulk + block deals come from NSE's deals history (nseindia.com/api/historical/bulk-deals and block-deals) and today's nsearchives bulk.csv / block.csv. Most stocks have few or no deals. Click to download / refresh now.")
     }
     @AppStorage("t3.rev") private var t3Rev = 0
     /// What this panel shows: the Delivery chart, Chart 3 (price + DEL2C line), or both stacked.

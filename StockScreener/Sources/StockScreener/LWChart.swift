@@ -255,6 +255,14 @@ struct LWChartData: Encodable {
             }
         }
         d.markers += events
+        // Deals: one letter at the candle — B (green, below) on net-buying days, S (red, above) on net-selling days
+        var net: [String: Double] = [:]
+        for p in deals.buy { net[p.time, default: 0] += p.value }
+        for p in deals.sell { net[p.time, default: 0] += p.value }
+        for (day, v) in net {
+            d.markers.append(v >= 0 ? Marker(time: day, text: "B", position: "belowBar", color: "#26a69a", shape: "arrowUp")
+                                    : Marker(time: day, text: "S", position: "aboveBar", color: "#ef5350", shape: "arrowDown"))
+        }
         // green ▲DS on days DELSMAC is above the level
         if layers.contains(.dsmark), let s = series {
             for day in DelsmacShade.days(s).sorted() {
@@ -598,9 +606,12 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       // full-height background shade on deal days: green = net buying, red = net selling
       var net={}; (d.dealBuy||[]).forEach(function(x){ net[x.time]=(net[x.time]||0)+x.value; }); (d.dealSell||[]).forEach(function(x){ net[x.time]=(net[x.time]||0)+x.value; });
       dshade.setData(Object.keys(net).sort().map(function(t){ return {time:t,value:1,color:net[t]>=0?'rgba(38,166,154,0.16)':'rgba(239,83,80,0.16)'}; }));
-      function cr(v){ v=Math.abs(v); return '₹'+(v>=100?v.toFixed(0):v.toFixed(1))+' Cr'; }
-      dbuy.setMarkers((d.dealBuy||[]).map(function(x){ return {time:x.time,position:'aboveBar',color:'#26a69a',shape:'arrowUp',text:'Buy '+cr(x.value)}; }));
-      dsell.setMarkers((d.dealSell||[]).map(function(x){ return {time:x.time,position:'belowBar',color:'#ef5350',shape:'arrowDown',text:'Sell '+cr(x.value)}; }));
+      function cr(v){ v=Math.abs(v); return v>=10?v.toFixed(0):v.toFixed(1); }
+      // top strip: one number per deal day (net ₹ Cr) — green above the bar = net buy, red below = net sell
+      var nb=[], ns=[];
+      Object.keys(net).sort().forEach(function(t){ var v=net[t], m={time:t,shape:'circle',size:0,text:cr(v)};
+        if(v>=0){ m.position='aboveBar'; m.color='#26a69a'; nb.push(m); } else { m.position='belowBar'; m.color='#ef5350'; ns.push(m); } });
+      dbuy.setMarkers(nb); dsell.setMarkers(ns);
       window._db={}; (d.dealBuy||[]).forEach(function(x){ window._db[x.time]=x.value; });
       window._dsl={}; (d.dealSell||[]).forEach(function(x){ window._dsl[x.time]=-x.value; });
       window._fb={}; (d.filledBand||[]).forEach(function(x){ window._fb[x.time]=1; });
