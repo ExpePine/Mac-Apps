@@ -408,7 +408,7 @@ struct NSERepairView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Bulk / block deals: all 5 years").font(.callout.bold())
-                            Text("Reads NSE's bulk-deal and block-deal history month by month (120 requests, about 2–4 min) for every stock — feeds the Deals layer (B / S, golden B / S, net ₹ Cr) and BUY_PRANK. Stop any time; it resumes (\(deals.fillDoneCount) of 120 done). \(deals.summary).")
+                            Text("Reads NSE's bulk-deal and block-deal history month by month — busy months are split into weeks / days because NSE returns at most 70 rows per request (a few hundred requests, roughly 10–20 min) for every stock — feeds the Deals layer (B / S, golden B / S, net ₹ Cr) and BUY_PRANK. Stop any time; it resumes (\(deals.fillDoneCount) of 120 done). \(deals.summary).")
                                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()

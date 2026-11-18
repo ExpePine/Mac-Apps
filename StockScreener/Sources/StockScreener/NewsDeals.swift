@@ -270,7 +270,10 @@ enum CSVLine {
     @Published private(set) var fillProgress: (done: Int, total: Int) = (0, 0)
     @Published private(set) var fillLog: [String] = []
     private var fillStop = false
-    private static let fillDoneKey = "deals.fill.done"          // "Bulk|2024-03", "Block|2024-03" …
+    private static let fillDoneKey = "deals.fill.done2"         // "Bulk|2024-03", "Block|2024-03" … (v2: split until under NSE's cap)
+    /// NSE's history API returns at most this many rows per request (seen: exactly 70 for every busy month),
+    /// so a full answer means "there may be more" and the range is split in half until each part is under it.
+    static let apiCap = 70
     var fillDoneCount: Int { (UserDefaults.standard.stringArray(forKey: Self.fillDoneKey) ?? []).count }
     func resetFill() { UserDefaults.standard.removeObject(forKey: Self.fillDoneKey) }
     func stopFill() { fillStop = true }
@@ -304,7 +307,7 @@ enum CSVLine {
                 let end = min(today, cal.date(byAdding: DateComponents(month: 1, day: -1), to: m)!)
                 let tag = kind + "|" + mf.string(from: m)
                 do {
-                    let d = try await NSEDealsClient.history(kind: kind, from: m, to: end)
+                    let d = try await fetchSplit(kind: kind, from: m, to: end, label: mf.string(from: m))
                     all += d; got += d.count; inRow = 0; sinceSave += 1
                     if m != thisMonth { done.insert(tag); UserDefaults.standard.set(Array(done), forKey: Self.fillDoneKey) }
                     note("\(mf.string(from: m)) \(kind.lowercased()): \(d.count) deals")
@@ -331,6 +334,23 @@ enum CSVLine {
             note("Done: \(got) deals read · \(deals.count) stored in all" + (allDone ? " · history complete" : " · some months missing — run Fill all again"))
             fillRunning = false
         }
+    }
+
+    /// One range of deals; when NSE's answer is full (≥ cap rows) the range is split in two, down to single days.
+    private func fetchSplit(kind: String, from: Date, to: Date, label: String) async throws -> [BulkDeal] {
+        let d = try await NSEDealsClient.history(kind: kind, from: from, to: to)
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        guard d.count >= Self.apiCap, !fillStop else { return d }
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Kolkata")!
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: to)).day ?? 0
+        if days < 1 {
+            note("\(Self.ymd(from)) \(kind.lowercased()): \(d.count) rows — NSE's cap for one day, some may be missing")
+            return d
+        }
+        let mid = cal.date(byAdding: .day, value: days / 2, to: cal.startOfDay(for: from))!
+        let a = try await fetchSplit(kind: kind, from: from, to: mid, label: label)
+        let b = try await fetchSplit(kind: kind, from: cal.date(byAdding: .day, value: 1, to: mid)!, to: to, label: label)
+        return a + b
     }
 
     var summary: String {
