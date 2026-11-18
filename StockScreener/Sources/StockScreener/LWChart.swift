@@ -135,6 +135,7 @@ struct LWChartData: Encodable {
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
     var dealSell: [Point] = []
     var dealGold: [String] = []
+    var dealsOn = false
     var dprank: [Point] = []          // DEAL_PRANK = ta.percentrank(DEALSIZE = buy + sell ₹ Cr, 300): cyan line
     var bprank: [Point] = []          // BUY_PRANK = ta.percentrank(daily buy, 300): gold bars on the percentrank scale
     var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
@@ -161,7 +162,9 @@ struct LWChartData: Encodable {
                      layers: Set<ChartLayer> = ChartLayer.defaults, events: [Marker] = [],
                      deals: (buy: [Point], sell: [Point], from: String) = ([], [], "")) -> LWChartData {
         var d = LWChartData()
-        d.dealBuy = deals.buy; d.dealSell = deals.sell
+        let dealsOn = layers.contains(.deals)            // bars, B / S, shade; BUY_PRANK / DEAL_PRANK show in the legend always
+        if dealsOn { d.dealBuy = deals.buy; d.dealSell = deals.sell }
+        d.dealsOn = dealsOn
         d.title = symbol
         d.metric = metric.smaLength == nil ? metric.pine : "smooth QTY"
         d.range = range
@@ -275,7 +278,7 @@ struct LWChartData: Encodable {
                 if lo >= 299 && lo < axis.count { start = axis[lo - 299] }
                 else { start = Self.weekdaysBack(day, 299) }
                 // golden only when deals are known for the whole window
-                guard !deals.from.isEmpty, start >= deals.from else { continue }
+                guard !deals.from.isEmpty, deals.from != "?", start >= deals.from else { continue }
                 var best = 0.0
                 for j in stride(from: k - 1, through: 0, by: -1) {
                     if ds[j] < start { break }
@@ -285,8 +288,8 @@ struct LWChartData: Encodable {
             }
             return out
         }
-        let goldB = goldDays(deals.buy), goldS = goldDays(deals.sell)
-        if !(deals.buy.isEmpty && deals.sell.isEmpty), !axis.isEmpty {
+        let goldB = dealsOn ? goldDays(deals.buy) : [], goldS = dealsOn ? goldDays(deals.sell) : []
+        if !deals.from.isEmpty || !(deals.buy.isEmpty && deals.sell.isEmpty), !axis.isEmpty {
             var bv: [String: Double] = [:]
             for p in deals.buy { bv[p.time, default: 0] += p.value ?? 0 }
             let pr = DealsCenter.buyPRank(bv, axis: axis)
@@ -303,7 +306,7 @@ struct LWChartData: Encodable {
         var buyV: [String: Double] = [:], sellV: [String: Double] = [:]
         for p in deals.buy { buyV[p.time, default: 0] += p.value ?? 0 }
         for p in deals.sell { sellV[p.time, default: 0] += abs(p.value ?? 0) }
-        for day in Set(buyV.keys).union(sellV.keys) {
+        for day in dealsOn ? Set(buyV.keys).union(sellV.keys) : [] {
             let b = buyV[day] ?? 0, sl = sellV[day] ?? 0
             if b > 0 {
                 d.markers.append(Marker(time: day, text: "B", position: "belowBar",
@@ -371,7 +374,6 @@ struct LWChartData: Encodable {
 
     /// Bulk + block deals of one stock as total buy / sell ₹ Cr per day (no client names).
     @MainActor static func dealBars(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> (buy: [Point], sell: [Point], from: String) {
-        guard layers.contains(.deals) else { return ([], [], "") }
         DealsCenter.shared.loadIfNeeded()
         let byDay = Dictionary(grouping: DealsCenter.shared.bySymbol[symbol.uppercased()] ?? [], by: \.day)
         var buy: [Point] = [], sell: [Point] = []
@@ -381,7 +383,9 @@ struct LWChartData: Encodable {
             if b > 0 { buy.append(Point(time: day, value: b)) }
             if sl > 0 { sell.append(Point(time: day, value: -sl)) }
         }
-        return (buy, sell, DealsCenter.shared.coveredFrom)
+        let dc = DealsCenter.shared
+        // "?" = some deals downloaded but no complete history (no golden marks, pranks still shown)
+        return (buy, sell, dc.coveredFrom.isEmpty ? (dc.deals.isEmpty ? "" : "?") : dc.coveredFrom)
     }
 
     /// News and bulk / block deal markers for one stock (shared by every delivery / news chart).
@@ -636,10 +640,11 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(sc) s+=' &nbsp;<span style="color:'+(sc==='EQ'?'#9E9E9E':'#FFB74D')+'">'+sc+'</span>';
       var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null, bpv=tk&&window._bp?window._bp[tk]:null;
       if(bpv==null && !t && last && last.bprank && last.bprank.length) bpv=last.bprank[last.bprank.length-1].value;
-      if(bpv!=null) s+=' &nbsp;<span style="color:#FFD54F">BUY_PRANK '+bpv.toFixed(1)+'</span>';
+      var hasP=last&&last.bprank&&last.bprank.length;
+      if(bpv!=null||hasP) s+=' &nbsp;<span style="color:#FFD54F">BUY_PRANK '+(bpv!=null?bpv.toFixed(1):'—')+'</span>';
       var dpv=tk&&window._dp?window._dp[tk]:null;
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
-      if(dpv!=null) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+dpv.toFixed(1)+'</span>';
+      if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
       if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr</span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
@@ -692,7 +697,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       window._sc=d.seriesCodes||{};
       window._ds={}; (d.dsmac||[]).forEach(function(x){ window._ds[x.time]=x.value; });
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]);
-      bpr.setData(d.bprank||[]); dpr.setData(d.dprank||[]);
+      bpr.setData(d.dealsOn?(d.bprank||[]):[]); dpr.setData(d.dealsOn?(d.dprank||[]):[]);
       window._dp={}; (d.dprank||[]).forEach(function(x){ window._dp[x.time]=x.value; });
       window._bp={}; (d.bprank||[]).forEach(function(x){ window._bp[x.time]=x.value; });
       sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
