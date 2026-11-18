@@ -50,11 +50,22 @@ import Darwin
     private static var timer: Timer?
 
     /// Call once at launch.
+    /// How many TradingView pages may stay alive at once (each is its own ~200–400 MB "Web Content" process).
+    /// Default: 4 on Macs with ≤ 8 GB RAM, 8 otherwise. Pages on screen are never closed.
+    static var tvBudget: Int {
+        let v = UserDefaults.standard.integer(forKey: "tv.maxPages")
+        return v > 0 ? v : (ProcessInfo.processInfo.physicalMemory <= UInt64(9) << 30 ? 4 : 8)
+    }
+
     static func install(_ vm: ScreenerViewModel) {
         guard pressure == nil else { return }
         URLCache.shared.memoryCapacity = 4 * 1_048_576            // web data is cached on disk; keep only a little in RAM
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
-            Task { @MainActor in unloadUnusedHistory(); giveBack() }
+            Task { @MainActor in
+                unloadUnusedHistory(); giveBack()
+                // over the page budget → close pages that aren't on screen (preloaded / other accounts / old Reel pages)
+                if PageCounter.pages.allObjects.count > tvBudget { NotificationCenter.default.post(name: ReelPool.freeMemory, object: nil) }
+            }
         }
         let src = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         src.setEventHandler { [weak vm] in Task { @MainActor in if let vm { run(vm, deep: true) } } }
@@ -119,7 +130,17 @@ struct MemoryPanel: View {
                 row("5-year multibagger prices", mb.book.series.isEmpty ? "not loaded" : "\(mb.book.series.count) stocks · \(mbPts.formatted()) days", mbMB)
                 row("The sheet (today)", "\(vm.table.rows.count) rows × \(vm.table.headers.count) columns", tableMB * 2)
                 row("Past days kept for the timeline", "\(vm.timelineCache.count) of 3", tableMB * Double(vm.timelineCache.count))
-                row("Web pages open (TradingView, charts)", "\(PageCounter.pages.allObjects.count) — each also runs as its own “Web Content” process in Activity Monitor", nil)
+                row("Web pages open (TradingView, charts)", "\(PageCounter.pages.allObjects.count) — each also runs as its own “Web Content” process in Activity Monitor (the in.tradingview.com row)", nil)
+            }
+            HStack(spacing: 6) {
+                Text("Keep at most").font(.caption)
+                Picker("", selection: Binding(get: { MemoryRelief.tvBudget }, set: { UserDefaults.standard.set($0, forKey: "tv.maxPages"); tick &+= 1
+                    if PageCounter.pages.allObjects.count > $0 { NotificationCenter.default.post(name: ReelPool.freeMemory, object: nil) } })) {
+                    ForEach([2, 3, 4, 6, 8, 12], id: \.self) { Text("\($0)").tag($0) }
+                }
+                .labelsHidden().fixedSize().controlSize(.small)
+                Text("TradingView pages alive (on-screen pages are always kept). Fewer = less RAM, a little more reloading.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             .font(.caption)
             if let r = MemoryRelief.lastRun {

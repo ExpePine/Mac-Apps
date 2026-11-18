@@ -736,10 +736,12 @@ struct ChartReelView: View {
         let l = ReelLayout(rawValue: layout) ?? .chart1
         let cols: [Int] = l == .chart1 || l == .withDelivery ? [0] : (l == .chart2 ? [1] : [0, 1])
         var urls: [(URL, Int, String?)] = []
-        for j in [i, i + 1, i + 2, i + 3, i - 1] where list.indices.contains(j) {
+        for j in [i, i + 1, i - 1, i + 2, i + 3] where list.indices.contains(j) {
             for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
         }
-        pool.preload(urls, keep: cols.count * 2)
+        // stay within the TradingView page budget (Memory panel): the shown charts + as many next ones as fit
+        let budget = max(cols.count, MemoryRelief.tvBudget)
+        pool.preload(Array(urls.prefix(budget)), keep: budget)
     }
 }
 
@@ -843,12 +845,13 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         let v = make(url, slot: slot, key: key, goTo: goTo)
         views[key] = v
         touch(key)
+        keep = min(max(keep, 2), max(2, MemoryRelief.tvBudget))
         trim()
         return v
     }
 
     func preload(_ urls: [(URL, Int, String?)], keep: Int) {
-        self.keep = max(4, keep + 2)
+        self.keep = max(2, keep)
         for (u, slot, g) in urls {
             let key = Self.key(u, g)
             guard views[key] == nil else { continue }
