@@ -302,6 +302,8 @@ final class ScreenerViewModel: ObservableObject {
             self.setTableKeepingRaw()
         }
         DeliveryCenter.shared.loadIfNeeded()
+        DealsCenter.shared.onChange = { [weak self] in self?.scheduleTableRebuild() }
+        DealsCenter.shared.loadIfNeeded()
         MemoryRelief.install(self)
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             if let self { AutoPredictCenter.shared.runIfDue(self) }
@@ -501,6 +503,8 @@ final class ScreenerViewModel: ObservableObject {
         func nm(_ n: String) -> String { t.index(of: n) == nil ? n : n + " (NSE)" }
         let d2Names = ["DEL2", "DEL2C", "C/DL2C"].map(nm)
         let serName = nm("NSE_SERIES")
+        let bpName = nm("BUY_PRANK")
+        let dealsOn = !DealsCenter.shared.deals.isEmpty
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
             let d: Double = c?.dlvr ?? 0                 // DLVR 0 = no new 300-day high today
@@ -527,12 +531,18 @@ final class ScreenerViewModel: ObservableObject {
             cells += [f(sf, "%.0f"), f(pr, "%.1f"), f(jp, "%.2f"), f(ms, "%.1f"), f(sk, "%.0f")]
             cells += [f(t3, "%.0f"), f(ht, "%.2f"), f(dd, "%.0f"), f(dc, "%.1f"), f(d2, "%.1f")]
             cells += [f(d2c, "%.2f"), f(cdl, "%.3f"), code]
+            var bp: Double? = nil
+            if dealsOn, let bs = book.series[sym], let k = bs.days.lastIndex(where: { $0 <= asOf }) {
+                let axis = Array(bs.days[...k])
+                bp = DealsCenter.buyPRank(DealsCenter.shared.buyByDay(sym), axis: axis).last ?? nil
+            }
+            cells.append(f(bp, "%.1f"))
             var nums: [Double?] = row.numbers
             nums += [d, sf, pr, jp, ms, sk, t3]
-            nums += [ht, dd, dc, d2, d2c, cdl, nil]
+            nums += [ht, dd, dc, d2, d2c, cdl, nil, bp]
             return SheetRow(id: row.id, cells: cells, numbers: nums)
         }
-        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName]
+        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, bpName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 

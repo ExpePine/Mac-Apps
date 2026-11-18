@@ -195,6 +195,7 @@ enum CSVLine {
         deals = list.filter { seen.insert($0.id).inserted }.sorted { $0.day < $1.day }
         bySymbol = Dictionary(grouping: deals, by: \.symbol)
         revision &+= 1
+        onChange?()
     }
 
     private func save() {

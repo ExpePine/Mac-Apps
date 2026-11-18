@@ -38,7 +38,7 @@ extension ScreenerViewModel {
     /// Every column the app computes from NSE delivery data (stored snapshots hold only the sheet, so these are
     /// empty for past days until recomputed here).
     static let deliveryColumnNames = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3",
-                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES"]
+                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES", "BUY_PRANK"]
     static func isDeliveryColumn(_ h: String) -> Bool {
         let base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
         return deliveryColumnNames.contains(base)
@@ -60,6 +60,14 @@ extension ScreenerViewModel {
                     var code = ""
                     if let bs = dc.book.series[sym], let k = bs.days.lastIndex(where: { $0 <= day }), k < bs.seriesCode.count { code = bs.seriesCode[k] }
                     cells[i] = code; nums[i] = nil
+                    continue
+                }
+                if n == "BUY_PRANK" {
+                    var bp: Double? = nil
+                    if let bs = dc.book.series[sym], let k = bs.days.lastIndex(where: { $0 <= day }), !DealsCenter.shared.deals.isEmpty {
+                        bp = DealsCenter.buyPRank(DealsCenter.shared.buyByDay(sym), axis: Array(bs.days[...k])).last ?? nil
+                    }
+                    cells[i] = bp.map { String(format: "%.1f", $0) } ?? ""; nums[i] = bp
                     continue
                 }
                 let v: Double?, f: String

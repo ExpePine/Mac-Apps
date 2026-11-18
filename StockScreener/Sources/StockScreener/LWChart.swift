@@ -134,7 +134,8 @@ struct LWChartData: Encodable {
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
     var dealSell: [Point] = []
-    var dealGold: [String] = []       // deal days whose buy or sell total = ta.highest(…, 300) → golden        // … sells per day, ₹ Cr as negative values (red bars)
+    var dealGold: [String] = []
+    var bprank: [Point] = []          // BUY_PRANK = ta.percentrank(buy, 300), only on days with a buy (legend + dotted line)       // deal days whose buy or sell total = ta.highest(…, 300) → golden        // … sells per day, ₹ Cr as negative values (red bars)
     var filledBand: [Point] = []      // grey band: delivery filled by the app (BE/BZ trade-for-trade)
     var dsmac: [Point] = []           // DELSMAC per day (legend)
     var seriesCodes: [String: String] = [:]   // day → NSE SERIES (EQ / BE / BZ …), for the legend
@@ -280,6 +281,12 @@ struct LWChartData: Encodable {
             return out
         }
         let goldB = goldDays(deals.buy), goldS = goldDays(deals.sell)
+        if !deals.buy.isEmpty, !axis.isEmpty {
+            var bv: [String: Double] = [:]
+            for p in deals.buy { bv[p.time, default: 0] += p.value ?? 0 }
+            let pr = DealsCenter.buyPRank(bv, axis: axis)
+            for (i, v) in pr.enumerated() { if let v, v > 0 { d.bprank.append(Point(time: axis[i], value: v)) } }
+        }
         d.dealGold = Array(goldB.union(goldS)).sorted()
         let goldBar = "rgba(255,215,0,0.95)"
         d.dealBuy = d.dealBuy.map { goldB.contains($0.time) ? Point(time: $0.time, value: $0.value, color: goldBar) : $0 }
@@ -470,7 +477,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
+    var chart=null, bpr, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -497,6 +504,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('deals').applyOptions({scaleMargins:{top:0.02,bottom:0.84},visible:false});
       fband=chart.addHistogramSeries({priceScaleId:'fband',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+      bpr=chart.addLineSeries({priceScaleId:'prank',color:'#FFD54F',lineWidth:2,lineStyle:0,lineVisible:false,pointMarkersVisible:true,pointMarkersRadius:3,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
       prank=chart.addLineSeries({priceScaleId:'prank',color:'#90CAF9',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
         title:'%rank',autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
       per=chart.addLineSeries({priceScaleId:'per',color:'#8BC34A',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,
@@ -602,7 +610,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(dv!=null) s+=' &nbsp;<span style="color:#00E676">DELSMAC '+dv.toFixed(1)+'</span>';
       var sc=tk&&window._sc?window._sc[tk]:null;
       if(sc) s+=' &nbsp;<span style="color:'+(sc==='EQ'?'#9E9E9E':'#FFB74D')+'">'+sc+'</span>';
-      var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null;
+      var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null, bpv=tk&&window._bp?window._bp[tk]:null;
+      if(bpv!=null) s+=' &nbsp;<span style="color:#FFD54F">BUY_PRANK '+bpv.toFixed(1)+'</span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
       if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
@@ -654,6 +663,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       window._sc=d.seriesCodes||{};
       window._ds={}; (d.dsmac||[]).forEach(function(x){ window._ds[x.time]=x.value; });
       candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]);
+      bpr.setData(d.bprank||[]);
+      window._bp={}; (d.bprank||[]).forEach(function(x){ window._bp[x.time]=x.value; });
       sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
       t3s.applyOptions({priceScaleId:d.t3Own?'t3':'deliv'});
       if(d.t3Own) chart.priceScale('t3').applyOptions({scaleMargins:low, visible:false});
