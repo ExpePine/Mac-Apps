@@ -179,6 +179,7 @@ struct FormulaDaysView: View {
     @AppStorage("fdays.sort") private var sortBy = 0               // 0 = as listed, 1 = avg %, 2 = win %
     @State private var success: [String: FSuccess] = [:]
     @State private var editing: FFormula?
+    @State private var deleting: FFormula?
     @State private var newFormula = false
     @State private var showHidden = false
     @AppStorage("fdays.alsoText") private var alsoText = ""
@@ -244,6 +245,14 @@ struct FormulaDaysView: View {
         .onChange(of: vm.settings.filterGroup) { _ in if alsoFilter { applyAlso() } }
         .sheet(item: $analysing) { f in GainerAnalysisView(formula: f, horizon: max(1, horizon)).environmentObject(vm) }
         .sheet(item: $editing) { f in FormulaEditor(start: f) { recount() }.environmentObject(vm) }
+        .confirmationDialog(deleting.map { deleteTitle($0) } ?? "", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+            if let f = deleting {
+                Button(f.mineID != nil || f.alertID != nil ? "Delete" : "Remove from this list", role: .destructive) { delete(f) }
+            }
+            Button("Cancel", role: .cancel) { deleting = nil }
+        } message: {
+            if let f = deleting { Text(deleteMessage(f)) }
+        }
         .onChange(of: lastDays) { _ in c.run(vm, lastDays: max(1, lastDays)) }
         .task(id: "\(c.counts.count)|\(c.running)|\(horizon)|\(c.days.count)") {
             guard !c.running else { return }
@@ -280,6 +289,23 @@ struct FormulaDaysView: View {
                 }
             }
         }
+    }
+
+    private func deleteTitle(_ f: FFormula) -> String {
+        f.mineID != nil ? "Delete this formula?" : (f.alertID != nil ? "Delete this F alert?" : "Remove this formula from the list?")
+    }
+    private func deleteMessage(_ f: FFormula) -> String {
+        if f.mineID != nil { return "\(f.name)\n\nIt's removed from My formulas. This can't be undone." }
+        if f.alertID != nil { return "\(f.name)\n\nThe F alert is deleted too, so it stops notifying. This can't be undone." }
+        return "\(f.name)\n\nIt comes from a note (\(f.source)). The note stays; the row is hidden here — bring it back with “Show hidden rows”."
+    }
+    private func delete(_ f: FFormula) {
+        if let id = f.mineID { c.mine.removeAll { $0.id == id } }
+        else if let aid = f.alertID { vm.settings.buyTriggers.removeAll { $0.id == aid } }
+        else { c.hidden.insert(f.key) }
+        if selected == f.key { selected = nil }
+        deleting = nil
+        recount()
     }
 
     private func recount() { c.run(vm, lastDays: max(1, lastDays)) }
@@ -344,7 +370,7 @@ struct FormulaDaysView: View {
                             Button("Duplicate as my formula") {
                                 c.mine.append(.init(name: "", quick: f.quick ?? f.name)); recount()
                             }.disabled(f.quick == nil)
-                            if let id = f.mineID { Button("Delete", role: .destructive) { c.mine.removeAll { $0.id == id } } }
+                            Button(f.mineID != nil || f.alertID != nil ? "Delete…" : "Remove from list…", role: .destructive) { deleting = f }
                             Button(c.hidden.contains(f.key) ? "Show this row" : "Hide this row") {
                                 if c.hidden.contains(f.key) { c.hidden.remove(f.key) } else { c.hidden.insert(f.key) }
                             }
@@ -357,6 +383,9 @@ struct FormulaDaysView: View {
                                 Button { editing = f } label: { Image(systemName: "pencil") }
                                     .buttonStyle(.borderless).foregroundStyle(.secondary)
                                     .help("Edit this formula (right-click for more)")
+                                Button { deleting = f } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                                    .help(f.mineID != nil ? "Delete this formula" : (f.alertID != nil ? "Delete this F alert" : "Remove this formula from the list (the note it comes from stays)"))
                             }.padding(.trailing, 6)
                         }
                         let st = success[f.key]
