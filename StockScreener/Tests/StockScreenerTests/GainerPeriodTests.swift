@@ -53,3 +53,14 @@ final class DealsHistoryParseTests: XCTestCase {
         XCTAssertEqual(NSEDealsClient.onHost("https://www.nseindia.com/api/x", "www.nseindia.in"), "https://www.nseindia.in/api/x")
     }
 }
+
+final class DealsCSVTests: XCTestCase {
+    func testReportCSV() {
+        let csv = "\u{FEFF}Date,Symbol,Security Name,Client Name,Buy/Sell,Quantity Traded,Trade Price / Wght. Avg. Price,Remarks\n17-Nov-2026,YATRA,Yatra Online Limited,NETWORK 18,SELL,1093480,98.83,-\n17-Nov-2026,YATRA,Yatra Online Limited,HRTI PRIVATE LIMITED,BUY,1629851,98.08,-\n"
+        let r = NSEDealsClient.parseCSV(csv, kind: "Bulk")
+        XCTAssertEqual(r.count, 2)
+        XCTAssertEqual(r.first?.symbol, "YATRA")
+        XCTAssertEqual(r.first?.isBuy, false)
+        XCTAssertEqual(r.last?.qty, 1629851)
+    }
+}

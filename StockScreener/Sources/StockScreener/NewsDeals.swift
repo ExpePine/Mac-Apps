@@ -109,6 +109,9 @@ enum NSEDealsClient {
     }
     private static var warmedHome = ""
 
+    /// True once NSE's CSV download answered (then a full answer isn't capped at 70).
+    static var csvWorks = false
+
     /// Deals between two days (inclusive), from NSE's history API
     /// (api/historicalOR/bulk-block-short-deals?optionType=bulk_deals|block_deals; older: api/historical/bulk-deals).
     static func history(kind: String, from: Date, to: Date) async throws -> [BulkDeal] {
@@ -117,6 +120,16 @@ enum NSEDealsClient {
         let urls = ["https://www.nseindia.in/api/historicalOR/bulk-block-short-deals?optionType=\(kind == "Block" ? "block_deals" : "bulk_deals")&from=\(f)&to=\(t)",
                     "https://www.nseindia.in/api/historical/\(kind == "Block" ? "block-deals" : "bulk-deals")?from=\(f)&to=\(t)"]
         var lastError: Error = Failure(message: "NSE unavailable")
+        // 1) the report's CSV download — the JSON answer stops at 70 rows, the CSV may not
+        for s in urls {
+            guard let url = URL(string: s + "&csv=true"),
+                  let data = try? await raw(url, referer: ref, json: false),
+                  let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+                  !text.hasPrefix("{"), !text.hasPrefix("[") else { continue }
+            let rows = parseCSV(text, kind: kind)
+            if !rows.isEmpty { csvWorks = true; return rows }
+        }
+        // 2) JSON (at most 70 rows)
         for s in urls {
             guard let url = URL(string: s) else { continue }
             do {
@@ -134,13 +147,19 @@ enum NSEDealsClient {
         guard let url = URL(string: "https://nsearchives.nseindia.com/content/equities/\(kind == "Block" ? "block" : "bulk").csv") else { return [] }
         let (data, resp) = try await session.data(for: request(url, json: false))
         guard ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200, let text = String(data: data, encoding: .utf8) else { throw Failure(message: "archive unavailable") }
-        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+        return parseCSV(text, kind: kind)
+    }
+
+    /// NSE's deal CSVs (today's archive file and the history report's "Download (.csv)").
+    static func parseCSV(_ text: String, kind: String) -> [BulkDeal] {
+        let t = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+        let lines = t.split(whereSeparator: \.isNewline).map(String.init)
         guard let head = lines.first else { return [] }
-        let h = CSVLine.split(head).map { $0.uppercased() }
+        let h = CSVLine.split(head).map { $0.trimmingCharacters(in: .whitespaces).uppercased() }
         return lines.dropFirst().compactMap { line in
             let c = CSVLine.split(line)
             var d: [String: Any] = [:]
-            for (i, k) in h.enumerated() where i < c.count { d[k] = c[i] }
+            for (i, k) in h.enumerated() where i < c.count { d[k] = c[i].trimmingCharacters(in: .whitespaces) }
             return parse(d, kind: kind)
         }
     }
@@ -270,7 +289,7 @@ enum CSVLine {
     @Published private(set) var fillProgress: (done: Int, total: Int) = (0, 0)
     @Published private(set) var fillLog: [String] = []
     private var fillStop = false
-    private static let fillDoneKey = "deals.fill.done2"         // "Bulk|2024-03", "Block|2024-03" … (v2: split until under NSE's cap)
+    private static let fillDoneKey = "deals.fill.done3"         // "Bulk|2024-03", "Block|2024-03" … (v2: split until under NSE's cap)
     /// NSE's history API returns at most this many rows per request (seen: exactly 70 for every busy month),
     /// so a full answer means "there may be more" and the range is split in half until each part is under it.
     static let apiCap = 70
@@ -340,7 +359,7 @@ enum CSVLine {
     private func fetchSplit(kind: String, from: Date, to: Date, label: String) async throws -> [BulkDeal] {
         let d = try await NSEDealsClient.history(kind: kind, from: from, to: to)
         try? await Task.sleep(nanoseconds: 350_000_000)
-        guard d.count >= Self.apiCap, !fillStop else { return d }
+        guard d.count == Self.apiCap, !fillStop else { return d }
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Kolkata")!
         let days = cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: to)).day ?? 0
         if days < 1 {
