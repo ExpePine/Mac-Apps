@@ -297,7 +297,7 @@ struct DeliveryView: View {
         .onChange(of: t3Rev) { _ in pushChart() }
         .onChange(of: newsTL.revision) { _ in pushChart() }
         .onChange(of: dealsC.revision) { _ in pushChart() }
-        .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1300) } }
+        .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1800) } }
     }
 
     /// One-line summary of the stock's delivery pattern.
@@ -482,7 +482,7 @@ struct DeliveryMiniChart: View {
         else if deals.status != nil { text = "⚠︎" }
         else if deals.deals.isEmpty { text = "↓" }
         else { text = "\(n)" }
-        return Button { deals.update(days: 1300, force: true) } label: {
+        return Button { deals.update(days: 1800, force: true) } label: {
             Text(text).font(.caption2.monospacedDigit()).lineLimit(1)
         }
         .buttonStyle(.borderless)
@@ -560,7 +560,7 @@ struct DeliveryMiniChart: View {
                     let L = ChartLayer.decode(layersRaw)
                     ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals], id: \.self) { layer in
                         Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : "Shade")))), isOn: Binding(get: { L.contains(layer) }, set: { on in
-                            var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1300) } } else { x.remove(layer) }
+                            var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
                             layersRaw = ChartLayer.encode(x)
                         }))
                         .toggleStyle(.button).controlSize(.mini)
@@ -598,7 +598,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: syncOffset) { _ in lw.refollow() }
         .onChange(of: news.revision) { _ in push() }
         .onChange(of: deals.revision) { _ in push() }
-        .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1300) } }
+        .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1800) } }
     }
 
     private func push() {

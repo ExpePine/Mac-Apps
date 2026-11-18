@@ -158,7 +158,7 @@ struct LWChartData: Encodable {
     static func make(symbol: String, series: DeliverySeries?, candles: [YahooClient.Candle], metric: DeliveryMetric,
                      length: Int, full: Bool, onlyRises: Bool, range: String, dark: Bool, calendar: [String] = [],
                      layers: Set<ChartLayer> = ChartLayer.defaults, events: [Marker] = [],
-                     deals: (buy: [Point], sell: [Point]) = ([], [])) -> LWChartData {
+                     deals: (buy: [Point], sell: [Point], from: String) = ([], [], "")) -> LWChartData {
         var d = LWChartData()
         d.dealBuy = deals.buy; d.dealSell = deals.sell
         d.title = symbol
@@ -269,8 +269,12 @@ struct LWChartData: Encodable {
                 guard let x = v[day], x > 0 else { continue }
                 var lo = 0, hi = axis.count                    // first axis day ≥ deal day
                 while lo < hi { let m = (lo + hi) / 2; if axis[m] < day { lo = m + 1 } else { hi = m } }
-                guard lo >= 299, lo < axis.count else { continue }   // needs a full 300-day window
-                let start = axis[lo - 299]
+                // the 300-trading-day window's first day (before the NSE days in memory: ~300 weekdays back)
+                let start: String
+                if lo >= 299 && lo < axis.count { start = axis[lo - 299] }
+                else { start = Self.weekdaysBack(day, 299) }
+                // golden only when deals are known for the whole window
+                guard !deals.from.isEmpty, start >= deals.from else { continue }
                 var best = 0.0
                 for j in stride(from: k - 1, through: 0, by: -1) {
                     if ds[j] < start { break }
@@ -346,9 +350,23 @@ struct LWChartData: Encodable {
         return (try? String(data: JSONEncoder().encode(d), encoding: .utf8)) ?? "{}"
     }
 
+    /// The day `n` weekdays before `day` (yyyy-MM-dd) — trading days approximated where NSE days aren't loaded.
+    nonisolated static func weekdaysBack(_ day: String, _ n: Int) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "Asia/Kolkata"); f.dateFormat = "yyyy-MM-dd"
+        guard var d = f.date(from: day) else { return day }
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = f.timeZone
+        var k = 0
+        while k < n {
+            d = cal.date(byAdding: .day, value: -1, to: d)!
+            let w = cal.component(.weekday, from: d)
+            if w != 1 && w != 7 { k += 1 }
+        }
+        return f.string(from: d)
+    }
+
     /// Bulk + block deals of one stock as total buy / sell ₹ Cr per day (no client names).
-    @MainActor static func dealBars(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> (buy: [Point], sell: [Point]) {
-        guard layers.contains(.deals) else { return ([], []) }
+    @MainActor static func dealBars(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> (buy: [Point], sell: [Point], from: String) {
+        guard layers.contains(.deals) else { return ([], [], "") }
         DealsCenter.shared.loadIfNeeded()
         let byDay = Dictionary(grouping: DealsCenter.shared.bySymbol[symbol.uppercased()] ?? [], by: \.day)
         var buy: [Point] = [], sell: [Point] = []
@@ -358,7 +376,7 @@ struct LWChartData: Encodable {
             if b > 0 { buy.append(Point(time: day, value: b)) }
             if sl > 0 { sell.append(Point(time: day, value: -sl)) }
         }
-        return (buy, sell)
+        return (buy, sell, DealsCenter.shared.coveredFrom)
     }
 
     /// News and bulk / block deal markers for one stock (shared by every delivery / news chart).

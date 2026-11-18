@@ -201,7 +201,7 @@ enum CSVLine {
         return out
     }
     private var loaded = false
-    private var coveredFrom = ""            // oldest day fetched from history
+    private(set) var coveredFrom = ""       // oldest day fetched from history
     private var coveredTo = ""
 
     private static var url: URL { AppFolders.base.appendingPathComponent("bulk_deals.json.lzfse") }
