@@ -267,6 +267,7 @@ struct DeliveryView: View {
                 } else {
                     LWChartView(holder: lw)
                         .frame(minHeight: 380)
+                        .dealRankPopup(lw, symbol: SymbolBook.clean(s))
                     if !lw.hoverLines.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(lw.hoverLines.prefix(4).enumerated()), id: \.offset) { _, l in Text(l).font(.caption).lineLimit(1).help(l) }
@@ -590,7 +591,7 @@ struct DeliveryMiniChart: View {
             }
             .lineLimit(1)
             .padding(.horizontal, 8).padding(.vertical, 3)
-            if s != nil { LWChartView(holder: lw) }        // the synced chart: Delivery, or Chart 3
+            if s != nil { LWChartView(holder: lw).dealRankPopup(lw, symbol: SymbolBook.clean(symbol)) }        // the synced chart: Delivery, or Chart 3
         }
         .onChange(of: lower) { _ in push() }
         .onChange(of: del2Len) { _ in push(); dc.refreshColumns() }

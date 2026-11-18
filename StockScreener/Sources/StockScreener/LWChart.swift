@@ -414,6 +414,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     @Published var hoverLines: [String] = []
     /// Day under the crosshair ("yyyy-MM-dd"), nil when it leaves the chart.
     @Published var crossDay: String?
+    /// A deal day the user clicked on the chart (opens the DEALSIZE ranking).
+    @Published var dealDay: String?
     /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
     var onUserRange: ((String, String) -> Void)?
 
@@ -433,6 +435,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         ucc.add(WeakHandler(self), name: "range")
         ucc.add(WeakHandler(self), name: "hover")
         ucc.add(WeakHandler(self), name: "cross")
+        ucc.add(WeakHandler(self), name: "deal")
         view.navigationDelegate = self
         view.setValue(false, forKey: "drawsBackground")
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
@@ -450,6 +453,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     }
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
+        if m.name == "deal" { if let d = m.body as? String, !d.isEmpty { dealDay = d }; return }
         if m.name == "cross" { let d = m.body as? String; let v = (d?.isEmpty ?? true) ? nil : d; if v != crossDay { crossDay = v }; return }
         if m.name == "hover" { let l = (m.body as? [String]) ?? []; if l != hoverLines { hoverLines = l }; return }
         guard let a = m.body as? [String], a.count == 2 else { return }
@@ -557,6 +561,11 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
           } else window.webkit.messageHandlers.range.postMessage([day(r.from), day(r.to)]);
         },120);
       });
+      // click on a deal day → the app opens that stock's deal days ranked by DEALSIZE
+      chart.subscribeClick(function(p){
+        if(!p||!p.time) return; var k=day(p.time);
+        if(((window._db&&window._db[k])||(window._dsl&&window._dsl[k])) && window.webkit&&window.webkit.messageHandlers.deal) window.webkit.messageHandlers.deal.postMessage(k);
+      });
       chart.subscribeCrosshairMove(function(p){
         if(!last) return;
         hover(p);
@@ -637,7 +646,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var dpv=tk&&window._dp?window._dp[tk]:null;
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
       if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
-      if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr</span>';
+      if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr <span style="opacity:.6">(click for ranking)</span></span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
       if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
