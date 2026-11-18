@@ -38,7 +38,7 @@ final class GainerUniverseTests: XCTestCase {
     }
 }
 
-final class DealsParseTests: XCTestCase {
+final class DealsHistoryParseTests: XCTestCase {
     func testHistoryRow() {
         let row: [String: Any] = ["BD_DT_DATE": "01-DEC-2025", "BD_SYMBOL": "ASTEC", "BD_CLIENT_NAME": "HRTI PRIVATE LIMITED",
                                   "BD_BUY_SELL": "BUY", "BD_QTY_TRD": 108709, "BD_TP_WATP": 826.15]
