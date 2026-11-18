@@ -475,6 +475,13 @@ struct DeliveryMiniChart: View {
     @ObservedObject private var deals = DealsCenter.shared
 
     /// What the Deals layer has for this stock (or what NSE said); click to download / refresh now.
+    /// A small one-line status capsule.
+    private func chip(_ text: String, _ color: Color) -> some View {
+        Text(text).font(.caption2.monospacedDigit()).foregroundStyle(color).lineLimit(1).fixedSize()
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(color.opacity(0.12), in: Capsule())
+    }
+
     private var dealsNote: some View {
         let n = deals.bySymbol[symbol.uppercased()]?.count ?? 0
         let text: String
@@ -504,78 +511,84 @@ struct DeliveryMiniChart: View {
         let s = dc.book.series[SymbolBook.clean(symbol)]
         let sig = s.map { DeliverySignal.signals($0.metric(metric), length: max(2, length), full: full, onlyRises: onlyRises) } ?? []
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                // ── what is drawn ──
                 Picker("", selection: $lower) {
                     Text("Delivery").tag("delivery"); Text("Chart 3").tag("chart3")
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
                 .help("Chart 3 = price with the DEL2C line: the close on the latest day DELIV_QTY×CLOSE made its \(del2Len)-day high (DEL2 = 100). Shown with Chart 1 / 2 above it. The Delivery chart draws DEL2C too (Layers → DEL2C line).")
                 if showChart3 || ChartLayer.decode(layersRaw).contains(.del2c) {
-                    Picker("", selection: $del2Len) { Text("highest 100").tag(100); Text("highest 300").tag(300) }
+                    Picker("", selection: $del2Len) { Text("H100").tag(100); Text("H300").tag(300) }
                         .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
                         .help("DEL2 = DELI × 100 / ta.highest(DELI, 100 or 300) — also used by the Filter's DEL2, DEL2C and C/DL2C")
-                }
-                Text("Delivery").font(.caption.bold())
-                Text(metric.smaLength == nil ? metric.pine : "smooth QTY").font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .help(metric.pine)
-                if let s, let last = sig.last {
-                    let ago = dc.book.days.count - 1 - (dc.book.days.firstIndex(of: s.days[last]) ?? dc.book.days.count - 1)
-                    Text("last \(length)-day high: \(s.days[last]) (\(ago == 0 ? "today" : "\(ago)d ago")) · \(sig.count) in history")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                if let s { DelsmacBadge(series: s, day: lw.crossDay) }
-                if s == nil {
-                    Text(dc.storedDays.isEmpty ? "No NSE delivery data yet — open Delivery Analysis (⌥⌘D) to download it." : "No NSE delivery data for \(symbol).")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if s != nil {
-                    let sym = SymbolBook.clean(symbol)
-                    let gapCount = dc.stockGaps(sym).count
-                    if let note = dc.recheckNote[sym] {
-                        Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1).help(note)
-                    } else if gapCount > 0 {
-                        Text("⚠️ \(gapCount) trading day\(gapCount == 1 ? "" : "s") without data").font(.caption2).foregroundStyle(.orange)
-                    }
-                    Button { dc.recheck(sym) } label: {
-                        if dc.rechecking == sym { ProgressView().controlSize(.mini) } else { Image(systemName: "arrow.triangle.2.circlepath") }
-                    }
-                    .buttonStyle(.borderless).controlSize(.mini)
-                    .disabled(dc.rechecking != nil || dc.isFetching)
-                    .help("Recheck: re-download NSE's files for the days this stock has no data, then redraw. Days NSE itself has no row for (not traded / suspended) stay empty.")
-                }
-                Spacer()
-                if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
-                if let n = syncNote {
-                    Text(n).font(.caption2).foregroundStyle(.secondary)
-                    Stepper(value: $syncOffset, in: -30...30) { Text(syncOffset == 0 ? "align" : String(format: "%+d bars", syncOffset)).font(.caption2.monospacedDigit()) }
-                        .controlSize(.mini).fixedSize()
-                        .help("Fine-tune: shift the delivery chart by a few bars if it still doesn't line up with TradingView")
                 }
                 Picker("", selection: Binding(get: { DeliveryChartBasis.shown(signal: signalMetric, basis: basis) }, set: { basis = $0 })) {
                     Text("Raw").tag("raw"); Text(signalMetric.smaLength == nil ? "SMA 22" : signalMetric.avgName).tag("sma")
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
-                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns.")
+                .help("Raw: ta.highest and ta.percentrank of DELIV_QTY*CLOSE_PRICE itself. SMA / EMA: of its \(signalMetric.smaLength ?? 22)-day average (as picked in the Delivery signal). Only changes these charts — not the Delivery Analysis signal or the Filter columns. Now drawing: \(metric.pine)")
+
+                // ── status chips (one line each; details on hover) ──
+                if let s, let last = sig.last {
+                    let ago = dc.book.days.count - 1 - (dc.book.days.firstIndex(of: s.days[last]) ?? dc.book.days.count - 1)
+                    chip("▲ \(String(s.days[last].dropFirst(2))) · \(ago == 0 ? "today" : "\(ago)d")", .orange)
+                        .help("Last \(length)-day high of \(metric.pine): \(s.days[last]) (\(ago == 0 ? "today" : "\(ago) trading days ago")) · \(sig.count) highs in the stored history")
+                }
+                if let s { DelsmacBadge(series: s, day: lw.crossDay).fixedSize() }
+                if s == nil {
+                    Text(dc.storedDays.isEmpty ? "No NSE delivery data yet — open Delivery Analysis (⌥⌘D)" : "No NSE delivery data for \(symbol)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if s != nil {
+                    let sym = SymbolBook.clean(symbol)
+                    let gapCount = dc.stockGaps(sym).count
+                    Button { dc.recheck(sym) } label: {
+                        if dc.rechecking == sym { ProgressView().controlSize(.mini) }
+                        else if gapCount > 0 { chip("⚠︎ \(gapCount)d gap", .orange) }
+                        else { Image(systemName: "arrow.triangle.2.circlepath") }
+                    }
+                    .buttonStyle(.borderless).controlSize(.mini)
+                    .disabled(dc.rechecking != nil || dc.isFetching)
+                    .help((dc.recheckNote[sym].map { $0 + "\n\n" } ?? "") + (gapCount > 0 ? "\(gapCount) trading day\(gapCount == 1 ? "" : "s") without NSE data for this stock. " : "") + "Click to recheck: re-download NSE's files for the days this stock has no data, then redraw. Days NSE itself has no row for (not traded / suspended) stay empty.")
+                }
+                if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
+                Spacer(minLength: 4)
+
+                // ── layers ──
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
-                    ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals], id: \.self) { layer in
-                        Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : "Shade")))), isOn: Binding(get: { L.contains(layer) }, set: { on in
-                            var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
-                            layersRaw = ChartLayer.encode(x)
-                        }))
-                        .toggleStyle(.button).controlSize(.mini)
-                        .help(layer.label(metric.pine, length))
+                    HStack(spacing: 2) {
+                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals], id: \.self) { layer in
+                            Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : "Shade")))), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                                var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
+                                layersRaw = ChartLayer.encode(x)
+                            }))
+                            .toggleStyle(.button).controlSize(.mini)
+                            .help(layer.label(metric.pine, length))
+                        }
+                        if L.contains(.deals) { dealsNote }
                     }
-                    DelsmacLevelControl(level: $shadeLevel).controlSize(.mini)
-                    if L.contains(.deals) { dealsNote }
+                    DelsmacLevelControl(level: $shadeLevel).controlSize(.mini).fixedSize()
                 }
                 ChartStyleButton().buttonStyle(.borderless).controlSize(.mini)
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases)
                     .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.mini).fixedSize()
+
+                // ── sync + range ──
+                if let n = syncNote {
+                    Stepper(value: $syncOffset, in: -30...30) {
+                        (Text(Image(systemName: "link")) + Text(syncOffset == 0 ? "" : String(format: " %+d", syncOffset)))
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    .controlSize(.mini).fixedSize()
+                    .help(n + " — fine-tune: shift the delivery chart by a few bars if it doesn't line up with TradingView")
+                }
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
             }
+            .lineLimit(1)
             .padding(.horizontal, 8).padding(.vertical, 3)
             if s != nil { LWChartView(holder: lw) }        // the synced chart: Delivery, or Chart 3
         }
