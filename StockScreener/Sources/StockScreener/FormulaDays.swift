@@ -35,7 +35,8 @@ struct FFormula: Identifiable, Hashable {
     var quick: String? = nil      // F text for editing (notes / my formulas)
     var mineID: UUID? = nil       // one of "My formulas" (edit in place)
     var alertID: UUID? = nil      // an F alert (edit updates the alert)
-    var key: String { group.describe }
+    var fresh = false             // count a stock only on the day it became true (true that day, not the previous day)
+    var key: String { group.describe + (fresh ? " ⟨just became true⟩" : "") }
     static func == (a: FFormula, b: FFormula) -> Bool { a.key == b.key }
     func hash(into h: inout Hasher) { h.combine(key) }
 }
@@ -50,7 +51,7 @@ struct FFormula: Identifiable, Hashable {
     private var cache: [String: [String]?] = [:]             // "day|formula" → symbols
 
     /// Formulas you typed or edited here (kept for good).
-    struct Mine: Codable, Identifiable, Equatable { var id = UUID(); var name: String; var quick: String }
+    struct Mine: Codable, Identifiable, Equatable { var id = UUID(); var name: String; var quick: String; var fresh: Bool? = nil }
     @Published var mine: [Mine] = { (UserDefaults.standard.data(forKey: "fdays.mine")).flatMap { try? JSONDecoder().decode([Mine].self, from: $0) } ?? [] }() {
         didSet { UserDefaults.standard.set(try? JSONEncoder().encode(mine), forKey: "fdays.mine") }
     }
@@ -71,7 +72,7 @@ struct FFormula: Identifiable, Hashable {
             guard f.group.activeCount > 0, includeHidden || !hidden.contains(f.key), seen.insert(f.key).inserted else { return }
             out.append(f)
         }
-        for m in mine { if let g = Self.group(m.quick, vm: vm) { add(FFormula(name: m.name.isEmpty ? m.quick : m.name, source: "My formula · \(m.quick)", group: g, quick: m.quick, mineID: m.id)) } }
+        for m in mine { if let g = Self.group(m.quick, vm: vm) { add(FFormula(name: m.name.isEmpty ? m.quick : m.name, source: "My formula · \(m.quick)" + (m.fresh == true ? " · only the day it became true" : ""), group: g, quick: m.quick, mineID: m.id, fresh: m.fresh == true)) } }
         for n in MBNoteStore.shared.notes.values.sorted(by: { $0.updated > $1.updated }) {
             let q = NoteAlerts.quick(n.text, headers: vm.headers)
             guard !q.isEmpty, let f = try? QuickF.formula(q, headers: vm.headers) else { continue }
@@ -111,7 +112,7 @@ struct FFormula: Identifiable, Hashable {
     /// The formula as counted: with "Also require" ANDed in.
     func effective(_ f: FFormula) -> FFormula {
         guard let a = also, a.activeCount > 0 else { return f }
-        return FFormula(name: f.name, source: f.source, group: FilterGroup(mode: .all, groups: [f.group, a]), quick: f.quick)
+        return FFormula(name: f.name, source: f.source, group: FilterGroup(mode: .all, groups: [f.group, a]), quick: f.quick, fresh: f.fresh)
     }
 
     func run(_ vm: ScreenerViewModel, lastDays: Int) {
@@ -119,15 +120,19 @@ struct FFormula: Identifiable, Hashable {
         let fs = formulas(vm).map { (orig: $0, eff: effective($0)) }
         guard let label = vm.labelIndex else { return }
         let liveKey = HistoryStore.dayKey(vm.dataDay(of: vm.table))
-        let stored = Array(HistoryStore.days().filter { $0 < liveKey }.suffix(max(1, lastDays)))
+        let storedAll = HistoryStore.days().filter { $0 < liveKey }
+        let stored = Array(storedAll.suffix(max(1, lastDays)))
         days = stored + [liveKey]
+        // "just became true" formulas also need the day before the first one shown
+        let before = fs.contains { $0.orig.fresh } ? storedAll.dropLast(stored.count).last : nil
+        let evalDays = (before.map { [$0] } ?? []) + days
         running = true; progress = 0
         task = Task { @MainActor in
             var result: [String: [String: [String]?]] = [:]
             let current = vm.table
-            for (k, d) in days.enumerated() {
+            for (k, d) in evalDays.enumerated() {
                 if Task.isCancelled { break }
-                let isLive = d == liveKey && k == days.count - 1
+                let isLive = d == liveKey && k == evalDays.count - 1
                 let todo = fs.filter { p in
                     if !isLive, let c = cache[d + "|" + p.eff.key] { result[p.orig.key, default: [:]][d] = .some(c); return false }
                     return true
@@ -150,13 +155,31 @@ struct FFormula: Identifiable, Hashable {
                         result[p.orig.key, default: [:]][d] = .some(r)
                     }
                 }
-                progress = Double(k + 1) / Double(days.count)
-                if k % 3 == 0 { counts = result; await Task.yield() }
+                progress = Double(k + 1) / Double(evalDays.count)
+                if k % 3 == 0 { counts = Self.freshOnly(result, fs.map(\.orig), evalDays); await Task.yield() }
             }
-            counts = result
+            counts = Self.freshOnly(result, fs.map(\.orig), evalDays)
             running = false
             MemoryRelief.giveBack()
         }
+    }
+
+    /// For "just became true" formulas: keep a stock on a day only if it didn't meet the formula the day before.
+    /// Unknown when either day can't be judged; the very first day (nothing before it) stays unknown too.
+    static func freshOnly(_ r: [String: [String: [String]?]], _ fs: [FFormula], _ days: [String]) -> [String: [String: [String]?]] {
+        var out = r
+        for f in fs where f.fresh {
+            guard let m = r[f.key] else { continue }
+            var n: [String: [String]?] = [:]
+            for (k, d) in days.enumerated() {
+                guard let cur = m[d] else { continue }                       // not computed yet
+                guard k > 0, let curS = cur, let prevE = m[days[k - 1]], let prev = prevE else { n[d] = .some(nil); continue }
+                let was = Set(prev)
+                n[d] = .some(curS.filter { !was.contains($0) })
+            }
+            out[f.key] = n
+        }
+        return out
     }
 
     /// Symbols meeting the formula in `t`; nil when a column it uses has no values that day.
@@ -646,6 +669,7 @@ struct FormulaEditor: View {
     @State private var quick = ""
     @State private var error: String?
     @State private var now: Int?
+    @State private var fresh = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -655,6 +679,10 @@ struct FormulaEditor: View {
             TextField("count=5 + DELSMA>90 + C/DL2C>1", text: $quick, axis: .vertical)
                 .textFieldStyle(.roundedBorder).font(.body.monospaced()).lineLimit(2...6)
             Text("+ = AND · | = OR · NOT col · col>5, col=1, col<0.9 … column names as in the Filter").font(.caption2).foregroundStyle(.secondary)
+            if start?.alertID == nil {
+                Toggle("Only when it just became true — true on the day, not true the previous day", isOn: $fresh)
+                    .help("Counts (and measures success of) a stock only on the day the formula turned true, not on every day it stays true")
+            }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             else if let now { Text("\(now) stocks meet it today").font(.caption).foregroundStyle(.green) }
             HStack {
@@ -668,7 +696,8 @@ struct FormulaEditor: View {
         .padding(16).frame(width: 520)
         .onAppear {
             quick = start?.quick ?? start?.name ?? ""
-            if let id = start?.mineID { name = c.mine.first { $0.id == id }?.name ?? "" }
+            if let id = start?.mineID { name = c.mine.first { $0.id == id }?.name ?? ""; fresh = c.mine.first { $0.id == id }?.fresh == true }
+            else { fresh = start?.fresh ?? false }
         }
         .task(id: quick) {
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -687,13 +716,13 @@ struct FormulaEditor: View {
     private func save() {
         let q = quick.trimmingCharacters(in: .whitespacesAndNewlines)
         if let id = start?.mineID, let i = c.mine.firstIndex(where: { $0.id == id }) {
-            c.mine[i].quick = q; c.mine[i].name = name
+            c.mine[i].quick = q; c.mine[i].name = name; c.mine[i].fresh = fresh ? true : nil
         } else if let aid = start?.alertID, let i = vm.settings.buyTriggers.firstIndex(where: { $0.id == aid }),
                   let f = try? QuickF.formula(q, headers: vm.headers) {
             vm.settings.buyTriggers[i].name = NoteAlerts.prefix + q
             vm.settings.buyTriggers[i].filter = FilterGroup(mode: .all, conditions: [FilterCondition(kind: .formula, formula: f)])
         } else {
-            c.mine.insert(.init(name: name, quick: q), at: 0)
+            c.mine.insert(.init(name: name, quick: q, fresh: fresh ? true : nil), at: 0)
             if let s = start, s.mineID == nil, s.alertID == nil, s.quick != nil { c.hidden.insert(s.key) }   // the edited copy replaces the note's row
         }
         saved()
