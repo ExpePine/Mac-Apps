@@ -295,12 +295,12 @@ struct LWChartData: Encodable {
         for p in deals.buy { buyV[p.time, default: 0] += p.value ?? 0 }
         for p in deals.sell { sellV[p.time, default: 0] += abs(p.value ?? 0) }
         for day in Set(buyV.keys).union(sellV.keys) {
-            let b = buyV[day] ?? 0, sl = sellV[day] ?? 0, netBuy = b >= sl
-            if b > 0 && (netBuy || goldB.contains(day)) {
+            let b = buyV[day] ?? 0, sl = sellV[day] ?? 0
+            if b > 0 {
                 d.markers.append(Marker(time: day, text: "B", position: "belowBar",
                                         color: goldB.contains(day) ? "#FFD700" : "#26a69a", shape: "arrowUp"))
             }
-            if sl > 0 && (!netBuy || goldS.contains(day)) {
+            if sl > 0 {
                 d.markers.append(Marker(time: day, text: "S", position: "aboveBar",
                                         color: goldS.contains(day) ? "#FFD700" : "#ef5350", shape: "arrowDown"))
             }
