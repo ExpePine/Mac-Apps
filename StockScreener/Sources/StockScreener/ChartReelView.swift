@@ -824,6 +824,7 @@ final class ReelPool: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         let config = WKWebViewConfiguration()
         config.websiteDataStore = TVAccounts.store(TVAccounts.account(forChart: slot))   // Chart 1 → Account 1, Chart 2 → Account 2
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        TVPopupBlocker.install(config)
         let v = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 700), configuration: config)
         PageCounter.track(v)
         v.customUserAgent = WebHolder.userAgent

@@ -477,6 +477,7 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         let config = WKWebViewConfiguration()
         config.websiteDataStore = TVAccounts.store(a)
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        TVPopupBlocker.install(config)
         let v = WKWebView(frame: .zero, configuration: config)
         PageCounter.track(v)
         v.allowsBackForwardNavigationGestures = true
