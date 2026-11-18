@@ -641,10 +641,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null, bpv=tk&&window._bp?window._bp[tk]:null;
       if(bpv==null && !t && last && last.bprank && last.bprank.length) bpv=last.bprank[last.bprank.length-1].value;
       var hasP=last&&last.bprank&&last.bprank.length;
-      if(bpv!=null||hasP) s+=' &nbsp;<span style="color:#FFD54F">BUY_PRANK '+(bpv!=null?bpv.toFixed(1):'—')+'</span>';
+      function lastNZ(a,day){ if(!a) return null; for(var i=a.length-1;i>=0;i--){ if(day&&a[i].time>day) continue; if(a[i].value>0) return a[i]; } return null; }
+      function since(a,day){ var p=lastNZ(a,day); return p?' <span style="opacity:.7">(last '+p.value.toFixed(1)+' · '+p.time.slice(2)+')</span>':' <span style="opacity:.7">(no deal yet)</span>'; }
+      var dayK=tk||null;
+      if(bpv!=null||hasP) s+=' &nbsp;<span style="color:#FFD54F">BUY_PRANK '+(bpv!=null?bpv.toFixed(1):'—')+((bpv===0)?since(last.bprank,dayK):'')+'</span>';
       var dpv=tk&&window._dp?window._dp[tk]:null;
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
-      if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
+      if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+((dpv===0)?since(last.dprank,dayK):'')+'</span>';
       if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr</span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
