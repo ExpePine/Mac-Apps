@@ -64,3 +64,19 @@ final class DealsCSVTests: XCTestCase {
         XCTAssertEqual(r.last?.qty, 1629851)
     }
 }
+
+final class DealPRankTests: XCTestCase {
+    func testOnlyDealDaysCompared() {
+        // 310 trading days; earlier deals of 10, 50, 100 Cr in the window; today 19 Cr → 1 of 3 earlier deal days ≤ 19 → 33.3
+        let axis = (0..<310).map { String(format: "d%03d", $0) }
+        var size: [String: Double] = ["d100": 10, "d200": 50, "d250": 100, "d309": 19]
+        var r = DealsCenter.dealPRank(size, axis: axis)
+        XCTAssertEqual(r[309]!!, 100.0 / 3, accuracy: 1e-9)
+        XCTAssertEqual(r[308]!!, 0)                     // no deal that day
+        size["d309"] = 117                              // bigger than all three → 100
+        r = DealsCenter.dealPRank(size, axis: axis)
+        XCTAssertEqual(r[309]!!, 100, accuracy: 1e-9)
+        size = ["d309": 19]                             // no earlier deal day in the window → nil
+        XCTAssertNil(DealsCenter.dealPRank(size, axis: axis)[309]!)
+    }
+}

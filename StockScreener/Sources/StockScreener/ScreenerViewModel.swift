@@ -503,7 +503,6 @@ final class ScreenerViewModel: ObservableObject {
         func nm(_ n: String) -> String { t.index(of: n) == nil ? n : n + " (NSE)" }
         let d2Names = ["DEL2", "DEL2C", "C/DL2C"].map(nm)
         let serName = nm("NSE_SERIES")
-        let bpName = nm("BUY_PRANK")
         let dpName = nm("DEAL_PRANK")
         let dealsOn = !DealsCenter.shared.deals.isEmpty
         let rows = t.rows.map { row -> SheetRow in
@@ -532,23 +531,17 @@ final class ScreenerViewModel: ObservableObject {
             cells += [f(sf, "%.0f"), f(pr, "%.1f"), f(jp, "%.2f"), f(ms, "%.1f"), f(sk, "%.0f")]
             cells += [f(t3, "%.0f"), f(ht, "%.2f"), f(dd, "%.0f"), f(dc, "%.1f"), f(d2, "%.1f")]
             cells += [f(d2c, "%.2f"), f(cdl, "%.3f"), code]
-            var bp: Double? = nil
-            if dealsOn, let bs = book.series[sym], let k = bs.days.lastIndex(where: { $0 <= asOf }) {
-                let axis = Array(bs.days[...k])
-                bp = DealsCenter.buyPRank(DealsCenter.shared.buyByDay(sym), axis: axis).last ?? nil
-            }
             var dp: Double? = nil
             if dealsOn, let bs = book.series[sym], let k = bs.days.lastIndex(where: { $0 <= asOf }) {
-                dp = DealsCenter.buyPRank(DealsCenter.shared.sizeByDay(sym), axis: Array(bs.days[...k])).last ?? nil
+                dp = DealsCenter.dealPRank(DealsCenter.shared.sizeByDay(sym), axis: Array(bs.days[...k])).last ?? nil
             }
-            cells.append(f(bp, "%.1f"))
             cells.append(f(dp, "%.1f"))
             var nums: [Double?] = row.numbers
             nums += [d, sf, pr, jp, ms, sk, t3]
-            nums += [ht, dd, dc, d2, d2c, cdl, nil, bp, dp]
+            nums += [ht, dd, dc, d2, d2c, cdl, nil, dp]
             return SheetRow(id: row.id, cells: cells, numbers: nums)
         }
-        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, bpName, dpName]
+        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, dpName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 

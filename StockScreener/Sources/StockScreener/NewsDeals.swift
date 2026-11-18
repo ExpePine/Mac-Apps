@@ -218,7 +218,7 @@ enum CSVLine {
     @Published private(set) var busy = false
     @Published var status: String?
     @Published private(set) var revision = 0
-    /// Called after the deals list changes (the Filter rebuilds BUY_PRANK).
+    /// Called after the deals list changes (the Filter rebuilds DEAL_PRANK).
     var onChange: (() -> Void)?
 
     /// Total bulk + block buy (₹ Cr) per day for one stock.
@@ -235,20 +235,21 @@ enum CSVLine {
         return out
     }
 
-    /// BUY_PRANK = ta.percentrank(B, 300) on each NSE trading day of `axis`, where B = that day's total bulk + block buy
-    /// (₹ Cr, 0 on days without). Pine's percentrank = % of the previous 300 values ≤ today's.
-    /// Days without a buy are 0 here (Pine would give the share of no-deal days, ~95–100, which says nothing).
-    /// nil until 300 days of history.
-    nonisolated static func buyPRank(_ buys: [String: Double], axis: [String], length: Int = 300) -> [Double?] {
-        let v = axis.map { buys[$0] ?? 0 }
+    /// DEAL_PRANK: how big today's DEALSIZE (buy + sell ₹ Cr) is against the other deal days of the last 300
+    /// trading days — % of those earlier deal days whose size was ≤ today's. Days without deals are left out of the
+    /// comparison (Pine's ta.percentrank would count them as 0, so every deal day would read ~100).
+    /// 0 on days without a deal; nil when there were no earlier deal days in the window (nothing to compare) or
+    /// before 300 days of history.
+    nonisolated static func dealPRank(_ size: [String: Double], axis: [String], length: Int = 300) -> [Double?] {
+        let v = axis.map { size[$0] ?? 0 }
         var out = [Double?](repeating: nil, count: v.count)
         guard v.count > length else { return out }
         for i in length..<v.count {
             let x = v[i]
             if x <= 0 { out[i] = 0; continue }
-            var n = 0
-            for j in (i - length)..<i where v[j] <= x { n += 1 }
-            out[i] = Double(n) / Double(length) * 100
+            var n = 0, le = 0
+            for j in (i - length)..<i where v[j] > 0 { n += 1; if v[j] <= x { le += 1 } }
+            out[i] = n == 0 ? nil : Double(le) / Double(n) * 100
         }
         return out
     }
