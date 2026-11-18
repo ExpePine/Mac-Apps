@@ -374,6 +374,7 @@ struct NSERepairView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var r = NSERepair.shared
     @ObservedObject private var dc = DeliveryCenter.shared
+    @ObservedObject private var deals = DealsCenter.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -400,6 +401,35 @@ struct NSERepairView: View {
                     Spacer()
                     Button("Fill all") { r.startBulk() }.disabled(r.running || dc.isFetching)
                     Menu("") { Button("Start over (re-read every day again)") { r.resetBulk() } }.menuStyle(.borderlessButton).fixedSize()
+                }
+            }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Bulk / block deals: all 5 years").font(.callout.bold())
+                            Text("Reads NSE's bulk-deal and block-deal history month by month (120 requests, about 2–4 min) for every stock — feeds the Deals layer (B / S, golden B / S, net ₹ Cr) and BUY_PRANK. Stop any time; it resumes (\(deals.fillDoneCount) of 120 done). \(deals.summary).")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        if deals.fillRunning { Button("Stop") { deals.stopFill() } }
+                        else { Button("Fill all") { deals.fillAll() }.disabled(deals.busy) }
+                        Menu("") { Button("Start over (re-read every month again)") { deals.resetFill() } }.menuStyle(.borderlessButton).fixedSize()
+                    }
+                    if deals.fillRunning && deals.fillProgress.total > 0 {
+                        ProgressView(value: Double(deals.fillProgress.done), total: Double(deals.fillProgress.total))
+                    }
+                    if !deals.fillLog.isEmpty {
+                        ScrollViewReader { p in
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 1) {
+                                    ForEach(Array(deals.fillLog.enumerated()), id: \.offset) { item in Text(item.element).font(.caption2.monospaced()).id(item.offset) }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(minHeight: 60, maxHeight: 110)
+                            .onChange(of: deals.fillLog.count) { n in p.scrollTo(n - 1, anchor: .bottom) }
+                        }
+                    }
                 }
             }
             if dc.isFetching { Text("An NSE download is running — wait for it to finish.").font(.caption).foregroundStyle(.orange) }

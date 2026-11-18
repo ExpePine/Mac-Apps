@@ -231,6 +231,75 @@ enum CSVLine {
         try? c.write(to: Self.url, options: .atomic)
     }
 
+    // MARK: Fill all — every month of bulk + block deals from NSE's history, resumable (like the BE/BZ bulk fill)
+
+    @Published private(set) var fillRunning = false
+    @Published private(set) var fillProgress: (done: Int, total: Int) = (0, 0)
+    @Published private(set) var fillLog: [String] = []
+    private var fillStop = false
+    private static let fillDoneKey = "deals.fill.done"          // "Bulk|2024-03", "Block|2024-03" …
+    var fillDoneCount: Int { (UserDefaults.standard.stringArray(forKey: Self.fillDoneKey) ?? []).count }
+    func resetFill() { UserDefaults.standard.removeObject(forKey: Self.fillDoneKey) }
+    func stopFill() { fillStop = true }
+
+    private func note(_ s: String) {
+        fillLog.append(s)
+        if fillLog.count > 300 { fillLog.removeFirst(fillLog.count - 300) }
+    }
+
+    /// Downloads every calendar month of the last `years` years (bulk and block), skipping months already done
+    /// (the current month is always re-read). Pauses 60 s after 4 refusals in a row; stops after 20.
+    func fillAll(years: Int = 5) {
+        guard !fillRunning, !busy else { return }
+        fillRunning = true; fillStop = false; fillLog = []
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Kolkata")!
+        let today = Date()
+        let thisMonth = cal.date(from: cal.dateComponents([.year, .month], from: today))!
+        var months: [Date] = []
+        for k in 0..<(years * 12) { months.append(cal.date(byAdding: .month, value: -k, to: thisMonth)!) }
+        let mf = DateFormatter(); mf.locale = Locale(identifier: "en_US_POSIX"); mf.timeZone = cal.timeZone; mf.dateFormat = "yyyy-MM"
+        var done = Set(UserDefaults.standard.stringArray(forKey: Self.fillDoneKey) ?? [])
+        let jobs: [(Date, String)] = months.flatMap { m in ["Bulk", "Block"].map { (m, $0) } }
+            .filter { m, kind in m == thisMonth || !done.contains(kind + "|" + mf.string(from: m)) }
+        fillProgress = (0, jobs.count)
+        note("\(jobs.count) month-files to read (\(years * 24 - jobs.count) already done earlier)")
+        Task {
+            var all = deals, got = 0, inRow = 0, refused = 0, sinceSave = 0
+            for (n, job) in jobs.enumerated() {
+                if fillStop { note("Stopped — Fill all resumes here next time."); break }
+                let (m, kind) = job
+                let end = min(today, cal.date(byAdding: DateComponents(month: 1, day: -1), to: m)!)
+                let tag = kind + "|" + mf.string(from: m)
+                do {
+                    let d = try await NSEDealsClient.history(kind: kind, from: m, to: end)
+                    all += d; got += d.count; inRow = 0; sinceSave += 1
+                    if m != thisMonth { done.insert(tag); UserDefaults.standard.set(Array(done), forKey: Self.fillDoneKey) }
+                    note("\(mf.string(from: m)) \(kind.lowercased()): \(d.count) deals")
+                } catch {
+                    inRow += 1; refused += 1
+                    note("\(mf.string(from: m)) \(kind.lowercased()): ✗ \(error.localizedDescription)")
+                    if refused > 20 { note("NSE refused more than 20 requests — stopped. Try Fill all again later; it resumes."); break }
+                    if inRow >= 4 { note("NSE is refusing — pausing 60 s…"); try? await Task.sleep(nanoseconds: 60_000_000_000); inRow = 0 }
+                }
+                fillProgress = (n + 1, jobs.count)
+                if sinceSave >= 12 { set(all); save(); sinceSave = 0 }
+                try? await Task.sleep(nanoseconds: 450_000_000)
+            }
+            for kind in ["Bulk", "Block"] { if let d = try? await NSEDealsClient.today(kind: kind) { all += d } }
+            let allDone = months.allSatisfy { m in m == thisMonth || (done.contains("Bulk|" + mf.string(from: m)) && done.contains("Block|" + mf.string(from: m))) }
+            if allDone, let first = months.last {
+                let f = Self.ymd(first)
+                if coveredFrom.isEmpty || f < coveredFrom { coveredFrom = f }
+                coveredTo = Self.ymd(today)
+                UserDefaults.standard.set(Date(), forKey: "deals.updatedAt")
+                status = nil
+            }
+            set(all); save()
+            note("Done: \(got) deals read · \(deals.count) stored in all" + (allDone ? " · history complete" : " · some months missing — run Fill all again"))
+            fillRunning = false
+        }
+    }
+
     var summary: String {
         guard let a = deals.first?.day, let b = deals.last?.day else { return "No bulk / block deals downloaded yet" }
         return "\(deals.count) deals · \(a) → \(b)"
