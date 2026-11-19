@@ -1029,14 +1029,38 @@ enum Del2 {
         let deli = (0..<n).map { s.qty[$0] * s.close[$0] }
         let hi = highest(deli, L, full: full)
         var d2 = [Double?](repeating: nil, count: n), dc = [Double?](repeating: nil, count: n)
+        // DEL2C in today's share terms: NSE's closes are raw, so a split / bonus (e.g. BLSE 1:2 split, Oct 2026)
+        // would leave the pre-split close (twice the price) as DEL2C. Charts use Yahoo's split-adjusted candles.
+        let f = splitFactors(Array(s.close.prefix(n)))
         var lastC: Double?
         for i in 0..<n {
             if let h = hi[i], h > 0 {
                 d2[i] = deli[i] >= h ? 100 : deli[i] * 100 / h
-                if deli[i] >= h { lastC = s.close[i] }
+                if deli[i] >= h { lastC = s.close[i] * f[i] }
             }
             dc[i] = lastC
         }
         return (d2, dc)
+    }
+
+    /// Price ratios of splits / bonuses: a one-day close-to-close jump beyond NSE's 20% band that matches a usual
+    /// ratio (1:2 split → ½, 1:1 bonus → ½, 1:2 bonus → ⅔, 1:10 split → ⅒ …; reverse for consolidations).
+    static let actionRatios: [Double] = [1.0 / 2, 1.0 / 3, 1.0 / 4, 1.0 / 5, 1.0 / 10, 2.0 / 3, 3.0 / 4, 4.0 / 5, 2.0 / 5, 3.0 / 5, 5.0 / 6, 1.0 / 20, 2, 3, 4, 5, 10]
+
+    /// Multiplier per day that puts NSE's raw close in today's share terms (1 after the last split / bonus).
+    static func splitFactors(_ c: [Double]) -> [Double] {
+        var f = [Double](repeating: 1, count: c.count)
+        guard c.count > 1 else { return f }
+        var acc = 1.0
+        for i in stride(from: c.count - 1, through: 1, by: -1) {
+            f[i] = acc
+            guard c[i - 1] > 0, c[i] > 0 else { continue }
+            let r = c[i] / c[i - 1]
+            if r < 0.78 || r > 1.28, let k = actionRatios.min(by: { abs($0 - r) / $0 < abs($1 - r) / $1 }), abs(k - r) / k < 0.08 {
+                acc *= k
+            }
+        }
+        f[0] = acc
+        return f
     }
 }

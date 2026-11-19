@@ -80,3 +80,16 @@ final class DealPRankTests: XCTestCase {
         XCTAssertNil(DealsCenter.dealPRank(size, axis: axis)[309])
     }
 }
+
+final class SplitAdjustTests: XCTestCase {
+    func testOneForTwoSplit() {
+        // 250 → split day 126 (½ of ~252) → later days unchanged
+        let f = Del2.splitFactors([240, 250, 252, 126, 130, 135])
+        XCTAssertEqual(f[0], 0.5); XCTAssertEqual(f[2], 0.5)
+        XCTAssertEqual(f[3], 1); XCTAssertEqual(f[5], 1)
+    }
+    func testCircuitMoveIsNotASplit() {
+        let f = Del2.splitFactors([100, 80, 64, 70])      // two 20% lower circuits
+        XCTAssertEqual(f, [1, 1, 1, 1])
+    }
+}
