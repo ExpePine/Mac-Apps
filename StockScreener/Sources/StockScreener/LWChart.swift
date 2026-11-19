@@ -151,6 +151,7 @@ struct LWChartData: Encodable {
     var steepEnergy: [Point] = []     // "steep energy": Σ z while steep, 0 otherwise
     var steepZ: [String: Double] = [:]    // day → z (legend)
     var steepRun: [String: Int] = [:]     // day → bars steep (legend)
+    var steepZPR: [String: Double] = [:]  // day → ta.percentrank(z, 300) (legend)
     var del2c: [Point] = []           // DEL2C step line (Chart 3: on the price scale; delivery chart: its own scale)
     var d2cOwn = false
     var style = ChartStyle.current      // your look: colours, line width, price / delivery split, grid
@@ -221,7 +222,9 @@ struct LWChartData: Encodable {
             }
             if layers.contains(.steep) {
                 let r = Steep.series(s)
+                let zpr = Steep.zPRank(r.z)
                 for i in s.days.indices {
+                    if i < zpr.count, let v = zpr[i] { d.steepZPR[s.days[i]] = (v * 10).rounded() / 10 }
                     let day = s.days[i]
                     if let z = r.z[i] { d.steepZ[day] = (z * 100).rounded() / 100 }
                     d.steepRun[day] = r.run[i]
@@ -667,7 +670,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
       if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
       var szk=tk||((last&&last.steepEnergy&&last.steepEnergy.length)?last.steepEnergy[last.steepEnergy.length-1].time:null);
-      if(szk&&window._sz&&window._sz[szk]!=null) s+=' &nbsp;<span style="color:#B2FF59">z '+window._sz[szk].toFixed(2)+'</span>';
+      if(szk&&window._sz&&window._sz[szk]!=null) s+=' &nbsp;<span style="color:#B2FF59">z '+window._sz[szk].toFixed(2)+(window._szp&&window._szp[szk]!=null?' · z%rank '+window._szp[szk].toFixed(1):'')+'</span>';
       if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr <span style="opacity:.6">(click for ranking)</span></span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
@@ -732,7 +735,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('hit3').applyOptions({scaleMargins:low, visible:false});
       ht3.setData(d.hit3||[]);
       sband.setData([]); sen.setData([]);          // steepness: numbers in the legend only, nothing drawn
-      window._sz=d.steepZ||{}; window._sr=d.steepRun||{}; window._se={}; (d.steepEnergy||[]).forEach(function(x){ window._se[x.time]=x.value; });
+      window._sz=d.steepZ||{}; window._szp=d.steepZPR||{}; window._sr=d.steepRun||{}; window._se={}; (d.steepEnergy||[]).forEach(function(x){ window._se[x.time]=x.value; });
       if(ht3Line){ ht3.removePriceLine(ht3Line); ht3Line=null; }
       if((d.hit3||[]).length) ht3Line=ht3.createPriceLine({price:1,color:'rgba(255,138,101,0.6)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:'1.00'});
       var ts={}; d.candles.forEach(function(x){ ts[x.time]=1; }); d.deliv.forEach(function(x){ ts[x.time]=1; });

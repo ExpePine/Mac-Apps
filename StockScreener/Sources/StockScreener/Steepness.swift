@@ -34,6 +34,63 @@ enum Steep {
         return compute(delVal, ema: ema, span: span, norm: norm, trig: trig)
     }
 
+    /// ta.percentrank(z, 300) on bar i: % of the previous 300 z values ≤ today's z (z = 0 where Pine's z is 0 / na).
+    /// nil until 300 earlier bars exist.
+    static func zPRankAt(_ s: DeliverySeries, at i: Int, length: Int = 300) -> Double? {
+        guard i >= length else { return nil }
+        let zs = zTail(s, at: i, count: length + 1)
+        guard zs.count == length + 1 else { return nil }
+        let x = zs.map { $0 ?? 0 }
+        var c = 0
+        for k in 0..<length where x[k] <= x[length] { c += 1 }
+        return Double(c) / Double(length) * 100
+    }
+
+    /// STEEP_Z and STEEP_ZPR together on bar i (one pass).
+    static func zAndPRank(_ s: DeliverySeries, at i: Int, length: Int = 300) -> (z: Double?, pr: Double?) {
+        let zs = zTail(s, at: i, count: length + 1)
+        guard let zi = zs.last else { return (nil, nil) }
+        guard zs.count == length + 1, i >= length else { return (zi, nil) }
+        let x = zs.map { $0 ?? 0 }
+        var c = 0
+        for k in 0..<length where x[k] <= x[length] { c += 1 }
+        return (zi, Double(c) / Double(length) * 100)
+    }
+
+    /// percentrank(z, 300) for every bar of a full z series (charts' legend).
+    static func zPRank(_ z: [Double?], length: Int = 300) -> [Double?] {
+        let x = z.map { $0 ?? 0 }
+        var out = [Double?](repeating: nil, count: x.count)
+        guard x.count > length else { return out }
+        for i in length..<x.count {
+            var c = 0
+            for k in (i - length)..<i where x[k] <= x[i] { c += 1 }
+            out[i] = Double(c) / Double(length) * 100
+        }
+        return out
+    }
+
+    /// z for the last `count` bars ending at i (only the src values those need are computed).
+    static func zTail(_ s: DeliverySeries, at i: Int, count: Int) -> [Double?] {
+        let n = min(s.qty.count, s.close.count)
+        guard i < n, count > 0 else { return [] }
+        let need = norm + span + count - 1
+        let from = max(0, i - need + 1)
+        var src = [Double?](repeating: nil, count: i - from + 1)
+        if source == "delsma" {
+            let m = Array(s.metric(value: true).prefix(i + 1))
+            let L = DeliveryColumns.hiSma
+            guard m.count > L - 1 else { return [] }
+            let sm = DeliverySignal.avg(m, L, ema: DeliveryMetric.signalIsEMA)
+            let valid = Array(sm[(L - 1)...])
+            for bar in from...i { let vk = bar - (L - 1); if vk >= 0 { src[bar - from] = DeliveryColumns.percentRank(valid, length: 300, at: vk) } }
+            let z = compute(src: src, span: span, norm: norm, trig: trig).z
+            return Array(z.suffix(count))
+        }
+        let x = (0...i).map { s.qty[$0] * s.close[$0] }
+        return Array(compute(x, ema: ema, span: span, norm: norm, trig: trig).z.suffix(count))
+    }
+
     /// z on bar i only (the Filter's STEEP_Z) — computes just the src values the window needs.
     static func zAt(_ s: DeliverySeries, at i: Int) -> Double? {
         let n = min(s.qty.count, s.close.count)

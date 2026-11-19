@@ -108,3 +108,13 @@ final class SteepTests: XCTestCase {
         XCTAssertEqual(r.run[150], 0)
     }
 }
+
+final class ZPRankTests: XCTestCase {
+    func testPercentRankOfZ() {
+        var z: [Double?] = Array(repeating: nil, count: 10)      // na → 0 like Pine's z
+        z += (0..<300).map { Double($0 % 10) / 10 }               // 0.0 … 0.9
+        z.append(0.95)                                            // above all 300 previous → 100
+        let r = Steep.zPRank(z)
+        XCTAssertEqual(r.last!!, 100, accuracy: 1e-9)
+    }
+}
