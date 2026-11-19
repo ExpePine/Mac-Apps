@@ -201,6 +201,10 @@ struct FormulaDaysView: View {
     @AppStorage("fdays.mode") private var mode = 0                 // 0 = stocks count, 1 = change %
     @AppStorage("fdays.sort") private var sortBy = 0               // 0 = as listed, 1 = avg %, 2 = win %
     @State private var success: [String: FSuccess] = [:]
+    @State private var lead: [String: LeadMath.Result] = [:]
+    @AppStorage("lead.gain") private var leadGain = 30.0
+    @AppStorage("lead.within") private var leadWithin = 22
+    @AppStorage("lead.lookback") private var leadLookback = 60
     @State private var editing: FFormula?
     @State private var deleting: FFormula?
     @State private var newFormula = false
@@ -285,6 +289,11 @@ struct FormulaDaysView: View {
                 await Task.yield()
             }
             success = out
+            // lead time before ≥ leadGain% moves (same settings as the Lead-time matrix)
+            let lm = LeadMath(vm: vm, days: c.days, gain: leadGain, within: max(1, leadWithin))
+            var l: [String: LeadMath.Result] = [:]
+            for f in c.formulas(vm) { l[f.key] = lm.stats(c.counts[f.key] ?? [:], lookback: max(0, leadLookback)); await Task.yield() }
+            lead = l
         }
         .sheet(isPresented: $showCell) { cellPopover }
     }
@@ -369,6 +378,12 @@ struct FormulaDaysView: View {
                     Text("Up").font(.caption2.bold()).frame(width: 40)
                     Text("Best").font(.caption2.bold()).frame(width: 54)
                     Text("Worst").font(.caption2.bold()).frame(width: 54)
+                    Text("Lead d").font(.caption2.bold()).frame(width: 50)
+                        .help("Median trading days between the formula's last true day and the start of a ≥\(Int(leadGain))%-in-\(leadWithin)-days move (within \(leadLookback) days before it). Settings: Lead-time matrix")
+                    Text("Caught").font(.caption2.bold()).frame(width: 56)
+                        .help("Moves it was true before (within the look-back) / all moves in these days")
+                    Text("Lift").font(.caption2.bold()).frame(width: 46)
+                        .help("How much more often a move followed within \(leadWithin) days on the formula's days than on any stock-day")
                     ForEach(days, id: \.self) { d in
                         Text(d == c.days.last ? "Today" : String(d.suffix(5))).font(.caption2.bold()).frame(width: 46).padding(.vertical, 4)
                     }
@@ -419,6 +434,15 @@ struct FormulaDaysView: View {
                         Text(st?.win.map { String(format: "%.0f%%", $0 * 100) } ?? "—").font(.caption.monospacedDigit()).frame(width: 40)
                         Text(FSuccessMath.pct(st?.best)).font(.caption.monospacedDigit()).foregroundStyle(.green).frame(width: 54)
                         Text(FSuccessMath.pct(st?.worst)).font(.caption.monospacedDigit()).foregroundStyle(.red).frame(width: 54)
+                        let ld = lead[f.key]
+                        Text(ld?.median.map { String(format: "%.0f", $0) } ?? "—").font(.caption.monospacedDigit().bold()).frame(width: 50)
+                        Text(ld.map { $0.events > 0 ? String(format: "%.0f%%", Double($0.caught) / Double($0.events) * 100) : "—" } ?? "—")
+                            .font(.caption.monospacedDigit()).frame(width: 56)
+                            .help(ld.map { "\($0.caught) of \($0.events) moves" } ?? "")
+                        Text(ld?.lift.map { String(format: "%.1f×", $0) } ?? "—").font(.caption.monospacedDigit())
+                            .foregroundStyle((ld?.lift ?? 1) >= 1.5 ? Color.green : ((ld?.lift ?? 1) < 1 ? Color.red : Color.primary))
+                            .frame(width: 46)
+                            .help(ld?.precision.map { String(format: "%.1f%% of its stock-days had a move start within %d days", $0, leadWithin) } ?? "")
                         ForEach(days, id: \.self) { d in
                             let v = row[d]
                             Group {

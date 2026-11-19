@@ -276,3 +276,69 @@ struct LeadTimeView: View {
         }
     }
 }
+
+
+/// Lead-time stats for per-day symbol lists (F Formula Counts): moves are found once for every stock in the sheet.
+@MainActor struct LeadMath {
+    struct Result { var median: Double?; var caught = 0; var events = 0; var precision: Double?; var lift: Double? }
+    private struct Px { let ds: [String]; let starts: [Int]; let startSet: Set<Int> }
+    private var px: [String: Px] = [:]
+    private let first: String, last: String, within: Int
+    private(set) var baseRate: Double?
+
+    init(vm: ScreenerViewModel, days: [String], gain: Double, within: Int) {
+        self.within = within
+        first = days.first ?? ""; last = days.last ?? ""
+        guard let label = vm.labelIndex else { return }
+        var allDays = 0, allHit = 0
+        for r in vm.table.rows {
+            let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+            guard !sym.isEmpty, px[sym] == nil else { continue }
+            let ds: [String], cl: [Double]
+            if let p = vm.priceBook.series(for: sym), !p.days.isEmpty { (ds, cl) = (p.days, p.closes) }
+            else if let x = DeliveryCenter.shared.book.series[sym], !x.days.isEmpty {
+                let f = Del2.splitFactors(x.close); (ds, cl) = (x.days, zip(x.close, f).map { $0 * $1 })
+            } else { continue }
+            var starts: [Int] = [], i = 0
+            while i < cl.count - 1 {
+                if cl[i] > 0, ds[i] >= first {
+                    let hi = cl[(i + 1)...min(cl.count - 1, i + within)].max() ?? 0
+                    if hi / cl[i] - 1 >= gain / 100 { starts.append(i); i += within; continue }
+                }
+                i += 1
+            }
+            let set = Set(starts)
+            px[sym] = Px(ds: ds, starts: starts, startSet: set)
+            for (k, day) in ds.enumerated() where day >= first && day <= last && k + within < ds.count {
+                allDays += 1
+                if (k...(k + within)).contains(where: { set.contains($0) }) { allHit += 1 }
+            }
+        }
+        baseRate = allDays > 0 ? Double(allHit) / Double(allDays) * 100 : nil
+    }
+
+    func stats(_ perDay: [String: [String]?], lookback: Int) -> Result {
+        var trueOn: [String: Set<String>] = [:]
+        for (d, syms) in perDay { for s in syms ?? [] { trueOn[s, default: []].insert(d) } }
+        var r = Result(), dist: [Double] = [], fires = 0, hits = 0
+        for (sym, p) in px {
+            let set = trueOn[sym] ?? []
+            for s0 in p.starts {
+                r.events += 1
+                guard !set.isEmpty else { continue }
+                for back in 0...lookback where s0 - back >= 0 {
+                    if set.contains(p.ds[s0 - back]) { dist.append(Double(back)); r.caught += 1; break }
+                }
+            }
+            for day in set {
+                guard let k = FSuccessMath.index(p.ds, day), p.ds[k] == day, k + within < p.ds.count else { continue }
+                fires += 1
+                if (k...(k + within)).contains(where: { p.startSet.contains($0) }) { hits += 1 }
+            }
+        }
+        if !dist.isEmpty { let v = dist.sorted(); r.median = v.count % 2 == 1 ? v[v.count / 2] : (v[v.count / 2 - 1] + v[v.count / 2]) / 2 }
+        if fires > 0 { r.precision = Double(hits) / Double(fires) * 100 }
+        if let p = r.precision, let b = baseRate, b > 0 { r.lift = p / b }
+        return r
+    }
+}
