@@ -8,6 +8,8 @@ enum Steep {
     static var ema: Int { v("steep.ema", 66) }
     static var span: Int { v("steep.span", 5) }
     static var norm: Int { v("steep.norm", 250) }
+    /// What the steepness is measured on: "delsma" (default) = DELSMA itself; "value" = ta.ema(DELIV_QTY×CLOSE, 66).
+    static var source: String { UserDefaults.standard.string(forKey: "steep.source") ?? "delsma" }
     static var trig: Double { let d = UserDefaults.standard.double(forKey: "steep.trig"); return d > 0 ? d : 2.0 }
     private static func v(_ k: String, _ def: Int) -> Int { let i = UserDefaults.standard.integer(forKey: k); return i > 0 ? i : def }
 
@@ -15,6 +17,19 @@ enum Steep {
 
     static func series(_ s: DeliverySeries) -> Result {
         let n = min(s.qty.count, s.close.count)
+        if source == "delsma" {
+            // DELSMA = ta.percentrank(ta.sma(DELIV_QTY×CLOSE, 22 / as the Delivery signal), 300), 0–100 — already smooth,
+            // so it is used as src directly (no extra EMA)
+            let m = Array(s.metric(value: true).prefix(n))
+            let L = DeliveryColumns.hiSma
+            let sm = DeliverySignal.avg(m, L, ema: DeliveryMetric.signalIsEMA)
+            var src = [Double?](repeating: nil, count: n)
+            if n > L - 1 {
+                let valid = Array(sm[(L - 1)...])
+                for k in valid.indices { src[k + L - 1] = DeliveryColumns.percentRank(valid, length: 300, at: k) }
+            }
+            return compute(src: src, span: span, norm: norm, trig: trig)
+        }
         let delVal = (0..<n).map { s.qty[$0] * s.close[$0] }
         return compute(delVal, ema: ema, span: span, norm: norm, trig: trig)
     }
@@ -31,9 +46,16 @@ enum Steep {
             else { sum += x[i]; if i >= L - 1 { prev = sum / Double(L) } }
             src[i] = prev
         }
+        return compute(src: src, span: span, norm: norm, trig: trig)
+    }
+
+    /// Steepness of any src. g = (src / src[span] − 1) × 100; for DELSMA (0–100) the divisor is floored at 1 so a
+    /// rank of 0 doesn't divide by zero.
+    static func compute(src: [Double?], span: Int, norm: Int, trig: Double) -> Result {
+        let n = src.count
         var g = [Double?](repeating: nil, count: n)
         for i in 0..<n where i >= span {
-            if let c = src[i], let p = src[i - span], p != 0 { g[i] = (c / p - 1) * 100 }
+            if let c = src[i], let p = src[i - span] { g[i] = (c / max(p, 1) - 1) * 100 }
         }
         var z = [Double?](repeating: nil, count: n), run = [Int](repeating: 0, count: n)
         var energy = [Double](repeating: 0, count: n), steep = [Bool](repeating: false, count: n)

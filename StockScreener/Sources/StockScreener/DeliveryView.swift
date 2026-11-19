@@ -475,6 +475,7 @@ struct DeliveryMiniChart: View {
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
     @AppStorage("steep.span") private var steepSpan = 5
+    @AppStorage("steep.source") private var steepSource = "delsma"
     @AppStorage("steep.norm") private var steepNorm = 250
     @AppStorage("steep.trig") private var steepTrig = 2.0
 
@@ -574,12 +575,15 @@ struct DeliveryMiniChart: View {
                         if L.contains(.deals) { dealsNote }
                         if L.contains(.steep) {
                             Menu {
+                                Picker("Measured on", selection: $steepSource) {
+                                    Text("DELSMA").tag("delsma"); Text("Delivery value — EMA 66").tag("value")
+                                }
                                 Picker("Steepness span", selection: $steepSpan) { ForEach([3, 5, 10, 20], id: \.self) { Text("\($0) days").tag($0) } }
                                 Picker("Normal-steepness window", selection: $steepNorm) { ForEach([100, 150, 250, 500], id: \.self) { Text("\($0) days").tag($0) } }
                                 Picker("Steep = σ above normal", selection: $steepTrig) { ForEach([1.5, 2.0, 2.5, 3.0], id: \.self) { Text(String(format: "%.1f σ", $0)).tag($0) } }
                             } label: { Text("\(steepSpan)d·\(String(format: "%g", steepTrig))σ").font(.caption2.monospacedDigit()) }
                             .menuStyle(.borderlessButton).fixedSize()
-                            .help("Sustained steepness: src = ta.ema(DELIV_QTY×CLOSE, 66); g = (src/src[span] − 1)×100; z = (g − sma(g, window)) / stdev(g, window); steep = z > σ; run = days steep in a row; energy = Σ z while steep")
+                            .help("Sustained steepness: src = DELSMA (or ta.ema(DELIV_QTY×CLOSE, 66)); g = (src/src[span] − 1)×100; z = (g − sma(g, window)) / stdev(g, window); steep = z > σ; run = days steep in a row; energy = Σ z while steep")
                         }
                     }
                     DelsmacLevelControl(level: $shadeLevel).controlSize(.mini).fixedSize()
@@ -623,6 +627,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: t3Rev) { _ in push() }
         .onChange(of: syncOffset) { _ in lw.refollow() }
         .onChange(of: steepSpan) { _ in push() }
+        .onChange(of: steepSource) { _ in push() }
         .onChange(of: steepNorm) { _ in push() }
         .onChange(of: steepTrig) { _ in push() }
         .onChange(of: news.revision) { _ in push() }
