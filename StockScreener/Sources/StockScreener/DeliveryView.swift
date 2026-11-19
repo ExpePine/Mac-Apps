@@ -886,12 +886,31 @@ struct DelsmaDaysSettings: View {
     }
 }
 
+/// Z_PRANK_DAYS: days since Z_PRANK (ta.percentrank(z, 300)) was above the chosen level.
+struct ZPrankDaysSettings: View {
+    @AppStorage("zprankDays.value") private var value = 99.0
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Z_PRANK_DAYS = ta.barssince(Z_PRANK >").font(.caption.monospaced())
+                TextField("", value: $value, format: .number).frame(width: 46).multilineTextAlignment(.trailing)
+                Text(")").font(.caption.monospaced())
+                ForEach([80.0, 90, 95, 97, 99], id: \.self) { v in Button(CombiEngine.fmt(v)) { value = v }.controlSize(.small) }
+            }
+            Text("Z_PRANK = ta.percentrank(z, 300), z = the Steep z of DELSMA. 0 = above the level today; 5 = last above it 5 trading days ago; blank = not within the last 300 trading days.")
+                .font(.caption2).foregroundStyle(.secondary).frame(width: 470, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+        }
+        .onChange(of: value) { _ in DeliveryCenter.shared.refreshColumns() }
+    }
+}
+
 /// One button for the STREAK and delivery-T3 settings, each in a collapsible section.
 struct IndicatorSettingsButton: View {
     @State private var open = false
     @AppStorage("hub.streak") private var streak = false
     @AppStorage("hub.t3") private var t3 = false
     @AppStorage("hub.delsmaDays") private var daysOpen = true
+    @AppStorage("hub.zprankDays") private var zDaysOpen = true
 
     var body: some View {
         Button { open.toggle() } label: { Label("STREAK · T3", systemImage: "slider.horizontal.3") }
@@ -903,6 +922,8 @@ struct IndicatorSettingsButton: View {
                     DisclosureGroup("T3 on delivery", isExpanded: $t3) { T3Settings().padding(.vertical, 6) }
                     Divider()
                     DisclosureGroup("DAYS_DELSMA — days since DELSMA > …", isExpanded: $daysOpen) { DelsmaDaysSettings().padding(.vertical, 6) }
+                    Divider()
+                    DisclosureGroup("Z_PRANK_DAYS — days since Z_PRANK > …", isExpanded: $zDaysOpen) { ZPrankDaysSettings().padding(.vertical, 6) }
                 }
                 .padding(14).frame(width: 520)
             }

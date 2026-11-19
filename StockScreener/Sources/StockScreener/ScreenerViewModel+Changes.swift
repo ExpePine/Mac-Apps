@@ -38,7 +38,7 @@ extension ScreenerViewModel {
     /// Every column the app computes from NSE delivery data (stored snapshots hold only the sheet, so these are
     /// empty for past days until recomputed here).
     static let deliveryColumnNames = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3",
-                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES", "DEAL_PRANK", "STEEP_Z", "STEEP_ZPR"]
+                                      "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES", "DEAL_PRANK", "STEEP_Z", "Z_PRANK", "Z_PRANK_DAYS"]
     static func isDeliveryColumn(_ h: String) -> Bool {
         let base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
         return deliveryColumnNames.contains(base)
@@ -62,10 +62,13 @@ extension ScreenerViewModel {
                     cells[i] = code; nums[i] = nil
                     continue
                 }
-                if n == "STEEP_ZPR" {
-                    var z: Double? = nil
-                    if let bs = dc.book.series[sym], let k = bs.days.lastIndex(where: { $0 <= day }) { z = Steep.zPRankAt(bs, at: k) }
-                    cells[i] = z.map { String(format: "%.1f", $0) } ?? ""; nums[i] = z
+                if n == "Z_PRANK" || n == "Z_PRANK_DAYS" {
+                    var v: Double? = nil
+                    if let bs = dc.book.series[sym], let k = bs.days.lastIndex(where: { $0 <= day }) {
+                        let r = Steep.zAndPRank(bs, at: k)
+                        v = n == "Z_PRANK" ? r.pr : r.days.map(Double.init)
+                    }
+                    cells[i] = v.map { String(format: n == "Z_PRANK" ? "%.1f" : "%.0f", $0) } ?? ""; nums[i] = v
                     continue
                 }
                 if n == "STEEP_Z" {

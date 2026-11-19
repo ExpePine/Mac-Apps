@@ -46,15 +46,31 @@ enum Steep {
         return Double(c) / Double(length) * 100
     }
 
-    /// STEEP_Z and STEEP_ZPR together on bar i (one pass).
-    static func zAndPRank(_ s: DeliverySeries, at i: Int, length: Int = 300) -> (z: Double?, pr: Double?) {
-        let zs = zTail(s, at: i, count: length + 1)
-        guard let zi = zs.last else { return (nil, nil) }
-        guard zs.count == length + 1, i >= length else { return (zi, nil) }
+    /// Z_PRANK_DAYS threshold: days since Z_PRANK > this (UserDefaults "zprankDays.value", default 99).
+    static var daysLevel: Double { let v = UserDefaults.standard.object(forKey: "zprankDays.value") as? Double; return v ?? 99 }
+    static let daysLookback = 300
+
+    /// STEEP_Z, Z_PRANK and Z_PRANK_DAYS on bar i (one pass). days = ta.barssince(Z_PRANK > level), searched over
+    /// the last 300 bars (nil = not within them).
+    static func zAndPRank(_ s: DeliverySeries, at i: Int, length: Int = 300) -> (z: Double?, pr: Double?, days: Int?) {
+        let back = daysLookback
+        let zs = zTail(s, at: i, count: length + back + 1)
+        guard let zi = zs.last else { return (nil, nil, nil) }
         let x = zs.map { $0 ?? 0 }
-        var c = 0
-        for k in 0..<length where x[k] <= x[length] { c += 1 }
-        return (zi, Double(c) / Double(length) * 100)
+        let firstBar = i - (x.count - 1)                     // bar number of x[0]
+        func pr(_ k: Int) -> Double? {                       // k = index in x
+            guard k >= length, firstBar + k >= length else { return nil }
+            var c = 0
+            for j in (k - length)..<k where x[j] <= x[k] { c += 1 }
+            return Double(c) / Double(length) * 100
+        }
+        let today = pr(x.count - 1)
+        var days: Int? = nil
+        let level = daysLevel
+        for d in 0...back where x.count - 1 - d >= 0 {
+            if let p = pr(x.count - 1 - d), p > level { days = d; break }
+        }
+        return (zi, today, days)
     }
 
     /// percentrank(z, 300) for every bar of a full z series (charts' legend).
