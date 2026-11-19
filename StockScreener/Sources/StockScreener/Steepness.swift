@@ -34,6 +34,32 @@ enum Steep {
         return compute(delVal, ema: ema, span: span, norm: norm, trig: trig)
     }
 
+    /// z on bar i only (the Filter's STEEP_Z) — computes just the src values the window needs.
+    static func zAt(_ s: DeliverySeries, at i: Int) -> Double? {
+        let n = min(s.qty.count, s.close.count)
+        guard i < n else { return nil }
+        let sp = span, nm = norm
+        let need = nm + sp                                     // src[i − need + 1 … i]
+        guard i - need + 1 >= 0 else { return nil }
+        var src = [Double?](repeating: nil, count: need)
+        if source == "delsma" {
+            let m = Array(s.metric(value: true).prefix(i + 1))
+            let L = DeliveryColumns.hiSma
+            let sm = DeliverySignal.avg(m, L, ema: DeliveryMetric.signalIsEMA)
+            guard m.count > L - 1 else { return nil }
+            let valid = Array(sm[(L - 1)...])
+            for k in 0..<need {
+                let bar = i - need + 1 + k, vk = bar - (L - 1)
+                if vk >= 0 { src[k] = DeliveryColumns.percentRank(valid, length: 300, at: vk) }
+            }
+        } else {
+            let x = (0...i).map { s.qty[$0] * s.close[$0] }
+            let all = compute(x, ema: ema, span: sp, norm: nm, trig: trig)
+            return all.z[i]
+        }
+        return compute(src: src, span: sp, norm: nm, trig: trig).z.last ?? nil
+    }
+
     /// Pine semantics: ta.ema seeded with the SMA of the first `ema` values; ta.stdev = population (biased) σ;
     /// z = 0 while mu / sd are na (fewer than `norm` values of g).
     static func compute(_ x: [Double], ema L: Int, span: Int, norm: Int, trig: Double) -> Result {

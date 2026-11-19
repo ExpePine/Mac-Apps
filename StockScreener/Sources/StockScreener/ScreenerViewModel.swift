@@ -504,6 +504,7 @@ final class ScreenerViewModel: ObservableObject {
         let d2Names = ["DEL2", "DEL2C", "C/DL2C"].map(nm)
         let serName = nm("NSE_SERIES")
         let dpName = nm("DEAL_PRANK")
+        let szName = nm("STEEP_Z")
         let dealsOn = !DealsCenter.shared.deals.isEmpty
         let rows = t.rows.map { row -> SheetRow in
             let c = cols[row.text(label).trimmingCharacters(in: .whitespaces).uppercased()]
@@ -536,12 +537,15 @@ final class ScreenerViewModel: ObservableObject {
                 dp = DealsCenter.dealPRank(DealsCenter.shared.sizeByDay(sym), axis: Array(bs.days[...k])).last ?? nil
             }
             cells.append(f(dp, "%.1f"))
+            var sz: Double? = nil
+            if let bs = book.series[sym], let k = bs.days.lastIndex(where: { $0 <= asOf }) { sz = Steep.zAt(bs, at: k).map { ($0 * 100).rounded() / 100 } }
+            cells.append(f(sz, "%.2f"))
             var nums: [Double?] = row.numbers
             nums += [d, sf, pr, jp, ms, sk, t3]
-            nums += [ht, dd, dc, d2, d2c, cdl, nil, dp]
+            nums += [ht, dd, dc, d2, d2c, cdl, nil, dp, sz]
             return SheetRow(id: row.id, cells: cells, numbers: nums)
         }
-        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, dpName]
+        let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, dpName, szName]
         return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
     }
 

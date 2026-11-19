@@ -136,6 +136,12 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
 
+        Window("Lead-time matrix", id: "leadtime") {
+            LeadTimeView()
+                .environmentObject(vm)
+                .frame(minWidth: 900, minHeight: 520)
+        }
+
         Window("Weights", id: "weights") {
             WeightsView()
                 .environmentObject(vm)

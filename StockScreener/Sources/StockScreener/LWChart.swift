@@ -667,7 +667,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
       if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
       var szk=tk||((last&&last.steepEnergy&&last.steepEnergy.length)?last.steepEnergy[last.steepEnergy.length-1].time:null);
-      if(szk&&window._sz&&window._sz[szk]!=null) s+=' &nbsp;<span style="color:#B2FF59">z '+window._sz[szk].toFixed(2)+' · run '+(window._sr[szk]||0)+' · energy '+((window._se&&window._se[szk])||0).toFixed(1)+'</span>';
+      if(szk&&window._sz&&window._sz[szk]!=null) s+=' &nbsp;<span style="color:#B2FF59">z '+window._sz[szk].toFixed(2)+'</span>';
       if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr <span style="opacity:.6">(click for ranking)</span></span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';

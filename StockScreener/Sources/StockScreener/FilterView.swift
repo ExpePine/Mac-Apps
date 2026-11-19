@@ -232,6 +232,8 @@ struct FilterView: View {
                     .help("Show in each column header how many of all stocks meet that column's Filter condition(s) alone (✓123)")
                 ScraperHealthBadge()
                 Button { openWindow(id: "weights") } label: { Label("Weights", systemImage: "scalemass") }
+                Button { openWindow(id: "leadtime") } label: { Label("Lead time", systemImage: "timer") }
+                    .help("Lead-time matrix: how many days before a ≥30% move each of your conditions turns true")
                     .help("Your colour-rule weights (WEIGHTS) and learned ones (WEIGHTS_AUTO) — what each rule is worth")
                 AlertsButton()
                 AnimateButton()
