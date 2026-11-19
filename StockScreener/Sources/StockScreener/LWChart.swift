@@ -29,7 +29,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals — total buy (green) / sell (red) ₹ Cr per day, strip at the top"
-        case .steep: return "Sustained steepness — lime days where \(Steep.source == "delsma" ? "DELSMA" : "EMA\(Steep.ema)(delivery value)") rose \(Steep.span)-day faster than \(Steep.trig)σ above its \(Steep.norm)-day normal; energy line, z and run in the legend"
+        case .steep: return "Sustained steepness — steep when \(Steep.source == "delsma" ? "DELSMA" : "EMA\(Steep.ema)(delivery value)") rose \(Steep.span)-day faster than \(Steep.trig)σ above its \(Steep.norm)-day normal — z, run and energy in the legend (not drawn)"
         }
     }
     var color: Color? {
@@ -731,7 +731,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       d2c.setData(d.del2c||[]);
       chart.priceScale('hit3').applyOptions({scaleMargins:low, visible:false});
       ht3.setData(d.hit3||[]);
-      sband.setData(d.steepBand||[]); sen.setData(d.steepEnergy||[]);
+      sband.setData([]); sen.setData([]);          // steepness: numbers in the legend only, nothing drawn
       window._sz=d.steepZ||{}; window._sr=d.steepRun||{}; window._se={}; (d.steepEnergy||[]).forEach(function(x){ window._se[x.time]=x.value; });
       if(ht3Line){ ht3.removePriceLine(ht3Line); ht3Line=null; }
       if((d.hit3||[]).length) ht3Line=ht3.createPriceLine({price:1,color:'rgba(255,138,101,0.6)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:'1.00'});
