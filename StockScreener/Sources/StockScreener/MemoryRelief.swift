@@ -57,6 +57,48 @@ import Darwin
         return v > 0 ? v : (ProcessInfo.processInfo.physicalMemory <= UInt64(9) << 30 ? 4 : 8)
     }
 
+    /// TradingView pages' own memory (their "Web Content" processes, the in.tradingview.com row in Activity Monitor).
+    /// TradingView's page grows the longer it stays open; a reload resets it.
+    static var tvLimitMB: Double {
+        let v = UserDefaults.standard.double(forKey: "tv.memLimitMB")
+        return v > 0 ? v : (ProcessInfo.processInfo.physicalMemory <= UInt64(9) << 30 ? 1200 : 2500)
+    }
+    static var tvPages: [WKWebView] { PageCounter.pages.allObjects.filter { ($0.url?.host ?? "").contains("tradingview") } }
+
+    /// Sum of the distinct web processes behind the TradingView pages (MB), and how many processes.
+    static func tvMemory() -> (mb: Double, processes: Int) {
+        var pids = Set<pid_t>()
+        let sel = NSSelectorFromString("_webProcessIdentifier")
+        for v in tvPages where v.responds(to: sel) {
+            if let n = v.value(forKey: "_webProcessIdentifier") as? NSNumber, n.int32Value > 0 { pids.insert(n.int32Value) }
+        }
+        return (pids.reduce(0) { $0 + (processMB($1) ?? 0) }, pids.count)
+    }
+
+    nonisolated static func processMB(_ pid: pid_t) -> Double? {
+        var info = rusage_info_v4()
+        let r = withUnsafeMutablePointer(to: &info) { p in
+            p.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+        }
+        return r == 0 ? Double(info.ri_phys_footprint) / 1_048_576 : nil
+    }
+
+    static var lastTVReload: Date?
+
+    /// Over the TradingView memory limit: close pages that aren't on screen; if still over and you're not using the
+    /// app (another app in front), reload the remaining TradingView pages — that resets their memory.
+    static func guardTradingView(force: Bool = false) {
+        guard force || tvMemory().mb > tvLimitMB else { return }
+        NotificationCenter.default.post(name: ReelPool.freeMemory, object: nil)
+        guard force || !NSApp.isActive else { return }
+        if !force, let t = lastTVReload, Date().timeIntervalSince(t) < 600 { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            guard force || tvMemory().mb > tvLimitMB else { return }
+            tvPages.forEach { $0.reload() }
+            lastTVReload = Date()
+        }
+    }
+
     static func install(_ vm: ScreenerViewModel) {
         guard pressure == nil else { return }
         URLCache.shared.memoryCapacity = 4 * 1_048_576            // web data is cached on disk; keep only a little in RAM
@@ -65,6 +107,7 @@ import Darwin
                 unloadUnusedHistory(); giveBack()
                 // over the page budget → close pages that aren't on screen (preloaded / other accounts / old Reel pages)
                 if PageCounter.pages.allObjects.count > tvBudget { NotificationCenter.default.post(name: ReelPool.freeMemory, object: nil) }
+                guardTradingView()
             }
         }
         let src = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
@@ -132,6 +175,20 @@ struct MemoryPanel: View {
                 row("Past days kept for the timeline", "\(vm.timelineCache.count) of 3", tableMB * Double(vm.timelineCache.count))
                 row("Web pages open (TradingView, charts)", "\(PageCounter.pages.allObjects.count) — each also runs as its own “Web Content” process in Activity Monitor (the in.tradingview.com row)", nil)
             }
+            let tv = MemoryRelief.tvMemory()
+            HStack(spacing: 6) {
+                Text(String(format: "TradingView pages: %.0f MB", tv.mb)).font(.caption.bold().monospacedDigit())
+                    .foregroundStyle(tv.mb > MemoryRelief.tvLimitMB ? Color.orange : Color.primary)
+                Text("(\(MemoryRelief.tvPages.count) pages, \(tv.processes) processes) · limit").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: Binding(get: { MemoryRelief.tvLimitMB }, set: { UserDefaults.standard.set($0, forKey: "tv.memLimitMB"); tick &+= 1 })) {
+                    ForEach([800.0, 1000, 1200, 1500, 2000, 2500, 4000], id: \.self) { Text(String(format: "%.1f GB", $0 / 1024)).tag($0) }
+                }
+                .labelsHidden().fixedSize().controlSize(.small)
+                Button("Reload them now") { MemoryRelief.guardTradingView(force: true) }.controlSize(.small)
+                    .help("TradingView's page keeps growing while it's open; reloading resets it (the charts redraw in a few seconds)")
+            }
+            Text("Over the limit: pages off screen are closed at once; the rest are reloaded when you switch to another app (at most every 10 min).")
+                .font(.caption2).foregroundStyle(.secondary)
             HStack(spacing: 6) {
                 Text("Keep at most").font(.caption)
                 Picker("", selection: Binding(get: { MemoryRelief.tvBudget }, set: { UserDefaults.standard.set($0, forKey: "tv.maxPages"); tick &+= 1
