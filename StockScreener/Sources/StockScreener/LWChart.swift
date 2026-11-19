@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals, steep
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -29,6 +29,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals — total buy (green) / sell (red) ₹ Cr per day, strip at the top"
+        case .steep: return "Sustained steepness — lime days where EMA\(Steep.ema)(delivery value) rose \(Steep.span)-day faster than \(Steep.trig)σ above its \(Steep.norm)-day normal; energy line, z and run in the legend"
         }
     }
     var color: Color? {
@@ -45,6 +46,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .hit3: return Color(red: 1, green: 0.54, blue: 0.4)
         case .news: return .blue
         case .deals: return .purple
+        case .steep: return Color(red: 0.6, green: 1, blue: 0.2)
         case .bands, .markers: return .orange
         default: return nil
         }
@@ -145,6 +147,10 @@ struct LWChartData: Encodable {
     var per: [Point] = []             // DELIV_PER, 0–100
     var t3: [Point] = []              // T3 with green / red per point
     var hit3: [Point] = []            // HI/T3 ratio, own scale in the delivery pane
+    var steepBand: [Point] = []       // lime background on steep days
+    var steepEnergy: [Point] = []     // "steep energy": Σ z while steep, 0 otherwise
+    var steepZ: [String: Double] = [:]    // day → z (legend)
+    var steepRun: [String: Int] = [:]     // day → bars steep (legend)
     var del2c: [Point] = []           // DEL2C step line (Chart 3: on the price scale; delivery chart: its own scale)
     var d2cOwn = false
     var style = ChartStyle.current      // your look: colours, line width, price / delivery split, grid
@@ -212,6 +218,16 @@ struct LWChartData: Encodable {
             if layers.contains(.hit3) {
                 let r = DeliveryColumns.hiT3Series(s)
                 for i in s.days.indices where i < r.count { if let v = r[i] { d.hit3.append(Point(time: s.days[i], value: v)) } }
+            }
+            if layers.contains(.steep) {
+                let r = Steep.series(s)
+                for i in s.days.indices {
+                    let day = s.days[i]
+                    if let z = r.z[i] { d.steepZ[day] = (z * 100).rounded() / 100 }
+                    d.steepRun[day] = r.run[i]
+                    d.steepEnergy.append(Point(time: day, value: r.energy[i]))
+                    if r.steep[i] { d.steepBand.append(Point(time: day, value: 1, color: "rgba(0,255,0,0.15)")) }
+                }
             }
             if layers.contains(.per) { d.per = s.days.indices.map { Point(time: s.days[$0], value: s.per[$0]) } }
             if layers.contains(.del2c) {
@@ -503,7 +519,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var chart=null, dpr, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
+    var chart=null, sband, sen, dpr, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -520,6 +536,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         crosshair:{mode:0}});
       bands=chart.addHistogramSeries({priceScaleId:'bands',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'price'}});
       chart.priceScale('bands').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+      sband=chart.addHistogramSeries({priceScaleId:'bands',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       dshade=chart.addHistogramSeries({priceScaleId:'dshade',lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
       chart.priceScale('dshade').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       candle=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
@@ -540,6 +557,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       t3s=chart.addLineSeries({priceScaleId:'deliv',color:'#26a69a',lineWidth:2,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       high=chart.addLineSeries({priceScaleId:'deliv',color:'#2962FF',lineWidth:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,priceFormat:{type:'custom',formatter:fmt}});
       d2c=chart.addLineSeries({priceScaleId:'right',color:'#FFC400',lineWidth:2,lineType:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:'DEL2C'});
+      sen=chart.addLineSeries({priceScaleId:'steep',color:'#B2FF59',lineWidth:2,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:'energy',
+        priceFormat:{type:'price',precision:1,minMove:0.1}});
+      chart.priceScale('steep').applyOptions({scaleMargins:{top:0.62,bottom:0.02},visible:false});
       ht3=chart.addLineSeries({priceScaleId:'hit3',color:'#FF8A65',lineWidth:2,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:'HI/T3',
         priceFormat:{type:'price',precision:2,minMove:0.01}});
       // only YOUR pans / zooms move TradingView — not the chart's own data loads, fits or range buttons
@@ -646,6 +666,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       var dpv=tk&&window._dp?window._dp[tk]:null;
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
       if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
+      var szk=tk||((last&&last.steepEnergy&&last.steepEnergy.length)?last.steepEnergy[last.steepEnergy.length-1].time:null);
+      if(szk&&window._sz&&window._sz[szk]!=null) s+=' &nbsp;<span style="color:#B2FF59">z '+window._sz[szk].toFixed(2)+' · run '+(window._sr[szk]||0)+' · energy '+((window._se&&window._se[szk])||0).toFixed(1)+'</span>';
       if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr <span style="opacity:.6">(click for ranking)</span></span>';
       if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
       if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
@@ -709,6 +731,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       d2c.setData(d.del2c||[]);
       chart.priceScale('hit3').applyOptions({scaleMargins:low, visible:false});
       ht3.setData(d.hit3||[]);
+      sband.setData(d.steepBand||[]); sen.setData(d.steepEnergy||[]);
+      window._sz=d.steepZ||{}; window._sr=d.steepRun||{}; window._se={}; (d.steepEnergy||[]).forEach(function(x){ window._se[x.time]=x.value; });
       if(ht3Line){ ht3.removePriceLine(ht3Line); ht3Line=null; }
       if((d.hit3||[]).length) ht3Line=ht3.createPriceLine({price:1,color:'rgba(255,138,101,0.6)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:'1.00'});
       var ts={}; d.candles.forEach(function(x){ ts[x.time]=1; }); d.deliv.forEach(function(x){ ts[x.time]=1; });

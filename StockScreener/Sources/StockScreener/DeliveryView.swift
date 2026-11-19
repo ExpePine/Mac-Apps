@@ -474,6 +474,9 @@ struct DeliveryMiniChart: View {
     @AppStorage("sync.offsetBars") private var syncOffset = 0
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
+    @AppStorage("steep.span") private var steepSpan = 5
+    @AppStorage("steep.norm") private var steepNorm = 250
+    @AppStorage("steep.trig") private var steepTrig = 2.0
 
     /// What the Deals layer has for this stock (or what NSE said); click to download / refresh now.
     /// A small one-line status capsule.
@@ -560,8 +563,8 @@ struct DeliveryMiniChart: View {
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
                     HStack(spacing: 2) {
-                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals], id: \.self) { layer in
-                            Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : "Shade")))), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals, .steep], id: \.self) { layer in
+                            Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : (layer == .steep ? "Steep" : "Shade"))))), isOn: Binding(get: { L.contains(layer) }, set: { on in
                                 var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
                                 layersRaw = ChartLayer.encode(x)
                             }))
@@ -569,6 +572,15 @@ struct DeliveryMiniChart: View {
                             .help(layer.label(metric.pine, length))
                         }
                         if L.contains(.deals) { dealsNote }
+                        if L.contains(.steep) {
+                            Menu {
+                                Picker("Steepness span", selection: $steepSpan) { ForEach([3, 5, 10, 20], id: \.self) { Text("\($0) days").tag($0) } }
+                                Picker("Normal-steepness window", selection: $steepNorm) { ForEach([100, 150, 250, 500], id: \.self) { Text("\($0) days").tag($0) } }
+                                Picker("Steep = σ above normal", selection: $steepTrig) { ForEach([1.5, 2.0, 2.5, 3.0], id: \.self) { Text(String(format: "%.1f σ", $0)).tag($0) } }
+                            } label: { Text("\(steepSpan)d·\(String(format: "%g", steepTrig))σ").font(.caption2.monospacedDigit()) }
+                            .menuStyle(.borderlessButton).fixedSize()
+                            .help("Sustained steepness: src = ta.ema(DELIV_QTY×CLOSE, 66); g = (src/src[span] − 1)×100; z = (g − sma(g, window)) / stdev(g, window); steep = z > σ; run = days steep in a row; energy = Σ z while steep")
+                        }
                     }
                     DelsmacLevelControl(level: $shadeLevel).controlSize(.mini).fixedSize()
                 }
@@ -610,6 +622,9 @@ struct DeliveryMiniChart: View {
         .onChange(of: layersRaw) { _ in push() }
         .onChange(of: t3Rev) { _ in push() }
         .onChange(of: syncOffset) { _ in lw.refollow() }
+        .onChange(of: steepSpan) { _ in push() }
+        .onChange(of: steepNorm) { _ in push() }
+        .onChange(of: steepTrig) { _ in push() }
         .onChange(of: news.revision) { _ in push() }
         .onChange(of: deals.revision) { _ in push() }
         .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1800) } }

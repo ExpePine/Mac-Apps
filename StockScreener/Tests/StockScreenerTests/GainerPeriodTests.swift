@@ -93,3 +93,18 @@ final class SplitAdjustTests: XCTestCase {
         XCTAssertEqual(f, [1, 1, 1, 1])
     }
 }
+
+final class SteepTests: XCTestCase {
+    func testSteepRunAndEnergy() {
+        // flat-ish delivery for 300 days, then a sharp ramp → steep days with growing run and energy
+        var x: [Double] = (0..<300).map { 100 + Double($0 % 7) }
+        x += (1...20).map { 100 * pow(1.25, Double($0)) }
+        let r = Steep.compute(x, ema: 10, span: 3, norm: 100, trig: 2)
+        let last = x.count - 1
+        XCTAssertTrue(r.steep[last])
+        XCTAssertGreaterThan(r.run[last], 3)
+        XCTAssertGreaterThan(r.energy[last], r.energy[last - 1])
+        XCTAssertEqual(r.energy[150], 0)          // not steep in the flat part
+        XCTAssertEqual(r.run[150], 0)
+    }
+}
