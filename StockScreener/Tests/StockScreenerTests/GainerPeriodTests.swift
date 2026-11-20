@@ -118,3 +118,16 @@ final class ZPRankTests: XCTestCase {
         XCTAssertEqual(r.last!!, 100, accuracy: 1e-9)
     }
 }
+
+final class QuickFAndTests: XCTestCase {
+    func testWordAnd() throws {
+        let h = ["Long_Green", "Short_Green", "DELSMA", "DELSMAC"]
+        XCTAssertEqual(QuickF.parts("Long_Green=1 and Short_Green=1"), ["Long_Green=1", "Short_Green=1"])
+        XCTAssertEqual(QuickF.parts("DELSMA>90 AND DELSMAC>96 & Long_Green=1"), ["DELSMA>90", "DELSMAC>96", "Long_Green=1"])
+        let f = try QuickF.formula("Long_Green=1 and Short_Green=1", headers: h)
+        XCTAssertTrue(f.contains(" AND "))
+        XCTAssertFalse(f.lowercased().contains("'1 and"))
+        let o = try QuickF.formula("DELSMA>90 or DELSMAC>96", headers: h)
+        XCTAssertTrue(o.contains(" OR "))
+    }
+}

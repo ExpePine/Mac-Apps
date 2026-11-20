@@ -702,7 +702,7 @@ struct FormulaEditor: View {
             TextField("Name (optional)", text: $name).textFieldStyle(.roundedBorder)
             TextField("count=5 + DELSMA>90 + C/DL2C>1", text: $quick, axis: .vertical)
                 .textFieldStyle(.roundedBorder).font(.body.monospaced()).lineLimit(2...6)
-            Text("+ = AND · | = OR · NOT col · col>5, col=1, col<0.9 … column names as in the Filter").font(.caption2).foregroundStyle(.secondary)
+            Text("+ or and = AND · | or or = OR · NOT col · col>5, col=1, col<0.9 … column names as in the Filter").font(.caption2).foregroundStyle(.secondary)
             if start?.alertID == nil {
                 Toggle("Only when it just became true — true on the day, not true the previous day", isOn: $fresh)
                     .help("Counts (and measures success of) a stock only on the day the formula turned true, not on every day it stays true")

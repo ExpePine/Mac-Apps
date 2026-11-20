@@ -13,9 +13,11 @@ import AppKit
 enum QuickF {
     private static let ops = [">=", "<=", "!=", "<>", "==", "≥", "≤", "≠", ">", "<", "="]
 
-    /// The `+` / `,` separated parts, trimmed.
+    /// The AND-separated parts, trimmed: `+`, `,`, `;`, `&`, `&&` and the word `and` (any case, with spaces around).
     static func parts(_ s: String) -> [String] {
-        s.split(whereSeparator: { $0 == "+" || $0 == "," }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var t = s.replacingOccurrences(of: "&&", with: "+").replacingOccurrences(of: "&", with: "+").replacingOccurrences(of: ";", with: "+")
+        t = t.replacingOccurrences(of: #"\s+(?i:and)\s+"#, with: " + ", options: .regularExpression)
+        return t.split(whereSeparator: { $0 == "+" || $0 == "," }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     /// Normalised text used to compare combinations (order of parts kept, spaces / case ignored).
@@ -29,7 +31,9 @@ enum QuickF {
         let ps = parts(s)
         guard !ps.isEmpty else { throw FormulaError(message: "Type a column, e.g. count>5 + D_TRIGGER") }
         return try ps.map { p in
-            let ors = p.components(separatedBy: "|").flatMap { $0.components(separatedBy: " or ") }.flatMap { $0.components(separatedBy: " OR ") }
+            let ors = p.replacingOccurrences(of: "||", with: "|")
+                .replacingOccurrences(of: #"\s+(?i:or)\s+"#, with: "|", options: .regularExpression)
+                .components(separatedBy: "|")
                 .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             let f = try ors.map { try term($0, headers: headers) }
             return f.count == 1 ? f[0] : "(" + f.joined(separator: " OR ") + ")"
