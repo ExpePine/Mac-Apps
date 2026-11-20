@@ -411,13 +411,7 @@ struct LWChartData: Encodable {
         return (buy, sell, dc.coveredFrom.isEmpty ? (dc.deals.isEmpty ? "" : "?") : dc.coveredFrom)
     }
 
-    /// ▲ZP level: Z_PRANK above this (0–100); at 100 = Z_PRANK is 100 (z higher than all of the previous 300 days).
-enum ZPLevel {
-    static var level: Double { UserDefaults.standard.object(forKey: "zp.level") as? Double ?? 99 }
-    static func hit(_ v: Double) -> Bool { level >= 100 ? v >= 100 : v > level }
-    static var text: String { level >= 100 ? "= 100" : "> " + (level == level.rounded() ? String(format: "%.0f", level) : String(format: "%.1f", level)) }
-}
-
+    
 /// News and bulk / block deal markers for one stock (shared by every delivery / news chart).
     @MainActor static func eventMarkers(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> [Marker] {
         var out: [Marker] = []
