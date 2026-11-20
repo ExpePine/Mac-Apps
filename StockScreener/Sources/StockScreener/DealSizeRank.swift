@@ -95,14 +95,18 @@ struct ZValueRankView: View {
         }
     }
 
-    var body: some View {
+    private func rows() -> [Row] {
         let base = all
         var list = base
         if last300, let k = base.firstIndex(where: { $0.id == day }) { list = Array(base[max(0, k - 300)...k]) }
         if onlyZP { list = list.filter { r in r.pr.map { ZPLevel.hit($0) } ?? false } }
-        list.sort { $0.z > $1.z }
+        return list.sorted { $0.z > $1.z }
+    }
+
+    var body: some View {
+        let list = rows()
         let rank = (list.firstIndex { $0.id == day } ?? -1) + 1
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(symbol) — days by z (steepness of \(Steep.source == "delsma" ? "DELSMA" : "delivery value"))").font(.headline)
