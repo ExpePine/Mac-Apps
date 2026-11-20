@@ -195,6 +195,8 @@ struct ChartViewer: View {
                     Text("Next 2 (about +300–600 MB)").tag(2)
                 }
                 Divider()
+                Text("TradingView pop-ups closed: \(TVPopupBlocker.closedCount)" + (TVPopupBlocker.lastClosed.isEmpty ? "" : " — last: “\(TVPopupBlocker.lastClosed)”"))
+                Divider()
                 ForEach(0..<TVAccounts.count, id: \.self) { a in
                     Button("Sign in — \(TVAccounts.name(a)) (\(a == 0 ? "Chart 1" : "Chart 2"))…") {
                         web.openSignIn(account: a)

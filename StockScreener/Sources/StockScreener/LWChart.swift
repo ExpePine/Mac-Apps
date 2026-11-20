@@ -678,30 +678,47 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(t) s+=(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0')))+' ';
       if(c) s+='O '+c.open.toFixed(2)+' H '+c.high.toFixed(2)+' L '+c.low.toFixed(2)+' C <b>'+c.close.toFixed(2)+'</b>';
       s+='<br>';
-      if(h&&h.value!=null) s+='<span style="color:#FF9800">'+last.metric+' '+fmt(h.value)+'</span>';
-      if(x&&x.value!=null) s+=' &nbsp;<span style="color:#2962FF">highest '+fmt(x.value)+'</span>';
-      if(s22&&s22.value!=null) s+=' &nbsp;<span style="color:#00BCD4">sma22 '+fmt(s22.value)+'</span>';
-      if(s66&&s66.value!=null) s+=' &nbsp;<span style="color:#E91E63">sma66 '+fmt(s66.value)+'</span>';
-      if(pr&&pr.value!=null) s+=' &nbsp;<span style="color:#90CAF9">percentrank '+pr.value.toFixed(1)+'</span>';
+      var S=last.style||{}, LC=S.legendColors||{};
+      function col(k,def){ return LC[k]||def; }
+      function sp(k,def,txt){ return '<span style="color:'+col(k,def)+'">'+txt+'</span>'; }
+      var P={};
+      if(h&&h.value!=null) P.metric=sp('metric','#FF9800',last.metric+' '+fmt(h.value));
+      if(x&&x.value!=null) P.highest=sp('highest','#2962FF','highest '+fmt(x.value));
+      if(s22&&s22.value!=null) P.sma22=sp('sma22','#00BCD4','sma22 '+fmt(s22.value));
+      if(s66&&s66.value!=null) P.sma66=sp('sma66','#E91E63','sma66 '+fmt(s66.value));
+      if(pr&&pr.value!=null) P.percentrank=sp('percentrank','#90CAF9','percentrank '+pr.value.toFixed(1));
       var tk=t?(typeof t==='string'?t:(t.year+'-'+String(t.month).padStart(2,'0')+'-'+String(t.day).padStart(2,'0'))):(lastOf(last.dsmac)||{}).time;
       var dv=tk&&window._ds?window._ds[tk]:null;
-      if(dv!=null) s+=' &nbsp;<span style="color:#00E676">DELSMAC '+dv.toFixed(1)+'</span>';
+      if(dv!=null) P.delsmac=sp('delsmac','#00E676','DELSMAC '+dv.toFixed(1));
       var sc=tk&&window._sc?window._sc[tk]:null;
-      if(sc) s+=' &nbsp;<span style="color:'+(sc==='EQ'?'#9E9E9E':'#FFB74D')+'">'+sc+'</span>';
+      if(sc) P.series=sp('series',(sc==='EQ'?'#9E9E9E':'#FFB74D'),sc);
       var bb=tk&&window._db?window._db[tk]:null, ss=tk&&window._dsl?window._dsl[tk]:null;
       var hasP=last&&last.dprank&&last.dprank.length;
       var dpv=tk&&window._dp?window._dp[tk]:null;
       if(dpv==null && !t && last && last.dprank && last.dprank.length) dpv=last.dprank[last.dprank.length-1].value;
-      if(dpv!=null||hasP) s+=' &nbsp;<span style="color:#4DD0E1">DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—')+'</span>';
+      if(dpv!=null||hasP) P.dealprank=sp('dealprank','#4DD0E1','DEAL_PRANK '+(dpv!=null?dpv.toFixed(1):'—'));
       var szk=tk||((last&&last.steepEnergy&&last.steepEnergy.length)?last.steepEnergy[last.steepEnergy.length-1].time:null);
-      if(szk&&window._sz&&window._sz[szk]!=null) s+=' &nbsp;<span style="color:#B2FF59">z '+window._sz[szk].toFixed(2)+(window._szp&&window._szp[szk]!=null?' · Z_PRANK '+window._szp[szk].toFixed(1):'')+'</span>';
-      if(bb||ss) s+=' &nbsp;<span style="color:#4DD0E1">DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr <span style="opacity:.6">(click for ranking)</span></span>';
-      if(bb||ss){ s+=' &nbsp;<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':''); }
-      if(tk&&window._fb&&window._fb[tk]) s+=' &nbsp;<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
-      if(pc&&pc.value!=null) s+=' &nbsp;<span style="color:#8BC34A">deliv '+pc.value.toFixed(0)+'%</span>';
-      if(d2v&&d2v.value!=null){ s+=' &nbsp;<span style="color:#FFC400">DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):'')+'</span>'; }
-      if(hv&&hv.value!=null) s+=' &nbsp;<span style="color:#FF8A65">HI/T3 '+hv.value.toFixed(2)+'</span>';
-      if(t3v&&t3v.value!=null){ var tc=t3v.color||'#26a69a'; s+=' &nbsp;<span style="color:'+tc+'">'+(last.t3Name||'T3')+' '+fmt(t3v.value)+(tc==='#26a69a'?' ▲':' ▼')+'</span>'; }
+      if(szk&&window._sz&&window._sz[szk]!=null) P.z=sp('z','#B2FF59','z '+window._sz[szk].toFixed(2)+(window._szp&&window._szp[szk]!=null?' · Z_PRANK '+window._szp[szk].toFixed(1):''));
+      if(bb||ss) P.dealsize=sp('dealsize','#4DD0E1','DEALSIZE ₹'+((bb||0)+(ss||0)).toFixed(1)+' Cr <span style="opacity:.6">(click for ranking)</span>');
+      if(bb||ss) P.deals='<span style="color:#9E9E9E">deals</span>'+(bb?' <span style="color:#26a69a">buy ₹'+bb.toFixed(1)+' Cr</span>':'')+(ss?' <span style="color:#ef5350">sell ₹'+ss.toFixed(1)+' Cr</span>':'')+(bb&&ss?' <span style="color:'+(bb>=ss?'#26a69a':'#ef5350')+'">net '+(bb>=ss?'+':'−')+'₹'+Math.abs(bb-ss).toFixed(1)+' Cr</span>':'');
+      if(tk&&window._fb&&window._fb[tk]) P.filled='<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
+      if(pc&&pc.value!=null) P.deliv=sp('deliv','#8BC34A','deliv '+pc.value.toFixed(0)+'%');
+      if(d2v&&d2v.value!=null) P.del2c=sp('del2c',(S.d2c||'#FFC400'),'DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):''));
+      if(hv&&hv.value!=null) P.hit3=sp('hit3','#FF8A65','HI/T3 '+hv.value.toFixed(2));
+      if(t3v&&t3v.value!=null){ var tc=t3v.color||'#26a69a'; P.t3='<span style="color:'+tc+'">'+(last.t3Name||'T3')+' '+fmt(t3v.value)+(tc==='#26a69a'?' ▲':' ▼')+'</span>'; }
+      var order=(S.legendOrder&&S.legendOrder.length)?S.legendOrder.slice():[];
+      ['metric','highest','sma22','sma66','percentrank','delsmac','series','dealprank','z','dealsize','deals','filled','deliv','del2c','hit3','t3'].forEach(function(k){ if(order.indexOf(k)<0) order.push(k); });
+      var hidden={}; (S.legendHidden||[]).forEach(function(k){ hidden[k]=1; });
+      var lines=S.legendLines||1, shown=order.filter(function(k){ return P[k] && !hidden[k]; }).map(function(k){ return P[k]; });
+      if(lines>1){ var per=Math.ceil(shown.length/lines), out=[]; for(var i=0;i<shown.length;i+=per) out.push(shown.slice(i,i+per).join(' &nbsp;')); s+=out.join('<br>'); }
+      else s+=shown.join(' &nbsp;');
+      var L=document.getElementById('legend');
+      L.style.fontSize=(S.legendSize||12)+'px';
+      L.style.left=''; L.style.right=''; L.style.top=''; L.style.bottom=''; L.style.textAlign='left';
+      var pos=S.legendPos||'tl';
+      if(pos==='tr'){ L.style.right='70px'; L.style.top='6px'; L.style.textAlign='right'; }
+      else if(pos==='bl'){ L.style.left='8px'; L.style.bottom='34px'; }
+      else { L.style.left='8px'; L.style.top='6px'; }
       document.getElementById('legend').innerHTML=s;
       document.getElementById('legend').style.color=dark?'#d1d4dc':'#131722';
     }
@@ -718,7 +735,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(!chart || dark!==d.dark) build(d.dark);
       last=d;
       var hasCandles=d.candles.length>0;
-      var S=d.style||{}, split=(S.split||72)/100;                  // where the delivery pane starts (fraction of height)
+      var S=d.style||{}, split=(S.split||72)/100;
+      var LCs=S.legendColors||{};
+      [['highest',high],['sma22',sma22],['sma66',sma66],['percentrank',prank],['deliv',per],['hit3',ht3],['dealprank',dpr]].forEach(function(p){ if(LCs[p[0]]&&p[1]) p[1].applyOptions({color:LCs[p[0]]}); });                  // where the delivery pane starts (fraction of height)
       var low=hasCandles?{top:split,bottom:0}:{top:0.08,bottom:0};
       chart.priceScale('deliv').applyOptions({scaleMargins:low});
       chart.priceScale('prank').applyOptions({scaleMargins:low, visible:false});
@@ -1015,6 +1034,27 @@ struct ChartStyle: Codable, Equatable {
     var wicks = true
     var borders = false
     var priceScale = true
+    // legend: order, hidden items, colours (also the line colours), position, size, lines
+    var legendOrder: [String]? = nil
+    var legendHidden: [String]? = nil
+    var legendColors: [String: String]? = nil
+    var legendPos: String? = nil          // "tl" top-left, "tr" top-right, "bl" bottom-left
+    var legendSize: Int? = nil
+    var legendLines: Int? = nil
+
+    /// Legend items: key, name, default colour.
+    static let legendItems: [(key: String, name: String, color: String)] = [
+        ("metric", "Delivery (smooth QTY)", "#FF9800"), ("highest", "highest", "#2962FF"), ("sma22", "sma22", "#00BCD4"),
+        ("sma66", "sma66", "#E91E63"), ("percentrank", "percentrank", "#90CAF9"), ("delsmac", "DELSMAC", "#00E676"),
+        ("series", "NSE series (EQ / BE …)", "#9E9E9E"), ("dealprank", "DEAL_PRANK", "#4DD0E1"), ("z", "z · Z_PRANK", "#B2FF59"),
+        ("dealsize", "DEALSIZE", "#4DD0E1"), ("deals", "deals buy / sell / net", "#9E9E9E"), ("filled", "delivery filled note", "#9E9E9E"),
+        ("deliv", "deliv %", "#8BC34A"), ("del2c", "DEL2C · C/DL2C", "#FFC400"), ("hit3", "HI/T3", "#FF8A65"), ("t3", "T3", "#26a69a"),
+    ]
+    var orderedLegend: [String] {
+        var o = legendOrder ?? []
+        for i in Self.legendItems where !o.contains(i.key) { o.append(i.key) }
+        return o.filter { k in Self.legendItems.contains { $0.key == k } }
+    }
 
     static let key = "chart.style"
     static var current: ChartStyle {
@@ -1075,6 +1115,8 @@ struct ChartStyleButton: View {
                     Toggle("Candle wicks", isOn: $st.wicks)
                     Toggle("Candle borders", isOn: $st.borders)
                     Toggle("Price scale on the right", isOn: $st.priceScale)
+                    Divider()
+                    legendSection
                     HStack {
                         Button("Reset") { st = ChartStyle() }
                         Spacer()
@@ -1082,9 +1124,57 @@ struct ChartStyleButton: View {
                     }
                 }
                 .toggleStyle(.checkbox)
-                .padding(14).frame(width: 380)
+                .padding(14).frame(width: 440)
                 .onChange(of: st) { v in v.save(); rev &+= 1 }
             }
+    }
+
+    // MARK: Legend — order (drag or ↑ ↓), show / hide, colour, position, size
+
+    private var legendSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Legend").font(.subheadline.bold())
+                Spacer()
+                Picker("", selection: Binding(get: { st.legendPos ?? "tl" }, set: { st.legendPos = $0 })) {
+                    Text("Top left").tag("tl"); Text("Top right").tag("tr"); Text("Bottom left").tag("bl")
+                }.labelsHidden().fixedSize().controlSize(.small)
+                Stepper("\(st.legendSize ?? 12) pt", value: Binding(get: { st.legendSize ?? 12 }, set: { st.legendSize = $0 }), in: 9...18).fixedSize().controlSize(.small)
+                Stepper("\(st.legendLines ?? 1) line\((st.legendLines ?? 1) == 1 ? "" : "s")", value: Binding(get: { st.legendLines ?? 1 }, set: { st.legendLines = $0 }), in: 1...4)
+                    .fixedSize().controlSize(.small).help("Spread the values over more lines")
+            }
+            List {
+                ForEach(st.orderedLegend, id: \.self) { k in
+                    let item = ChartStyle.legendItems.first { $0.key == k }!
+                    HStack(spacing: 8) {
+                        Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                        Toggle("", isOn: Binding(get: { !(st.legendHidden ?? []).contains(k) }, set: { on in
+                            var h = st.legendHidden ?? []; if on { h.removeAll { $0 == k } } else { h.append(k) }; st.legendHidden = h
+                        })).labelsHidden()
+                        Text(item.name).lineLimit(1)
+                        Spacer()
+                        if k != "deals" && k != "filled" && k != "t3" && k != "series" {
+                            ColorPicker("", selection: Binding(get: { Color(hexString: st.legendColors?[k] ?? (k == "del2c" ? st.d2c : item.color)) }, set: { c in
+                                var m = st.legendColors ?? [:]; m[k] = c.hexString; st.legendColors = m
+                            }), supportsOpacity: false).labelsHidden()
+                        }
+                        Button { move(k, -1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless)
+                        Button { move(k, 1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless)
+                    }
+                    .font(.callout)
+                }
+                .onMove { from, to in var o = st.orderedLegend; o.move(fromOffsets: from, toOffset: to); st.legendOrder = o }
+            }
+            .frame(height: 260)
+            Text("Drag rows (or ↑ ↓) to order the legend; untick to hide; the colour also recolours that line on the chart.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func move(_ k: String, _ by: Int) {
+        var o = st.orderedLegend
+        guard let i = o.firstIndex(of: k), o.indices.contains(i + by) else { return }
+        o.swapAt(i, i + by); st.legendOrder = o
     }
 
     private func colour(_ hex: Binding<String>) -> some View {
