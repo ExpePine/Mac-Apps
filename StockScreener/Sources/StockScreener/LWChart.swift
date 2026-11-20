@@ -124,8 +124,10 @@ struct LWChartData: Encodable {
         let text: String
         var info: String? = nil           // shown on the chart while the crosshair is on this day
         var full: [String]? = nil         // shown under the chart (headlines + source / deal details)
+        var id: String? = nil             // clickable markers: "zp" / "deal" (opens the Z / DEALSIZE list)
         init(time: String, text: String, position: String = "belowBar", color: String = "#FF9800", shape: String = "arrowUp",
-             info: String? = nil, full: [String]? = nil) {
+             info: String? = nil, full: [String]? = nil, id: String? = nil) {
+            self.id = id
             self.time = time; self.text = text; self.position = position; self.color = color; self.shape = shape
             self.info = info; self.full = full
         }
@@ -153,6 +155,7 @@ struct LWChartData: Encodable {
     var steepEnergy: [Point] = []     // "steep energy": Σ z while steep, 0 otherwise
     var steepZ: [String: Double] = [:]    // day → z (legend)
     var steepRun: [String: Int] = [:]     // day → bars steep (legend)
+    var zpDays: [String] = []             // days with a ▲ZP mark (click → Z list)
     var steepZPR: [String: Double] = [:]  // day → ta.percentrank(z, 300) (legend)
     var del2c: [Point] = []           // DEL2C step line (Chart 3: on the price scale; delivery chart: its own scale)
     var d2cOwn = false
@@ -226,9 +229,11 @@ struct LWChartData: Encodable {
                 let r = Steep.series(s)
                 let zpr = Steep.zPRank(r.z)
                 if layers.contains(.zpmark) {
+                    for i in s.days.indices where i < zpr.count { if let v = zpr[i], ZPLevel.hit(v) { d.zpDays.append(s.days[i]) } }
                     for i in s.days.indices where i < zpr.count {
                         if let v = zpr[i], ZPLevel.hit(v) {
-                            d.markers.append(Marker(time: s.days[i], text: "ZP", position: "belowBar", color: "#C6FF00", shape: "arrowUp"))
+                            // golden when z is the highest of the last 300 days (Z_PRANK = 100)
+                            d.markers.append(Marker(time: s.days[i], text: "ZP", position: "belowBar", color: v >= 100 ? "#FFD700" : "#C6FF00", shape: "arrowUp", id: "zp"))
                         }
                     }
                 }
@@ -333,11 +338,11 @@ struct LWChartData: Encodable {
             let b = buyV[day] ?? 0, sl = sellV[day] ?? 0
             if b > 0 {
                 d.markers.append(Marker(time: day, text: "B", position: "belowBar",
-                                        color: goldB.contains(day) ? "#FFD700" : "#26a69a", shape: "arrowUp"))
+                                        color: goldB.contains(day) ? "#FFD700" : "#26a69a", shape: "arrowUp", id: "deal"))
             }
             if sl > 0 {
                 d.markers.append(Marker(time: day, text: "S", position: "aboveBar",
-                                        color: goldS.contains(day) ? "#FFD700" : "#ef5350", shape: "arrowDown"))
+                                        color: goldS.contains(day) ? "#FFD700" : "#ef5350", shape: "arrowDown", id: "deal"))
             }
         }
         // green ▲DS on days DELSMAC is above the level
@@ -445,6 +450,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     @Published var crossDay: String?
     /// A deal day the user clicked on the chart (opens the DEALSIZE ranking).
     @Published var dealDay: String?
+    /// A ▲ZP day the user clicked (opens the stock's z values ranked).
+    @Published var zpDay: String?
     /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
     var onUserRange: ((String, String) -> Void)?
 
@@ -465,6 +472,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         ucc.add(WeakHandler(self), name: "hover")
         ucc.add(WeakHandler(self), name: "cross")
         ucc.add(WeakHandler(self), name: "deal")
+        ucc.add(WeakHandler(self), name: "zp")
         view.navigationDelegate = self
         view.setValue(false, forKey: "drawsBackground")
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
@@ -483,6 +491,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
 
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
         if m.name == "deal" { if let d = m.body as? String, !d.isEmpty { dealDay = d }; return }
+        if m.name == "zp" { if let d = m.body as? String, !d.isEmpty { zpDay = d }; return }
         if m.name == "cross" { let d = m.body as? String; let v = (d?.isEmpty ?? true) ? nil : d; if v != crossDay { crossDay = v }; return }
         if m.name == "hover" { let l = (m.body as? [String]) ?? []; if l != hoverLines { hoverLines = l }; return }
         guard let a = m.body as? [String], a.count == 2 else { return }
@@ -596,8 +605,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       });
       // click on a deal day → the app opens that stock's deal days ranked by DEALSIZE
       chart.subscribeClick(function(p){
-        if(!p||!p.time) return; var k=day(p.time);
-        if(((window._db&&window._db[k])||(window._dsl&&window._dsl[k])) && window.webkit&&window.webkit.messageHandlers.deal) window.webkit.messageHandlers.deal.postMessage(k);
+        if(!p||!p.time||!window.webkit) return; var k=day(p.time), h=window.webkit.messageHandlers;
+        var oid=p.hoveredObjectId?String(p.hoveredObjectId):'';
+        var isDeal=(window._db&&window._db[k])||(window._dsl&&window._dsl[k]), isZP=window._zp&&window._zp[k];
+        if(oid.indexOf('zp|')===0 && h.zp) { h.zp.postMessage(oid.slice(3)); return; }
+        if(oid.indexOf('deal|')===0 && h.deal) { h.deal.postMessage(oid.slice(5)); return; }
+        if(isDeal && h.deal) h.deal.postMessage(k);
+        else if(isZP && h.zp) h.zp.postMessage(k);
       });
       chart.subscribeCrosshairMove(function(p){
         if(!last) return;
@@ -745,6 +759,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('hit3').applyOptions({scaleMargins:low, visible:false});
       ht3.setData(d.hit3||[]);
       sband.setData([]); sen.setData([]);          // steepness: numbers in the legend only, nothing drawn
+      window._zp={}; (d.zpDays||[]).forEach(function(t){ window._zp[t]=1; });
       window._sz=d.steepZ||{}; window._szp=d.steepZPR||{}; window._sr=d.steepRun||{}; window._se={}; (d.steepEnergy||[]).forEach(function(x){ window._se[x.time]=x.value; });
       if(ht3Line){ ht3.removePriceLine(ht3Line); ht3Line=null; }
       if((d.hit3||[]).length) ht3Line=ht3.createPriceLine({price:1,color:'rgba(255,138,101,0.6)',lineWidth:1,lineStyle:2,axisLabelVisible:false,title:'1.00'});
@@ -764,7 +779,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       snapped.sort(function(a,b){ return a.time<b.time?-1:(a.time>b.time?1:0); });
       window._hover={};
       snapped.forEach(function(m){ if(m.info){ (window._hover[m.time]=window._hover[m.time]||[]).push({info:m.info,full:m.full,color:m.color}); } });
-      mk.setMarkers(snapped.map(function(m){ return {time:m.time,position:m.position,color:m.color,shape:m.shape,text:m.text}; }));
+      mk.setMarkers(snapped.map(function(m){ var o={time:m.time,position:m.position,color:m.color,shape:m.shape,text:m.text}; if(m.id) o.id=m.id+'|'+m.time; return o; }));
       var n={'6M':126,'1Y':252,'2Y':504}[d.range];
       var len=Math.max(d.candles.length,d.deliv.length);
       window._quiet=true;
