@@ -150,7 +150,37 @@ struct ScraperIssue: Identifiable, Equatable {
 
     func drop(_ i: ScraperIssue) { issues.removeAll { $0.id == i.id } }
 
-    func runAll() { for i in issues { if case .running = i.kind { continue }; runNow(i) } }
+    // MARK: Run all — only the ticked ones, one after another with a gap (default 30 min)
+
+    /// Rows you unticked for "Run all".
+    @Published var skipped: Set<String> = []
+    /// When each queued workflow will start.
+    @Published private(set) var queued: [String: Date] = [:]
+    private var queueTask: Task<Void, Never>?
+    var gapMinutes: Int { UserDefaults.standard.object(forKey: "health.gap") as? Int ?? 30 }
+
+    func runnable(_ i: ScraperIssue) -> Bool { if case .running = i.kind { return false }; return true }
+    var selected: [ScraperIssue] { issues.filter { runnable($0) && !skipped.contains($0.id) } }
+
+    /// Starts the first ticked workflow now and each next one `gapMinutes` later (the app must stay open).
+    func runAll() {
+        let list = selected
+        guard !list.isEmpty else { return }
+        stopQueue()
+        let gap = TimeInterval(max(0, gapMinutes) * 60)
+        var t = Date()
+        for i in list { queued[i.id] = t; t = t.addingTimeInterval(gap) }
+        queueTask = Task { @MainActor in
+            for (k, i) in list.enumerated() {
+                if k > 0 { try? await Task.sleep(nanoseconds: UInt64(gap * 1_000_000_000)) }
+                if Task.isCancelled { return }
+                queued[i.id] = nil
+                runNow(i)
+            }
+        }
+    }
+
+    func stopQueue() { queueTask?.cancel(); queueTask = nil; queued = [:] }
 }
 
 // MARK: - Banner
@@ -158,6 +188,7 @@ struct ScraperIssue: Identifiable, Equatable {
 struct ScraperHealthBanner: View {
     @ObservedObject private var h = ScraperHealth.shared
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("health.gap") private var gap = 30
     /// The Scraper window shows the list even after "Hide until tomorrow".
     var always = false
 
@@ -169,8 +200,20 @@ struct ScraperHealthBanner: View {
                     Text("Scraper: \(h.issues.count) workflow\(h.issues.count == 1 ? "" : "s") need attention today").font(.callout.bold())
                     if let t = h.checkedAt { Text("checked \(t.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
                     Spacer()
-                    if h.issues.contains(where: { if case .running = $0.kind { return false }; return true }) {
-                        Button("Run all of them") { h.runAll() }
+                    if h.issues.contains(where: { h.runnable($0) }) {
+                        if !h.queued.isEmpty {
+                            Text("\(h.queued.count) waiting").font(.caption).foregroundStyle(.secondary)
+                            Button("Stop queue") { h.stopQueue() }
+                        } else {
+                            Picker("", selection: $gap) {
+                                Text("all at once").tag(0)
+                                ForEach([10, 15, 20, 30, 45, 60, 90], id: \.self) { Text("\($0) min apart").tag($0) }
+                            }
+                            .labelsHidden().fixedSize().controlSize(.small)
+                            .help("Gap between the workflows started by Run")
+                            Button("Run \(h.selected.count) ticked") { h.runAll() }.disabled(h.selected.isEmpty)
+                                .help("Starts the first ticked workflow now and each next one \(gap) min later (keep the app open). Untick rows you don't want to run.")
+                        }
                     }
                     Button { Task { await h.check() } } label: { if h.checking { ProgressView().controlSize(.mini) } else { Text("Recheck") } }
                     if !always {
@@ -182,6 +225,11 @@ struct ScraperHealthBanner: View {
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
                     ForEach(h.issues) { i in
                         GridRow {
+                            if h.runnable(i) {
+                                Toggle("", isOn: Binding(get: { !h.skipped.contains(i.id) }, set: { on in if on { h.skipped.remove(i.id) } else { h.skipped.insert(i.id) } }))
+                                    .toggleStyle(.checkbox).labelsHidden()
+                                    .help("Include in Run")
+                            } else { Text("") }
                             Circle().fill(i.color).frame(width: 7, height: 7)
                             Text(i.workflow).fontWeight(.medium).lineLimit(1)
                             Text(i.repo).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -202,6 +250,10 @@ struct ScraperHealthBanner: View {
                                     .buttonStyle(.borderless).foregroundStyle(.secondary)
                                     .help("Not needed: remove this workflow from the app (stays on GitHub; restore in the Scraper window)")
                                 if h.acting.contains(i.id) { ProgressView().controlSize(.mini) }
+                                if let at = h.queued[i.id] {
+                                    Text(Date().distance(to: at) < 30 ? "starting" : "at " + at.formatted(date: .omitted, time: .shortened))
+                                        .font(.caption).foregroundStyle(.blue)
+                                }
                             }
                             .gridColumnAlignment(.leading)
                         }
