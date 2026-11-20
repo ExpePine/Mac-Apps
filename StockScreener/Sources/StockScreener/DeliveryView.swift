@@ -475,11 +475,25 @@ struct DeliveryMiniChart: View {
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
     @AppStorage("steep.span") private var steepSpan = 5
+    @AppStorage("zp.level") private var zpLevel = 99.0
     @AppStorage("steep.source") private var steepSource = "delsma"
     @AppStorage("steep.norm") private var steepNorm = 250
     @AppStorage("steep.trig") private var steepTrig = 2.0
 
     /// What the Deals layer has for this stock (or what NSE said); click to download / refresh now.
+    static func quickName(_ l: ChartLayer) -> String {
+        switch l {
+        case .candles: return "Candles"
+        case .del2c: return "DEL2C"
+        case .hit3: return "HI/T3"
+        case .dsmark: return "▲DS"
+        case .zpmark: return "▲ZP"
+        case .deals: return "Deals"
+        case .steep: return "Steep"
+        default: return "Shade"
+        }
+    }
+
     /// A small one-line status capsule.
     private func chip(_ text: String, _ color: Color) -> some View {
         Text(text).font(.caption2.monospacedDigit()).foregroundStyle(color).lineLimit(1).fixedSize()
@@ -564,14 +578,15 @@ struct DeliveryMiniChart: View {
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
                     HStack(spacing: 2) {
-                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .deals, .steep], id: \.self) { layer in
-                            Toggle(layer == .candles ? "Candles" : (layer == .del2c ? "DEL2C" : (layer == .hit3 ? "HI/T3" : (layer == .dsmark ? "▲DS" : (layer == .deals ? "Deals" : (layer == .steep ? "Steep" : "Shade"))))), isOn: Binding(get: { L.contains(layer) }, set: { on in
+                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .zpmark, .deals, .steep], id: \.self) { layer in
+                            Toggle(Self.quickName(layer), isOn: Binding(get: { L.contains(layer) }, set: { on in
                                 var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
                                 layersRaw = ChartLayer.encode(x)
                             }))
                             .toggleStyle(.button).controlSize(.mini)
                             .help(layer.label(metric.pine, length))
                         }
+                        if L.contains(.zpmark) { ZPLevelControl(level: $zpLevel).controlSize(.mini).fixedSize() }
                         if L.contains(.deals) { dealsNote }
                         if L.contains(.steep) {
                             Menu {
@@ -627,6 +642,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: t3Rev) { _ in push() }
         .onChange(of: syncOffset) { _ in lw.refollow() }
         .onChange(of: steepSpan) { _ in push() }
+        .onChange(of: zpLevel) { _ in push() }
         .onChange(of: steepSource) { _ in push() }
         .onChange(of: steepNorm) { _ in push() }
         .onChange(of: steepTrig) { _ in push() }
@@ -1067,6 +1083,25 @@ struct DelsmacBadge: View {
 
 
 /// Where the DELSMAC purple shading and green ▲DS marks start: presets (90, 91 … 99.5) or ± 1 steps.
+/// ▲ZP level: Z_PRANK above 90 … 99, or = 100.
+struct ZPLevelControl: View {
+    @Binding var level: Double
+    private static let presets: [Double] = [80, 85, 90, 92, 94, 95, 96, 97, 98, 99, 99.5, 100]
+    var body: some View {
+        HStack(spacing: 2) {
+            Menu {
+                ForEach(Self.presets, id: \.self) { v in
+                    Button { level = v } label: { Text(v >= 100 ? "= 100 (300-day record)" : "> " + label(v)) + Text(v == level ? "  ✓" : "") }
+                }
+            } label: { Text("Z_PRANK " + (level >= 100 ? "= 100" : "> " + label(level))).monospacedDigit() }
+            .fixedSize()
+            Stepper("", value: $level, in: 50...100, step: 1).labelsHidden()
+        }
+        .help("▲ZP marks days Z_PRANK — ta.percentrank(z, 300) of the Steep z of DELSMA — is above this. 100 = z higher than on all previous 300 days.")
+    }
+    private func label(_ v: Double) -> String { v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v) }
+}
+
 struct DelsmacLevelControl: View {
     @Binding var level: Double
     private static let presets: [Double] = [80, 85, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 99.5]

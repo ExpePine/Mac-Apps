@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals, steep
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals, steep, zpmark
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -29,6 +29,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals — total buy (green) / sell (red) ₹ Cr per day, strip at the top"
+        case .zpmark: return "▲ZP — days Z_PRANK (ta.percentrank of the Steep z, 300) is \(ZPLevel.text)"
         case .steep: return "Sustained steepness — steep when \(Steep.source == "delsma" ? "DELSMA" : "EMA\(Steep.ema)(delivery value)") rose \(Steep.span)-day faster than \(Steep.trig)σ above its \(Steep.norm)-day normal — z, run and energy in the legend (not drawn)"
         }
     }
@@ -47,6 +48,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .news: return .blue
         case .deals: return .purple
         case .steep: return Color(red: 0.6, green: 1, blue: 0.2)
+        case .zpmark: return Color(red: 0.78, green: 1, blue: 0)
         case .bands, .markers: return .orange
         default: return nil
         }
@@ -220,10 +222,17 @@ struct LWChartData: Encodable {
                 let r = DeliveryColumns.hiT3Series(s)
                 for i in s.days.indices where i < r.count { if let v = r[i] { d.hit3.append(Point(time: s.days[i], value: v)) } }
             }
-            if layers.contains(.steep) {
+            if layers.contains(.steep) || layers.contains(.zpmark) {
                 let r = Steep.series(s)
                 let zpr = Steep.zPRank(r.z)
-                for i in s.days.indices {
+                if layers.contains(.zpmark) {
+                    for i in s.days.indices where i < zpr.count {
+                        if let v = zpr[i], ZPLevel.hit(v) {
+                            d.markers.append(Marker(time: s.days[i], text: "ZP", position: "belowBar", color: "#C6FF00", shape: "arrowUp"))
+                        }
+                    }
+                }
+                for i in s.days.indices where layers.contains(.steep) {
                     if i < zpr.count, let v = zpr[i] { d.steepZPR[s.days[i]] = (v * 10).rounded() / 10 }
                     let day = s.days[i]
                     if let z = r.z[i] { d.steepZ[day] = (z * 100).rounded() / 100 }
@@ -402,7 +411,14 @@ struct LWChartData: Encodable {
         return (buy, sell, dc.coveredFrom.isEmpty ? (dc.deals.isEmpty ? "" : "?") : dc.coveredFrom)
     }
 
-    /// News and bulk / block deal markers for one stock (shared by every delivery / news chart).
+    /// ▲ZP level: Z_PRANK above this (0–100); at 100 = Z_PRANK is 100 (z higher than all of the previous 300 days).
+enum ZPLevel {
+    static var level: Double { UserDefaults.standard.object(forKey: "zp.level") as? Double ?? 99 }
+    static func hit(_ v: Double) -> Bool { level >= 100 ? v >= 100 : v > level }
+    static var text: String { level >= 100 ? "= 100" : "> " + (level == level.rounded() ? String(format: "%.0f", level) : String(format: "%.1f", level)) }
+}
+
+/// News and bulk / block deal markers for one stock (shared by every delivery / news chart).
     @MainActor static func eventMarkers(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> [Marker] {
         var out: [Marker] = []
         let sym = symbol.uppercased()
