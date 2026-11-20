@@ -700,8 +700,9 @@ struct FormulaEditor: View {
             Text(start == nil ? "New formula" : "Edit formula").font(.headline)
             if let s = start { Text(s.source).font(.caption).foregroundStyle(.secondary) }
             TextField("Name (optional)", text: $name).textFieldStyle(.roundedBorder)
-            TextField("count=5 + DELSMA>90 + C/DL2C>1", text: $quick, axis: .vertical)
-                .textFieldStyle(.roundedBorder).font(.body.monospaced()).lineLimit(2...6)
+            // column names complete as you type (↓ / ↑ to pick, Return to take one)
+            FormulaField(columns: vm.table.headers, placeholder: "count=5 and DELSMA>90 and C/DL2C>1", text: $quick)
+                .frame(height: 24)
             Text("+ or and = AND · | or or = OR · NOT col · col>5, col=1, col<0.9 … column names as in the Filter").font(.caption2).foregroundStyle(.secondary)
             if start?.alertID == nil {
                 Toggle("Only when it just became true — true on the day, not true the previous day", isOn: $fresh)
