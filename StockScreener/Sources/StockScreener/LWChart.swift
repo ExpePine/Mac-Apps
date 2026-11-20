@@ -1095,3 +1095,10 @@ extension Color {
         return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
     }
 }
+
+/// ▲ZP level: Z_PRANK above this (0–100); at 100 = Z_PRANK is 100 (z higher than all of the previous 300 days).
+enum ZPLevel {
+    static var level: Double { UserDefaults.standard.object(forKey: "zp.level") as? Double ?? 99 }
+    static func hit(_ v: Double) -> Bool { level >= 100 ? v >= 100 : v > level }
+    static var text: String { level >= 100 ? "= 100" : "> " + (level == level.rounded() ? String(format: "%.0f", level) : String(format: "%.1f", level)) }
+}
