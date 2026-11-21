@@ -44,7 +44,7 @@ import SwiftUI
             return Cond(id: r.id.uuidString, name: "\(c.column) \(c.op.rawValue) \(v)" + ((r.onlyNew ?? false) ? " (new)" : ""), kind: "Colour rule")
         }
         let mine = FormulaDaysCenter.shared.mine
-        for m in mine { cs.append(Cond(id: "f:" + m.id.uuidString, name: m.name.isEmpty ? m.quick : m.name, kind: "My formula")) }
+        for m in mine { cs.append(Cond(id: "f:" + m.id.uuidString, name: "\(FormulaNumbers.number("mine:" + m.id.uuidString))F · " + (m.name.isEmpty ? m.quick : m.name), kind: "My formula")) }
         guard !cs.isEmpty else { note = "No colour rules or My formulas to test."; return }
         running = true; progress = 0; note = nil; conds = cs
         Task { @MainActor in

@@ -36,6 +36,11 @@ struct FFormula: Identifiable, Hashable {
     var mineID: UUID? = nil       // one of "My formulas" (edit in place)
     var alertID: UUID? = nil      // an F alert (edit updates the alert)
     var fresh = false             // count a stock only on the day it became true (true that day, not the previous day)
+    var num = 0                   // permanent number: 1F, 2F, … (same everywhere)
+    var label: String { num > 0 ? "\(num)F" : "F" }
+    var titled: String { "\(label) · \(name)" }
+    /// What the number is tied to: My formulas / F alerts keep their number when edited.
+    var identity: String { mineID.map { "mine:" + $0.uuidString } ?? alertID.map { "alert:" + $0.uuidString } ?? "key:" + key }
     var key: String { group.describe + (fresh ? " ⟨just became true⟩" : "") }
     static func == (a: FFormula, b: FFormula) -> Bool { a.key == b.key }
     func hash(into h: inout Hasher) { h.combine(key) }
@@ -68,8 +73,9 @@ struct FFormula: Identifiable, Hashable {
     /// Every formula from F: note formulas, F alerts, saved F combinations (duplicates dropped).
     func formulas(_ vm: ScreenerViewModel, includeHidden: Bool = false) -> [FFormula] {
         var out: [FFormula] = [], seen = Set<String>()
-        func add(_ f: FFormula) {
-            guard f.group.activeCount > 0, includeHidden || !hidden.contains(f.key), seen.insert(f.key).inserted else { return }
+        func add(_ f0: FFormula) {
+            guard f0.group.activeCount > 0, includeHidden || !hidden.contains(f0.key), seen.insert(f0.key).inserted else { return }
+            var f = f0; f.num = FormulaNumbers.number(f.identity)
             out.append(f)
         }
         for m in mine { if let g = Self.group(m.quick, vm: vm) { add(FFormula(name: m.name.isEmpty ? m.quick : m.name, source: "My formula · \(m.quick)" + (m.fresh == true ? " · only the day it became true" : ""), group: g, quick: m.quick, mineID: m.id, fresh: m.fresh == true)) } }
@@ -112,7 +118,9 @@ struct FFormula: Identifiable, Hashable {
     /// The formula as counted: with "Also require" ANDed in.
     func effective(_ f: FFormula) -> FFormula {
         guard let a = also, a.activeCount > 0 else { return f }
-        return FFormula(name: f.name, source: f.source, group: FilterGroup(mode: .all, groups: [f.group, a]), quick: f.quick, fresh: f.fresh)
+        var e = FFormula(name: f.name, source: f.source, group: FilterGroup(mode: .all, groups: [f.group, a]), quick: f.quick, fresh: f.fresh)
+        e.num = f.num
+        return e
     }
 
     func run(_ vm: ScreenerViewModel, lastDays: Int) {
@@ -263,7 +271,7 @@ struct FormulaDaysView: View {
                 Text("No formulas yet — write a note in F (count=5 + DELSMA>70 …), make an F alert, or save an F combination.").foregroundStyle(.secondary)
                 Spacer()
             } else {
-                if let s = selected ?? fs.first?.key { chart(s, name: fs.first { $0.key == s }?.name ?? "") }
+                if let s = selected ?? fs.first?.key { chart(s, name: fs.first { $0.key == s }?.titled ?? "") }
                 grid(sorted(fs))
             }
         }
@@ -395,7 +403,7 @@ struct FormulaDaysView: View {
                     GridRow {
                         Button { selected = f.key } label: {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(f.name).font(.caption.monospaced()).lineLimit(1)
+                                Text(f.titled).font(.caption.monospaced()).lineLimit(1)
                                 Text(f.source).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                             }
                             .frame(width: 320, alignment: .leading).padding(4)
@@ -484,7 +492,7 @@ struct FormulaDaysView: View {
 
     @ViewBuilder private var cellPopover: some View {
         if let cell, let syms = c.counts[cell.formula]?[cell.day] ?? nil {
-            DayStocksView(day: cell.day, isToday: cell.day == c.days.last, formula: FormulaDaysCenter.shared.formulas(vm).first { $0.key == cell.formula }?.name ?? "",
+            DayStocksView(day: cell.day, isToday: cell.day == c.days.last, formula: FormulaDaysCenter.shared.formulas(vm).first { $0.key == cell.formula }?.titled ?? "",
                           symbols: syms, close: { showCell = false })
                 .environmentObject(vm)
         }
