@@ -1,134 +1,92 @@
 import SwiftUI
+import Combine
 
-/// "F" marks on the delivery charts: the days one or two of your stored formulas (My formulas, note formulas,
-/// F alerts, F combinations, Filter conditions) were true for the stock on the chart.
-/// Judged on the sheet snapshots the app keeps (History), so marks only go back as far as those snapshots.
+/// Formula marks on the delivery charts: the days your stored formulas (My formulas, note formulas, F alerts,
+/// F combinations, Filter conditions) were true for the stock on the chart.
+/// Uses Formula counts' results (same days, same "Also require"), so it costs nothing extra once those are counted.
 @MainActor final class FormulaMarks: ObservableObject {
     static let shared = FormulaMarks()
 
     @Published private(set) var revision = 0
     @Published private(set) var running = false
     @Published private(set) var progress = ""
-    @Published private(set) var coverage = ""          // "120 days · 2026-05-02 → today"
+    @Published private(set) var coverage = ""
 
     /// Formulas you ticked (by their permanent identity), used when "all" is off.
     var picked: Set<String> { Set(UserDefaults.standard.stringArray(forKey: "fmarks.picked") ?? []) }
     var freshAll: Bool { UserDefaults.standard.bool(forKey: "fmarks.fresh") }
-    /// All stored formulas are matched automatically (default); off = only the one or two you pick.
+    /// All stored formulas are matched automatically (default); off = only the ones you tick.
     var auto: Bool { UserDefaults.standard.object(forKey: "fmarks.auto") as? Bool ?? true }
-    /// Formula keys of the last run, by formula number.
+    /// Formula keys shown, by formula number.
     private(set) var active: [String] = []
 
-    /// formula key → day → symbols true that day (after the "just became true" rule when chosen)
+    /// formula key → day → symbols true that day
     private var hits: [String: [String: Set<String>]] = [:]
     private var names: [String: String] = [:]
     private var labels: [String: String] = [:]
     func label(_ key: String) -> String { labels[key] ?? "F" }
-    private var signature = ""
-    private var liveAt = Date.distantPast
-    /// "day|formula key" → symbols (nil = couldn't be judged); past days only — they never change.
-    private var cache: [String: Set<String>?] = [:]
-    private var dirty = false
-    private var diskLoaded = false
-    private static var cacheURL: URL { HistoryStore.folder.deletingLastPathComponent().appendingPathComponent("formula_marks_cache.json") }
-
-    private func loadDiskCache() {
-        guard !diskLoaded else { return }
-        diskLoaded = true
-        guard let d = try? Data(contentsOf: Self.cacheURL),
-              let m = try? JSONDecoder().decode([String: [String]?].self, from: d) else { return }
-        let keep = Set(HistoryStore.days())
-        for (k, v) in m where keep.contains(String(k.prefix(10))) { cache[k] = .some(v.map(Set.init)) }
-    }
-    private func saveDiskCache() {
-        guard dirty else { return }
-        dirty = false
-        if cache.count > 60_000 { cache.removeAll() }          // bounded; re-judged on demand
-        let m = cache.mapValues { $0.map { Array($0) } }
-        let url = Self.cacheURL
-        Task.detached(priority: .background) { if let d = try? JSONEncoder().encode(m) { try? d.write(to: url, options: .atomic) } }
-    }
-    private var task: Task<Void, Never>?
+    private var wanted: [FFormula] = []
+    private var bag = Set<AnyCancellable>()
     weak var vm: ScreenerViewModel?
 
-    /// Computes the marks if the chosen formulas or the stored days changed. Cheap to call often.
+    private init() {
+        let fc = FormulaDaysCenter.shared
+        fc.$running.removeDuplicates().sink { [weak self] r in
+            Task { @MainActor in
+                guard let self else { return }
+                self.running = r
+                if !r { self.rebuild() }
+            }
+        }.store(in: &bag)
+        fc.$progress.sink { [weak self] p in
+            Task { @MainActor in self?.progress = fc.running ? "Formula counts \(Int(p * 100))%" : "" }
+        }.store(in: &bag)
+    }
+
+    /// Picks the formulas to show; asks Formula counts to count if it hasn't counted them yet.
     func ensure(_ vm: ScreenerViewModel, force: Bool = false) {
         self.vm = vm
-        let fs: [FFormula]
+        let fc = FormulaDaysCenter.shared
         if auto {
-            fs = FormulaDaysCenter.shared.formulas(vm).sorted { $0.num < $1.num }
+            wanted = fc.formulas(vm).sorted { $0.num < $1.num }
         } else {
             let p = picked
-            fs = FormulaDaysCenter.shared.formulas(vm, includeHidden: true).filter { p.contains($0.identity) }.sorted { $0.num < $1.num }
+            wanted = fc.formulas(vm, includeHidden: true).filter { p.contains($0.identity) }.sorted { $0.num < $1.num }
         }
-        let chosen = fs.map(\.key)
-        guard !chosen.isEmpty else { if !hits.isEmpty { hits = [:]; active = []; revision += 1 }; signature = ""; return }
-        let liveKey = HistoryStore.dayKey(vm.dataDay(of: vm.table))
-        let stored = HistoryStore.days().filter { $0 < liveKey }
-        let sig = chosen.joined(separator: "|") + "#\(freshAll)#\(stored.count)#\(stored.last ?? "")#\(liveKey)"
-        // the live day is re-judged at most every 15 minutes (the sheet refreshes often)
-        let liveStale = Date().timeIntervalSince(liveAt) > 900
-        if !force && sig == signature && (!liveStale || running) { return }
-        signature = sig
-        task?.cancel()
-        guard let label = vm.labelIndex, !fs.isEmpty else { hits = [:]; revision += 1; return }
-        let days = stored + [liveKey]
-        let fresh = freshAll
-        running = true
-        loadDiskCache()
-        task = Task { @MainActor in
-            var out: [String: [String: Set<String>]] = [:]
-            let current = vm.table
-            for (k, d) in days.enumerated() {
-                if Task.isCancelled { return }
-                let isLive = k == days.count - 1
-                // past days never change: judged once, then kept (also on disk)
-                var todo: [FFormula] = []
-                for f in fs {
-                    if !isLive, let c = cache[d + "|" + f.key] { if let c { out[f.key, default: [:]][d] = c } }
-                    else { todo.append(f) }
-                }
-                if todo.isEmpty { continue }
-                progress = "\(k + 1)/\(days.count) days"
-                var table: SheetTable? = isLive ? current : await Task.detached(priority: .utility) {
-                    HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) }
-                }.value
-                if !isLive, let tt = table {
-                    let del = tt.headers.filter { ScreenerViewModel.isDeliveryColumn($0) }
-                    if todo.contains(where: { f in del.contains { f.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
-                }
-                guard let t = table else { continue }
-                let work = todo
-                let res: [(String, Set<String>?)] = await Task.detached(priority: .utility) {
-                    work.map { f in (f.key, FormulaDaysCenter.evaluate(f, table: t, label: label).map(Set.init)) }
-                }.value
-                for (key, r) in res {
-                    if let r { out[key, default: [:]][d] = r }
-                    if !isLive { cache[d + "|" + key] = .some(r); dirty = true }
-                }
-                await Task.yield()
-            }
-            liveAt = Date()
-            saveDiskCache()
-            // "only when it just became true": drop a stock on a day it was already true the stored day before
-            for f in fs where fresh || f.fresh {
-                guard let m = out[f.key] else { continue }
+        let missing = wanted.contains { fc.counts[$0.key] == nil }
+        if (force || missing || fc.days.isEmpty) && !fc.running && !wanted.isEmpty {
+            let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+            fc.run(vm, lastDays: max(1, n))
+        }
+        rebuild()
+    }
+
+    /// Reads Formula counts' results for the wanted formulas.
+    func rebuild() {
+        let fc = FormulaDaysCenter.shared
+        let days = fc.days
+        var out: [String: [String: Set<String>]] = [:]
+        for f in wanted {
+            guard let m = fc.counts[f.key] else { continue }
+            var per: [String: Set<String>] = [:]
+            for (d, v) in m { if let v { per[d] = Set(v) } }
+            // "only when it just became true" for every formula (a formula's own tick is already applied by Formula counts)
+            if freshAll && !f.fresh {
                 var n: [String: Set<String>] = [:]
                 for (k, d) in days.enumerated() where k > 0 {
-                    guard let cur = m[d], let prev = m[days[k - 1]] else { continue }
+                    guard let cur = per[d], let prev = per[days[k - 1]] else { continue }
                     n[d] = cur.subtracting(prev)
                 }
-                out[f.key] = n
+                per = n
             }
-            hits = out
-            active = fs.map(\.key)
-            names = Dictionary(fs.map { ($0.key, $0.titled) }, uniquingKeysWith: { a, _ in a })
-            labels = Dictionary(fs.map { ($0.key, $0.label) }, uniquingKeysWith: { a, _ in a })
-            coverage = days.count > 1 ? "\(days.count) days · from \(days.first!)" : "only today (no stored days yet)"
-            running = false; progress = ""
-            revision += 1
-            MemoryRelief.giveBack()
+            out[f.key] = per
         }
+        hits = out
+        active = wanted.map(\.key).filter { out[$0] != nil }
+        names = Dictionary(wanted.map { ($0.key, $0.titled) }, uniquingKeysWith: { a, _ in a })
+        labels = Dictionary(wanted.map { ($0.key, $0.label) }, uniquingKeysWith: { a, _ in a })
+        coverage = days.isEmpty ? "" : "Formula counts' \(days.count) days · from \(days.first!)"
+        revision += 1
     }
 
     func name(_ key: String) -> String { names[key] ?? key }
@@ -185,7 +143,7 @@ struct FormulaMarkControl: View {
             }
         }
         .buttonStyle(.borderless).fixedSize()
-        .help("Formula marks: on each day, every chosen formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click the mark to see them in Quick). Gold when more than one formula was true. Judged on the sheet snapshots the app has stored, so marks only go back as far as those days.")
+        .help("Formula marks: on each day, every chosen formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click the mark to see them in Quick). Gold when more than one formula was true. Uses Formula counts' results: the same days (its Days setting) and its \"Also require\".")
         .popover(isPresented: $open, arrowEdge: .bottom) { panel }
         .onAppear { fm.ensure(vm) }
         .onChange(of: fresh) { _ in fm.ensure(vm, force: true) }
@@ -231,7 +189,7 @@ struct FormulaMarkControl: View {
             Divider()
             Toggle("Only when it just became true", isOn: $fresh).toggleStyle(.checkbox)
             HStack {
-                Text(fm.running ? "Working… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing matched yet" : "Judged on \(fm.coverage)"))
+                Text(fm.running ? "Counting… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing counted yet" : "Uses \(fm.coverage) (set Days in Formula counts)"))
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Recalculate") { fm.ensure(vm, force: true) }
