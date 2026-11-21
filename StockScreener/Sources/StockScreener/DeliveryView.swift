@@ -492,7 +492,7 @@ struct DeliveryMiniChart: View {
         case .hit3: return "HI/T3"
         case .dsmark: return "▲DS"
         case .zpmark: return "▲ZP"
-        case .fmark: return "F"
+        case .fmark: return "Formula"
         case .deals: return "Deals"
         case .steep: return "Steep"
         default: return "Shade"

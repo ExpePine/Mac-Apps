@@ -11,8 +11,8 @@ import SwiftUI
     @Published private(set) var progress = ""
     @Published private(set) var coverage = ""          // "120 days · 2026-05-02 → today"
 
-    var f1: String { UserDefaults.standard.string(forKey: "fmarks.f1") ?? "" }
-    var f2: String { UserDefaults.standard.string(forKey: "fmarks.f2") ?? "" }
+    /// Formulas you ticked (by their permanent identity), used when "all" is off.
+    var picked: Set<String> { Set(UserDefaults.standard.stringArray(forKey: "fmarks.picked") ?? []) }
     var freshAll: Bool { UserDefaults.standard.bool(forKey: "fmarks.fresh") }
     /// All stored formulas are matched automatically (default); off = only the one or two you pick.
     var auto: Bool { UserDefaults.standard.object(forKey: "fmarks.auto") as? Bool ?? true }
@@ -35,8 +35,8 @@ import SwiftUI
         if auto {
             fs = FormulaDaysCenter.shared.formulas(vm).sorted { $0.num < $1.num }
         } else {
-            let all = FormulaDaysCenter.shared.formulas(vm, includeHidden: true)
-            fs = [f1, f2].filter { !$0.isEmpty }.compactMap { k in all.first { $0.key == k } }
+            let p = picked
+            fs = FormulaDaysCenter.shared.formulas(vm, includeHidden: true).filter { p.contains($0.identity) }.sorted { $0.num < $1.num }
         }
         let chosen = fs.map(\.key)
         guard !chosen.isEmpty else { if !hits.isEmpty { hits = [:]; active = []; revision += 1 }; signature = ""; return }
@@ -126,53 +126,86 @@ import SwiftUI
     }
 }
 
-/// The F-marks menu in the delivery chart's header: pick one or two stored formulas.
+/// The Formula-marks button in the delivery chart's header: all formulas, or tick the ones to match.
 struct FormulaMarkControl: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var fm = FormulaMarks.shared
-    @AppStorage("fmarks.f1") private var f1 = ""
-    @AppStorage("fmarks.f2") private var f2 = ""
     @AppStorage("fmarks.fresh") private var fresh = false
     @AppStorage("fmarks.auto") private var auto = true
+    @State private var picked: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "fmarks.picked") ?? [])
+    @State private var open = false
+    @State private var search = ""
 
     var body: some View {
-        let fs = FormulaDaysCenter.shared.formulas(vm, includeHidden: true)
-        Menu {
-            Toggle("Match all my formulas automatically", isOn: $auto)
-            Divider()
-            Picker("Or just this formula", selection: $f1) {
-                Text("None").tag("")
-                ForEach(fs) { f in Text(short(f.titled) + "  — " + String(f.source.prefix(30))).tag(f.key) }
-            }
-            Picker("…and this one", selection: $f2) {
-                Text("None").tag("")
-                ForEach(fs) { f in Text(short(f.titled) + "  — " + String(f.source.prefix(30))).tag(f.key) }
-            }
-            Toggle("Only when it just became true", isOn: $fresh)
-            Divider()
-            Text(fm.running ? "Working… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing matched yet" : "Judged on \(fm.coverage)"))
-            Button("Recalculate") { fm.ensure(vm, force: true) }
-        } label: {
+        Button { open.toggle() } label: {
             HStack(spacing: 3) {
                 if fm.running { ProgressView().controlSize(.mini) }
                 Text(label).font(.caption2).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 7))
             }
         }
-        .menuStyle(.borderlessButton).fixedSize()
-        .help("F marks: on each day, every formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click to see them in Quick). Gold when more than one formula was true. Matches all your formulas automatically, or just one or two you pick. Judged on the sheet snapshots the app has stored, so marks only go back as far as those days.")
+        .buttonStyle(.borderless).fixedSize()
+        .help("Formula marks: on each day, every chosen formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click the mark to see them in Quick). Gold when more than one formula was true. Judged on the sheet snapshots the app has stored, so marks only go back as far as those days.")
+        .popover(isPresented: $open, arrowEdge: .bottom) { panel }
         .onAppear { fm.ensure(vm) }
-        .onChange(of: f1) { v in if !v.isEmpty && auto { auto = false } else { fm.ensure(vm) } }
-        .onChange(of: f2) { v in if !v.isEmpty && auto { auto = false } else { fm.ensure(vm) } }
         .onChange(of: fresh) { _ in fm.ensure(vm, force: true) }
         .onChange(of: auto) { _ in fm.ensure(vm, force: true) }
+        .onChange(of: picked) { p in UserDefaults.standard.set(Array(p), forKey: "fmarks.picked"); fm.ensure(vm, force: true) }
+    }
+
+    private var panel: some View {
+        let fs = FormulaDaysCenter.shared.formulas(vm, includeHidden: true).sorted { $0.num < $1.num }
+        let q = search.lowercased()
+        let shown = q.isEmpty ? fs : fs.filter { $0.titled.lowercased().contains(q) || $0.source.lowercased().contains(q) }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Formulas to match").font(.headline)
+            Picker("", selection: $auto) {
+                Text("All my formulas").tag(true)
+                Text("Only the ones I tick").tag(false)
+            }
+            .pickerStyle(.radioGroup).labelsHidden()
+            if !auto {
+                HStack {
+                    TextField("Search", text: $search).textFieldStyle(.roundedBorder)
+                    Button("All") { picked.formUnion(shown.map(\.identity)) }
+                    Button("None") { picked.subtract(shown.map(\.identity)) }
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(shown) { f in
+                            Toggle(isOn: Binding(get: { picked.contains(f.identity) },
+                                                 set: { on in if on { picked.insert(f.identity) } else { picked.remove(f.identity) } })) {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(f.titled).font(.caption.monospaced()).lineLimit(1)
+                                    Text(f.source).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: min(360, CGFloat(max(1, shown.count)) * 34))
+                Text("\(picked.intersection(fs.map(\.identity)).count) of \(fs.count) ticked").font(.caption2).foregroundStyle(.secondary)
+            }
+            Divider()
+            Toggle("Only when it just became true", isOn: $fresh).toggleStyle(.checkbox)
+            HStack {
+                Text(fm.running ? "Working… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing matched yet" : "Judged on \(fm.coverage)"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Recalculate") { fm.ensure(vm, force: true) }
+            }
+        }
+        .padding(12)
+        .frame(width: 460)
     }
 
     private var label: String {
         if auto { return "all formulas" }
-        let n = [f1, f2].filter { !$0.isEmpty }.count
-        return n == 0 ? "pick formula" : (n == 1 ? short(fm.name(f1.isEmpty ? f2 : f1), 22) : fm.label(f1) + " · " + fm.label(f2))
+        let n = picked.count
+        return n == 0 ? "tick formulas" : "\(n) formula\(n == 1 ? "" : "s")"
     }
-    private func short(_ s: String, _ n: Int = 48) -> String { s.count > n ? String(s.prefix(n - 1)) + "…" : s }
 }
 
 /// Permanent formula numbers: 1F, 2F, … given once and kept (shown in Formula counts, F marks, Quick, Lead-time).

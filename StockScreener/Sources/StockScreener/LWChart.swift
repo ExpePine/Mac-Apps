@@ -29,7 +29,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals — total buy (green) / sell (red) ₹ Cr per day, strip at the top"
-        case .fmark: return "F — days your chosen formula(s) were true (pick them next to the F button)"
+        case .fmark: return "Formula marks — days your formulas were true (1F11 = formula 1, true for 11 other stocks); choose which formulas next to the Formula button"
         case .zpmark: return "▲ZP — days Z_PRANK (ta.percentrank of the Steep z, 300) is \(ZPLevel.text)"
         case .steep: return "Sustained steepness — steep when \(Steep.source == "delsma" ? "DELSMA" : "EMA\(Steep.ema)(delivery value)") rose \(Steep.span)-day faster than \(Steep.trig)σ above its \(Steep.norm)-day normal — z, run and energy in the legend (not drawn)"
         }
