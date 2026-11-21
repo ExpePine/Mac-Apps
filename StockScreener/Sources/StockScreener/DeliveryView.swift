@@ -37,6 +37,7 @@ struct DeliveryView: View {
     @ObservedObject private var newsTL = NewsTimeline.shared
     @ObservedObject private var i5m = Intraday5mCenter.shared
     @ObservedObject private var dealsC = DealsCenter.shared
+    @ObservedObject private var fmarks = FormulaMarks.shared
     @AppStorage("t3.rev") private var t3Rev = 0
     @Environment(\.colorScheme) private var colorScheme
 
@@ -249,6 +250,7 @@ struct DeliveryView: View {
                         ChartStyleButton().controlSize(.small)
                         DelsmacLevelControl(level: $mainShadeLevel).controlSize(.small)
                         ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize()
+                        if ChartLayer.decode(layersRaw).contains(.fmark) { FormulaMarkControl().controlSize(.small) }
                     }
                     Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
@@ -298,6 +300,7 @@ struct DeliveryView: View {
         .onChange(of: t3Rev) { _ in pushChart() }
         .onChange(of: newsTL.revision) { _ in pushChart() }
         .onChange(of: dealsC.revision) { _ in pushChart() }
+        .onChange(of: fmarks.revision) { _ in pushChart() }
         .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1800) } }
     }
 
@@ -474,6 +477,7 @@ struct DeliveryMiniChart: View {
     @AppStorage("sync.offsetBars") private var syncOffset = 0
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
+    @ObservedObject private var fmarks = FormulaMarks.shared
     @AppStorage("steep.span") private var steepSpan = 5
     @AppStorage("zp.level") private var zpLevel = 99.0
     @AppStorage("steep.source") private var steepSource = "delsma"
@@ -488,6 +492,7 @@ struct DeliveryMiniChart: View {
         case .hit3: return "HI/T3"
         case .dsmark: return "▲DS"
         case .zpmark: return "▲ZP"
+        case .fmark: return "F"
         case .deals: return "Deals"
         case .steep: return "Steep"
         default: return "Shade"
@@ -578,7 +583,7 @@ struct DeliveryMiniChart: View {
                 if !showChart3 {
                     let L = ChartLayer.decode(layersRaw)
                     HStack(spacing: 2) {
-                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .zpmark, .deals, .steep], id: \.self) { layer in
+                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .zpmark, .fmark, .deals, .steep], id: \.self) { layer in
                             Toggle(Self.quickName(layer), isOn: Binding(get: { L.contains(layer) }, set: { on in
                                 var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
                                 layersRaw = ChartLayer.encode(x)
@@ -587,6 +592,7 @@ struct DeliveryMiniChart: View {
                             .help(layer.label(metric.pine, length))
                         }
                         if L.contains(.zpmark) { ZPLevelControl(level: $zpLevel).controlSize(.mini).fixedSize() }
+                        if L.contains(.fmark) { FormulaMarkControl().controlSize(.mini) }
                         if L.contains(.deals) { dealsNote }
                         if L.contains(.steep) {
                             Menu {
@@ -634,6 +640,7 @@ struct DeliveryMiniChart: View {
         .onAppear { dc.loadIfNeeded(); push() }
         .task(id: symbol + "|" + (focus ?? "")) { push() }
         .onChange(of: dc.revision) { _ in push() }
+        .onChange(of: fmarks.revision) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: basis) { _ in push() }

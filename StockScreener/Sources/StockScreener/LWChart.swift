@@ -9,7 +9,7 @@ import WebKit
 
 /// The things that can be drawn on the delivery charts — each one can be switched on / off.
 enum ChartLayer: String, CaseIterable, Identifiable {
-    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals, steep, zpmark
+    case candles, deliv, high, bands, markers, prank, sma22, sma66, per, t3, del2c, hit3, shade, dsmark, news, deals, steep, zpmark, fmark
     var id: String { rawValue }
     func label(_ metric: String, _ length: Int) -> String {
         switch self {
@@ -29,6 +29,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .dsmark: return "Green ▲DS under the bar on days DELSMAC > \(String(format: "%g", DelsmacShade.level))"
         case .news: return "News (3–4 word labels, blue ●)"
         case .deals: return "Bulk / block deals — total buy (green) / sell (red) ₹ Cr per day, strip at the top"
+        case .fmark: return "F — days your chosen formula(s) were true (pick them next to the F button)"
         case .zpmark: return "▲ZP — days Z_PRANK (ta.percentrank of the Steep z, 300) is \(ZPLevel.text)"
         case .steep: return "Sustained steepness — steep when \(Steep.source == "delsma" ? "DELSMA" : "EMA\(Steep.ema)(delivery value)") rose \(Steep.span)-day faster than \(Steep.trig)σ above its \(Steep.norm)-day normal — z, run and energy in the legend (not drawn)"
         }
@@ -49,6 +50,7 @@ enum ChartLayer: String, CaseIterable, Identifiable {
         case .deals: return .purple
         case .steep: return Color(red: 0.6, green: 1, blue: 0.2)
         case .zpmark: return Color(red: 0.78, green: 1, blue: 0)
+        case .fmark: return Color(red: 0.88, green: 0.25, blue: 0.98)
         case .bands, .markers: return .orange
         default: return nil
         }
@@ -421,6 +423,7 @@ struct LWChartData: Encodable {
     @MainActor static func eventMarkers(_ symbol: String, layers: Set<ChartLayer>, from: String = "") -> [Marker] {
         var out: [Marker] = []
         let sym = symbol.uppercased()
+        if layers.contains(.fmark) { out += FormulaMarks.shared.markers(sym, from: from) }
         if layers.contains(.news) {
             let codes = EventCodes.all
             let minImpact = NewsImpact.minimum
