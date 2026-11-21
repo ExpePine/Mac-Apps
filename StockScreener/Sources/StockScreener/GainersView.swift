@@ -74,6 +74,9 @@ struct GainersView: View {
             }
         }
         .navigationTitle("Daily Gainers")
+        // Quick takes its pictures in pages hidden under this window's content (they must be in a visible window to draw)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .background(QuickCaptureHost().allowsHitTesting(false))
         .task { await LiveQuotes.shared.keepLive(vm) }             // live Yahoo prices for every stock
         .task {
             while !Task.isCancelled {
@@ -265,8 +268,7 @@ struct GainersView: View {
                 .help("All your picks in one place, with returns since (⌥⌘P)")
             Button { UserDefaults.standard.set(ReelSource.gainers.rawValue, forKey: "reel.source"); openWindow(id: "reel") } label: { Label("Chart Reel", systemImage: "film.stack") }
                 .help("Flick through these gainers' charts with a slider (⌥⌘R)")
-            Button { openWindow(id: "quick") } label: { Label("Quick", systemImage: "square.grid.3x3") }
-                .help("Pictures of Chart 1, Chart 2 and the delivery chart of these gainers in a 2×2 or 3×3 grid — refreshed every hour")
+            QuickButton()
             Button { openWindow(id: "delchart") } label: { Label("DEL chart", systemImage: "chart.bar.xaxis") }
                 .help("The whole market's delivered value per day (Σ DELIV_QTY × CLOSE), with traded value, delivery % and Nifty 50")
             OpenMenu()
