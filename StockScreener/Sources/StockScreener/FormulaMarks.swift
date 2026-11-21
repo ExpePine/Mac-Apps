@@ -75,12 +75,10 @@ import AppKit
             for (d, v) in m { if let v { per[d] = Set(v) } }
             // "only when it just became true" for every formula (a formula's own tick is already applied by Formula counts)
             if freshAll && !f.fresh {
-                var n: [String: Set<String>] = [:]
-                for (k, d) in days.enumerated() where k > 0 {
-                    guard let cur = per[d], let prev = per[days[k - 1]] else { continue }
-                    n[d] = cur.subtracting(prev)
-                }
-                per = n
+                let all = Array(Set(m.keys)).sorted()
+                let starts = FormulaDaysCenter.runStarts(m, days: all, mode: FormulaDaysCenter.freshMode, gap: FormulaDaysCenter.freshGap)
+                per = [:]
+                for (d, v) in starts { if let v, !v.isEmpty { per[d] = Set(v) } }
             }
             out[f.key] = per
         }
@@ -211,6 +209,7 @@ struct FormulaMarkControl: View {
             }
             Divider()
             Toggle("Only when it just became true", isOn: $fresh).toggleStyle(.checkbox)
+            FreshModePicker { fm.ensure(vm, force: true) }
             HStack {
                 Text(fm.running ? "Counting… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing counted yet" : "Uses \(fm.coverage) (set Days in Formula counts)"))
                     .font(.caption).foregroundStyle(.secondary)
@@ -334,4 +333,35 @@ struct FormulaWorkbench: View {
     }
 
     func close() { panel?.orderOut(nil) }
+}
+
+/// What "just became true" means — shared by Formula counts and the Formula marks.
+struct FreshModePicker: View {
+    var changed: () -> Void = {}
+    @EnvironmentObject var vm: ScreenerViewModel
+    @AppStorage("fresh.mode") private var mode = 0
+    @AppStorage("fresh.gap") private var gap = 5
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("\"Just became true\" =", selection: $mode) {
+                Text("true that day, not the day before").tag(0)
+                Text("the original first day of the run").tag(1)
+            }
+            .help("The first: a stock that drops out for a day and comes back is marked again (often late in a rise). The second walks back while the condition kept being true and marks the day it originally became true.")
+            if mode == 1 {
+                Stepper("A run survives gaps of up to \(gap) day\(gap == 1 ? "" : "s")", value: $gap, in: 0...30)
+                    .help("Days the condition may be false in between and still count as the same run")
+            }
+        }
+        .font(.caption)
+        .onChange(of: mode) { _ in recount() }
+        .onChange(of: gap) { _ in recount() }
+    }
+
+    private func recount() {
+        changed()
+        let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+        FormulaDaysCenter.shared.run(vm, lastDays: max(1, n))
+    }
 }

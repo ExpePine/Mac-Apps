@@ -132,8 +132,9 @@ struct FFormula: Identifiable, Hashable {
         let stored = Array(storedAll.suffix(max(1, lastDays)))
         days = stored + [liveKey]
         // "just became true" formulas also need the day before the first one shown
-        let before = fs.contains { $0.orig.fresh } ? storedAll.dropLast(stored.count).last : nil
-        let evalDays = (before.map { [$0] } ?? []) + days
+        let before: [String] = (fs.contains { $0.orig.fresh } || UserDefaults.standard.bool(forKey: "fmarks.fresh"))
+            ? Array(storedAll.dropLast(stored.count).suffix(Self.freshLookback)) : []
+        let evalDays = before + days
         running = true; progress = 0
         task = Task { @MainActor in
             var result: [String: [String: [String]?]] = [:]
@@ -172,22 +173,50 @@ struct FFormula: Identifiable, Hashable {
         }
     }
 
-    /// For "just became true" formulas: keep a stock on a day only if it didn't meet the formula the day before.
-    /// Unknown when either day can't be judged; the very first day (nothing before it) stays unknown too.
+    /// What "just became true" means (set in Formula counts / the Formula marks menu):
+    /// 0 = true that day, not the day before · 1 = the original first day of the run — a stock that drops out for up
+    /// to `freshGap` days and comes back is still the same run, so it isn't marked again at the end of a rise.
+    static var freshMode: Int { UserDefaults.standard.integer(forKey: "fresh.mode") }
+    static var freshGap: Int { UserDefaults.standard.object(forKey: "fresh.gap") as? Int ?? 5 }
+    /// Extra earlier days judged so a run that began before the first day shown is recognised (and not marked late).
+    static var freshLookback: Int { freshMode == 1 ? freshGap + 30 : 1 }
+
+    /// For "just became true" formulas: keep a stock only on the day its run began.
     static func freshOnly(_ r: [String: [String: [String]?]], _ fs: [FFormula], _ days: [String]) -> [String: [String: [String]?]] {
         var out = r
         for f in fs where f.fresh {
             guard let m = r[f.key] else { continue }
-            var n: [String: [String]?] = [:]
+            out[f.key] = runStarts(m, days: days, mode: freshMode, gap: freshGap)
+        }
+        return out
+    }
+
+    /// Day → stocks whose run (of days meeting a formula) began that day.
+    /// mode 0: began = not true the day before (unknown when either day can't be judged; the first day stays unknown).
+    /// mode 1: began = not true in any of the `gap` days before (gaps of up to `gap` days don't end a run).
+    static func runStarts(_ m: [String: [String]?], days: [String], mode: Int, gap: Int) -> [String: [String]?] {
+        var n: [String: [String]?] = [:]
+        if mode == 0 {
             for (k, d) in days.enumerated() {
-                guard let cur = m[d] else { continue }                       // not computed yet
+                guard let cur = m[d] else { continue }
                 guard k > 0, let curS = cur, let prevE = m[days[k - 1]], let prev = prevE else { n[d] = .some(nil); continue }
                 let was = Set(prev)
                 n[d] = .some(curS.filter { !was.contains($0) })
             }
-            out[f.key] = n
+            return n
         }
-        return out
+        var lastTrue: [String: Int] = [:]
+        for (k, d) in days.enumerated() {
+            guard let cur = m[d] else { continue }
+            guard let curS = cur else { n[d] = .some(nil); continue }
+            var starts: [String] = []
+            for sym in curS {
+                if let l = lastTrue[sym], k - l - 1 <= gap { } else if k > 0 { starts.append(sym) }
+                lastTrue[sym] = k
+            }
+            n[d] = k > 0 ? .some(starts) : .some(nil)       // the first day: can't tell if the run began earlier
+        }
+        return n
     }
 
     /// Symbols meeting the formula in `t`; nil when a column it uses has no values that day.
@@ -716,8 +745,9 @@ struct FormulaEditor: View {
                 .frame(height: 24)
             Text("+ or and = AND · | or or = OR · NOT col · col>5, col=1, col<0.9 … column names as in the Filter").font(.caption2).foregroundStyle(.secondary)
             if start?.alertID == nil {
-                Toggle("Only when it just became true — true on the day, not true the previous day", isOn: $fresh)
+                Toggle("Only when it just became true", isOn: $fresh)
                     .help("Counts (and measures success of) a stock only on the day the formula turned true, not on every day it stays true")
+                if fresh { FreshModePicker().padding(.leading, 20) }
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             else if let now { Text("\(now) stocks meet it today").font(.caption).foregroundStyle(.green) }
