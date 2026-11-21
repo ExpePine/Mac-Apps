@@ -455,6 +455,8 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     @Published var dealDay: String?
     /// A ▲ZP day the user clicked (opens the stock's z values ranked).
     @Published var zpDay: String?
+    /// An F mark the user clicked (opens Quick with the other stocks the formula was true for that day).
+    @Published var fmDay: String?
     /// Called when YOU pan / zoom this chart: first and last visible day ("yyyy-MM-dd").
     var onUserRange: ((String, String) -> Void)?
 
@@ -476,6 +478,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         ucc.add(WeakHandler(self), name: "cross")
         ucc.add(WeakHandler(self), name: "deal")
         ucc.add(WeakHandler(self), name: "zp")
+        ucc.add(WeakHandler(self), name: "fm")
         view.navigationDelegate = self
         view.setValue(false, forKey: "drawsBackground")
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
@@ -495,6 +498,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
     func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
         if m.name == "deal" { if let d = m.body as? String, !d.isEmpty { dealDay = d }; return }
         if m.name == "zp" { if let d = m.body as? String, !d.isEmpty { zpDay = d }; return }
+        if m.name == "fm" { if let d = m.body as? String, !d.isEmpty { fmDay = d }; return }
         if m.name == "cross" { let d = m.body as? String; let v = (d?.isEmpty ?? true) ? nil : d; if v != crossDay { crossDay = v }; return }
         if m.name == "hover" { let l = (m.body as? [String]) ?? []; if l != hoverLines { hoverLines = l }; return }
         guard let a = m.body as? [String], a.count == 2 else { return }
@@ -612,6 +616,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         var oid=p.hoveredObjectId?String(p.hoveredObjectId):'';
         var isDeal=(window._db&&window._db[k])||(window._dsl&&window._dsl[k]), isZP=window._zp&&window._zp[k];
         if(oid.indexOf('zp|')===0 && h.zp) { h.zp.postMessage(oid.slice(3)); return; }
+        if(oid.indexOf('fm|')===0 && h.fm) { h.fm.postMessage(oid.slice(3)); return; }
         if(oid.indexOf('deal|')===0 && h.deal) { h.deal.postMessage(oid.slice(5)); return; }
         if(isDeal && h.deal) h.deal.postMessage(k);
         else if(isZP && h.zp) h.zp.postMessage(k);

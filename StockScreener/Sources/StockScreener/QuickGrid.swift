@@ -24,6 +24,24 @@ import AppKit
     private var job: Task<Void, Never>?
     private var hourly: Timer?
     private var done = 0, total = 0
+    private var gen = 0
+    private weak var vm: ScreenerViewModel?
+    /// Set when Quick shows a list (e.g. the other stocks an F formula was true for) instead of today's gainers.
+    @Published private(set) var listTitle: String?
+    @Published private(set) var listDay: String?
+    private var listSymbols: [String] = []
+
+    func showList(title: String, day: String, symbols: [String]) {
+        listTitle = title; listDay = day; listSymbols = symbols
+        restart()
+    }
+    func backToGainers() { listTitle = nil; listDay = nil; listSymbols = []; restart() }
+    private func restart() {
+        job?.cancel(); job = nil; gen += 1
+        teardown()
+        running = false; progress = ""; tiles = []
+        if let vm, host?.window != nil { refresh(vm) }
+    }
 
     var maxStocks: Int { let v = UserDefaults.standard.integer(forKey: "quick.max"); return v > 0 ? v : 18 }
     var maxWait: Double { let v = UserDefaults.standard.double(forKey: "quick.maxWait"); return v > 0 ? v : 15 }
@@ -38,6 +56,7 @@ import AppKit
 
     /// Starts now and then every hour while the Quick window is open.
     func begin(_ vm: ScreenerViewModel) {
+        self.vm = vm
         refresh(vm)
         hourly?.invalidate()
         hourly = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -47,7 +66,7 @@ import AppKit
 
     func end() {
         hourly?.invalidate(); hourly = nil
-        job?.cancel(); job = nil
+        job?.cancel(); job = nil; gen += 1
         teardown()
         running = false; progress = ""
     }
@@ -57,13 +76,26 @@ import AppKit
     func refresh(_ vm: ScreenerViewModel) {
         guard !running else { return }
         guard host?.window != nil else { progress = "Open the Quick window to take pictures."; return }
-        let day = vm.currentGainerDay
-        var seen = Set<String>()
-        let list = Array(vm.gainers(on: day).filter { seen.insert($0.symbol).inserted }.prefix(maxStocks))
-        guard !list.isEmpty else { progress = "No gainers on \(day) with the current Daily Gainers settings."; return }
+        self.vm = vm
+        var list: [(symbol: String, change: Double)]
+        if listTitle != nil, let from = listDay {
+            // a list: change % = since that day
+            list = listSymbols.prefix(36).map { s in
+                let then = ScreenerViewModel.close(of: s, on: from, prices: vm.priceBook.series(for: s), nse: DeliveryCenter.shared.book.series[s])
+                let now = ScreenerViewModel.close(of: s, on: "9999-12-31", prices: vm.priceBook.series(for: s), nse: DeliveryCenter.shared.book.series[s])
+                let ch: Double = { if let a = then, let b = now, a > 0 { return (b / a - 1) * 100 }; return 0 }()
+                return (s, ch)
+            }
+        } else {
+            let day = vm.currentGainerDay
+            var seen = Set<String>()
+            list = vm.gainers(on: day).filter { seen.insert($0.symbol).inserted }.prefix(maxStocks).map { ($0.symbol, $0.change) }
+            guard !list.isEmpty else { progress = "No gainers on \(day) with the current Daily Gainers settings."; return }
+        }
         let old = Dictionary(tiles.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         tiles = list.map { g in var t = old[g.symbol] ?? Tile(id: g.symbol, change: g.change); t.change = g.change; return t }
         running = true
+        let myGen = gen
         let syms = list.map(\.symbol)
         let want = charts
         let par = parallel
@@ -75,10 +107,11 @@ import AppKit
                     let lanes = c == 2 ? 1 : par
                     for lane in 0..<lanes {
                         let mine = syms.enumerated().filter { $0.offset % lanes == lane }.map(\.element)
-                        group.addTask { @MainActor in await self.worker(vm, chart: c, symbols: mine) }
+                        group.addTask { @MainActor in await self.worker(vm, chart: c, symbols: mine, gen: myGen) }
                     }
                 }
             }
+            guard myGen == gen else { return }      // replaced by a newer run
             teardown()
             let secs = Int(Date().timeIntervalSince(started))
             lastRun = "\(done) pictures in \(secs / 60)m \(secs % 60)s"
@@ -87,10 +120,11 @@ import AppKit
         }
     }
 
-    private func worker(_ vm: ScreenerViewModel, chart c: Int, symbols: [String]) async {
+    private func worker(_ vm: ScreenerViewModel, chart c: Int, symbols: [String], gen g: Int) async {
         for sym in symbols {
-            if Task.isCancelled { return }
+            if Task.isCancelled || g != gen { return }
             let img = c == 2 ? await deliveryPicture(vm, sym) : await tvPicture(vm, sym, chart: c)
+            guard g == gen else { return }
             done += 1
             progress = "\(done)/\(total) · \(sym) \(c == 2 ? "Delivery" : "Chart \(c + 1)")"
             if let img, let i = tiles.firstIndex(where: { $0.id == sym }) { tiles[i].images[c] = img }
@@ -237,6 +271,15 @@ struct QuickGridView: View {
 
     private var main: some View {
         VStack(spacing: 6) {
+            if let t = q.listTitle {
+                HStack {
+                    Image(systemName: "function").foregroundStyle(.purple)
+                    Text(t).font(.callout.bold()).lineLimit(1)
+                    Text("· % = change since \(q.listDay ?? "")").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Back to gainers") { page = 0; q.backToGainers() }
+                }
+            }
             HStack(spacing: 10) {
                 Picker("", selection: $grid) { Text("2 × 2").tag(2); Text("3 × 3").tag(3) }.pickerStyle(.segmented).fixedSize()
                 Toggle("Chart 1", isOn: $c1); Toggle("Chart 2", isOn: $c2); Toggle("Delivery", isOn: $deliv)
@@ -267,6 +310,7 @@ struct QuickGridView: View {
             Spacer(minLength: 0)
         }
         .padding(8)
+        .onChange(of: q.listTitle) { _ in page = 0 }
         .onChange(of: pageSec) { _ in retime() }
         .onChange(of: tileSec) { _ in retime() }
         .onReceive(pageTimer) { _ in if pageSec > 0 && pages > 1 { page = (page + 1) % pages } }

@@ -80,6 +80,18 @@ import SwiftUI
 
     func name(_ key: String) -> String { names[key] ?? key }
 
+    /// The other stocks the chosen formula(s) — the ones true for `symbol` that day — were true for on `day`.
+    func others(_ symbol: String, _ day: String) -> (title: String, symbols: [String]) {
+        let sym = symbol.uppercased()
+        var set = Set<String>(), which: [String] = []
+        for (i, k) in [f1, f2].enumerated() where !k.isEmpty {
+            guard let s = hits[k]?[day], s.contains(sym) else { continue }
+            set.formUnion(s); which.append("F\(i + 1) " + name(k))
+        }
+        set.remove(sym)
+        return (which.joined(separator: " · "), set.sorted())
+    }
+
     /// Markers for one stock: F (one formula) or F1 / F2 / F1+2 above the candle.
     func markers(_ symbol: String, from: String = "") -> [LWChartData.Marker] {
         let sym = symbol.uppercased()
@@ -90,10 +102,13 @@ import SwiftUI
         var out: [LWChartData.Marker] = []
         for day in d1.union(d2).sorted() where day >= from {
             let a = d1.contains(day), b = d2.contains(day)
-            let text = !two ? "F" : (a && b ? "F1+2" : (a ? "F1" : "F2"))
+            let n = others(sym, day).symbols.count
+            let tag = !two ? "F" : (a && b ? "F1+2" : (a ? "F1" : "F2"))
+            let text = n > 0 ? "\(tag) \(n)" : tag
             let color = a && b ? "#FFD600" : (a ? "#E040FB" : "#00B8D4")
             let info = [a ? "F1 · \(name(k1))" : nil, b ? "F2 · \(name(k2))" : nil].compactMap { $0 }.joined(separator: "  ·  ")
-            out.append(LWChartData.Marker(time: day, text: text, position: "aboveBar", color: color, shape: "arrowDown", info: info))
+                + (n > 0 ? " — also true for \(n) other stock\(n == 1 ? "" : "s") (click to see them)" : "")
+            out.append(LWChartData.Marker(time: day, text: text, position: "aboveBar", color: color, shape: "arrowDown", info: info, id: "fm|" + day))
         }
         return out
     }

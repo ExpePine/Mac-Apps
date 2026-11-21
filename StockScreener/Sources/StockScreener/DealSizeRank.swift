@@ -153,6 +153,7 @@ struct ZValueRankView: View {
 struct DealRankPopup: ViewModifier {
     @ObservedObject var holder: LWChartHolder
     let symbol: String
+    @Environment(\.openWindow) private var openWindow
     struct Pick: Identifiable { let id: String; let zp: Bool }
     func body(content: Content) -> some View {
         content.sheet(item: Binding(get: {
@@ -161,6 +162,15 @@ struct DealRankPopup: ViewModifier {
             return nil
         }, set: { if $0 == nil { holder.dealDay = nil; holder.zpDay = nil } })) { p in
             if p.zp { ZValueRankView(symbol: symbol, day: p.id) } else { DealSizeRankView(symbol: symbol, day: p.id) }
+        }
+        .onChange(of: holder.fmDay) { d in
+            guard let d else { return }
+            holder.fmDay = nil
+            let o = FormulaMarks.shared.others(symbol, d)
+            guard !o.symbols.isEmpty else { return }
+            QuickCenter.shared.showList(title: "\(o.title) — true on \(d) for \(o.symbols.count) other stock\(o.symbols.count == 1 ? "" : "s") besides \(symbol.uppercased())",
+                                        day: d, symbols: o.symbols)
+            openWindow(id: "quick")
         }
     }
 }
