@@ -46,6 +46,15 @@ import AppKit
         }.store(in: &bag)
     }
 
+    /// Full formula mode: judge formulas on every stored day (all the candles the chart shows that have a stored sheet),
+    /// not just Formula counts' Days.
+    static var full: Bool { UserDefaults.standard.bool(forKey: "fmarks.full") }
+    /// Days Formula counts should count: its Days setting, or every stored day in Full mode.
+    static var countDays: Int {
+        let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+        return full ? max(n, HistoryStore.days().count) : n
+    }
+
     /// Picks the formulas to show; asks Formula counts to count if it hasn't counted them yet.
     func ensure(_ vm: ScreenerViewModel, force: Bool = false) {
         self.vm = vm
@@ -57,8 +66,10 @@ import AppKit
             wanted = fc.formulas(vm, includeHidden: true).filter { p.contains($0.identity) }.sorted { $0.num < $1.num }
         }
         let missing = wanted.contains { fc.counts[$0.key] == nil }
-        if (force || missing || fc.days.isEmpty) && !fc.running && !wanted.isEmpty {
-            let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+        // Full mode: every stored day must be counted (Formula counts' window is widened to all of them)
+        let short = fc.days.count < min(Self.countDays, HistoryStore.days().count) + 1 && Self.full
+        if (force || missing || short || fc.days.isEmpty) && !fc.running && !wanted.isEmpty {
+            let n = FormulaMarks.countDays
             fc.run(vm, lastDays: max(1, n))
         }
         rebuild()
@@ -139,12 +150,17 @@ struct FormulaMarkControl: View {
     @ObservedObject private var fm = FormulaMarks.shared
     @AppStorage("fmarks.fresh") private var fresh = false
     @AppStorage("fmarks.auto") private var auto = true
+    @AppStorage("fmarks.full") private var full = false
     @State private var picked: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "fmarks.picked") ?? [])
     @State private var open = false
     @State private var search = ""
 
     var body: some View {
         HStack(spacing: 4) {
+            Toggle(isOn: $full) { Text("Full").font(.caption2.bold()) }
+                .toggleStyle(.button)
+                .help("Full formula mode: every selected formula on every day the app has a stored sheet for — all the way back on this chart, not just Formula counts' last \(UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60) days. Turning it on widens Formula counts to the same days.")
+                .onChange(of: full) { _ in fm.ensure(vm, force: true) }
             menuButton
             Button { fm.chartSymbol = symbol; FormulaWorkbenchPanel.shared.show(vm) } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless)
@@ -299,7 +315,7 @@ struct FormulaWorkbench: View {
     }
 
     private func recount() {
-        let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+        let n = FormulaMarks.countDays
         c.run(vm, lastDays: max(1, n))
         fm.ensure(vm)
     }
@@ -361,7 +377,7 @@ struct FreshModePicker: View {
 
     private func recount() {
         changed()
-        let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+        let n = FormulaMarks.countDays
         FormulaDaysCenter.shared.run(vm, lastDays: max(1, n))
     }
 }
