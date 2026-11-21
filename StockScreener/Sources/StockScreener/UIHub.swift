@@ -33,6 +33,7 @@ enum AppWindows {
             AppWindow(title: "DEL chart", id: "delchart", icon: "chart.bar.xaxis", shortcut: "", note: "market-wide delivered vs traded value"),
             AppWindow(title: "Multibaggers", id: "multibaggers", icon: "chart.line.uptrend.xyaxis.circle", shortcut: "⌥⌘M", note: "≥ 30% in a month"),
             AppWindow(title: "F Notes", id: "mbnotes", icon: "note.text", shortcut: "⌥⇧⌘N", note: "your notes per multibagger + patterns"),
+            AppWindow(title: "Quick", id: "quick", icon: "square.grid.3x3", shortcut: "", note: "today's gainers' charts as pictures, 2×2 or 3×3, refreshed hourly"),
             AppWindow(title: "Lead-time matrix", id: "leadtime", icon: "timer", shortcut: "", note: "which condition turns true closest before a ≥30% move"),
             AppWindow(title: "Weights", id: "weights", icon: "scalemass", shortcut: "", note: "your and learned weights for colour rules"),
             AppWindow(title: "F Formula Counts", id: "fdays", icon: "chart.bar.doc.horizontal", shortcut: "", note: "stocks meeting each F formula, per day"),

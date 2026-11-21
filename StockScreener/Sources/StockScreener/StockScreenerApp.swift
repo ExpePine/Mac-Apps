@@ -136,6 +136,12 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
 
+        Window("Quick", id: "quick") {
+            QuickGridView()
+                .environmentObject(vm)
+                .frame(minWidth: 900, minHeight: 600)
+        }
+
         Window("Lead-time matrix", id: "leadtime") {
             LeadTimeView()
                 .environmentObject(vm)
