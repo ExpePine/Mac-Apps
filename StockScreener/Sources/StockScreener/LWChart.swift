@@ -139,6 +139,7 @@ struct LWChartData: Encodable {
     var high: [Point] = []
     var bands: [Point] = []
     var markers: [Marker] = []
+    var fpills: [Marker] = []         // formula pills (1F11 …): drawn as badges in their own lane above the delivery pane
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
     var dealSell: [Point] = []
@@ -294,7 +295,8 @@ struct LWChartData: Encodable {
                 d.deliv = d.deliv.map { Point(time: $0.time, value: nil) }
             }
         }
-        d.markers += events
+        d.markers += events.filter { $0.id != "fpill" }
+        d.fpills = events.filter { $0.id == "fpill" }
         // Deals: one letter at the candle — B (green, below) on net-buying days, S (red, above) on net-selling days.
         // Golden when that day's total buy (or sell) is the highest of the last 300 trading days (ta.highest(B, 300)).
         let axis: [String] = series?.days ?? []
@@ -542,11 +544,16 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       #legend b{font-size:13px}
       #tip{position:absolute;z-index:6;pointer-events:none;display:none;padding:3px 7px;border-radius:5px;font-size:12px;font-weight:600;
            background:rgba(41,98,255,0.92);color:#fff;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.3)}
+      #fl{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
+      .fp{position:absolute;transform:translateX(-50%);padding:1px 6px;border-radius:9px;font:700 10.5px -apple-system,Helvetica,sans-serif;
+          white-space:nowrap;pointer-events:auto;cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,0.45),0 1px 3px rgba(0,0,0,0.4);line-height:14px}
+      .fp:hover{transform:translateX(-50%) scale(1.15);z-index:9}
+      .fv{position:absolute;width:0;border-left:1px dashed;pointer-events:none;opacity:0.5}
       #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#888}
     </style>
     <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
-    </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="err">Chart library couldn't load (needs internet once).</div>
+    </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="fl"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
     var chart=null, sband, sen, dpr, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
@@ -595,6 +602,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       window._userAt=0;
       var mark=function(e){ if(e.type!=='mousemove' || e.buttons) window._userAt=Date.now(); };
       ['pointerdown','mousedown','wheel','touchstart','touchmove','mousemove'].forEach(function(t){ document.addEventListener(t, mark, {capture:true, passive:true}); });
+      chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ requestAnimationFrame(drawPills); });
       chart.timeScale().subscribeVisibleTimeRangeChange(function(r){
         if(!r || window._quiet) return;
         if(Date.now()-window._userAt > 1500) return;
@@ -730,6 +738,35 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       document.getElementById('legend').innerHTML=s;
       document.getElementById('legend').style.color=dark?'#d1d4dc':'#131722';
     }
+    // Formula pills: one badge per formula day in a clear lane just above the delivery pane, plus a faint guide up to the candle.
+    // Badges that would overlap go to the next row (up to 3); the rest stay hidden until you zoom in.
+    function drawPills(){
+      var el=document.getElementById('fl'); el.innerHTML='';
+      var P=window._fp||[]; if(!chart||!P.length||!last) return;
+      var H=el.clientHeight, W=chart.timeScale().width()||el.clientWidth;
+      var split=((last.style||{}).split||72)/100;
+      var base=last.candles.length?H*split-20:H-40;
+      var rows=[-1e9,-1e9,-1e9], hidden=0;
+      P.forEach(function(p){
+        var x=chart.timeScale().timeToCoordinate(p.time);
+        if(x==null||x<0||x>W) return;
+        var w=p.text.length*6.6+14, r=0;
+        while(r<rows.length && x-w/2<rows[r]+3) r++;
+        if(r>=rows.length){ hidden++; return; }
+        rows[r]=x+w/2;
+        var y=base-r*17, multi=p.color!=='#E040FB';
+        var v=document.createElement('div'); v.className='fv';
+        v.style.left=x+'px'; v.style.top='0px'; v.style.height=Math.max(0,y)+'px'; v.style.borderColor=p.color;
+        el.appendChild(v);
+        var b=document.createElement('div'); b.className='fp'; b.textContent=p.text; b.title=p.info||'';
+        b.style.left=x+'px'; b.style.top=y+'px'; b.style.background=p.color; b.style.color=multi?'#1a1a1a':'#fff';
+        b.onclick=function(){ if(window.webkit&&window.webkit.messageHandlers.fm) window.webkit.messageHandlers.fm.postMessage(p.time); };
+        el.appendChild(b);
+      });
+      if(hidden){ var h=document.createElement('div'); h.className='fp'; h.textContent='+'+hidden+' (zoom in)';
+        h.style.left=(W-50)+'px'; h.style.top=base+'px'; h.style.background='rgba(120,120,120,0.85)'; h.style.color='#fff'; el.appendChild(h); }
+    }
+    window.addEventListener('resize', function(){ requestAnimationFrame(drawPills); });
     window.setData=function(d){
       try { return window._setData(d); }
       catch(e) {
@@ -750,7 +787,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('deliv').applyOptions({scaleMargins:low});
       chart.priceScale('prank').applyOptions({scaleMargins:low, visible:false});
       chart.priceScale('per').applyOptions({scaleMargins:low, visible:false});
-      chart.applyOptions({rightPriceScale:{visible:hasCandles && S.priceScale!==false, scaleMargins:{top:0.06,bottom:Math.max(0.05,1-split+0.03)}},
+      chart.applyOptions({rightPriceScale:{visible:hasCandles && S.priceScale!==false, scaleMargins:{top:0.06,bottom:Math.max(0.05,1-split+0.03)+((d.fpills||[]).length?0.08:0)}},
                           leftPriceScale:{visible:false},
                           grid:{vertLines:{visible:S.grid!==false},horzLines:{visible:S.grid!==false}}});
       candle.applyOptions({upColor:S.up||'#26a69a', downColor:S.down||'#ef5350', wickUpColor:S.up||'#26a69a', wickDownColor:S.down||'#ef5350',
@@ -812,6 +849,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       window._quiet=true;
       if(n && len>n) chart.timeScale().setVisibleLogicalRange({from:len-n,to:len+4}); else chart.timeScale().fitContent();
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350);
+      window._fp=d.fpills||[]; setTimeout(drawPills,30);
       legendLast();
       return 'ok';
     };

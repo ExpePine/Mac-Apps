@@ -113,12 +113,12 @@ import Combine
         var out: [LWChartData.Marker] = []
         for day in byDay.keys.sorted() {
             let ks = active.filter { byDay[day]!.contains($0) }
-            let parts = ks.map { k -> String in let n = (hits[k]?[day]?.count ?? 1) - 1; return label(k) + (n > 0 ? "\(n)" : "") }
-            let text = parts.prefix(4).joined(separator: " ") + (parts.count > 4 ? " +\(parts.count - 4)" : "")
-            let color = ks.count > 1 ? "#FFD600" : "#E040FB"
+            let parts = ks.map { k -> String in let n = (hits[k]?[day]?.count ?? 1) - 1; return label(k) + (n > 0 ? " \(n)" : "") }
+            let text = parts.prefix(3).joined(separator: " · ") + (parts.count > 3 ? " +\(parts.count - 3)" : "")
+            let color = ks.count > 1 ? "#FFC400" : "#E040FB"
             let info = ks.map { k in let n = (hits[k]?[day]?.count ?? 1) - 1; return name(k) + " (\(n) other\(n == 1 ? "" : "s"))" }.joined(separator: "  ·  ")
                 + " — click to see the other stocks"
-            out.append(LWChartData.Marker(time: day, text: text, position: "aboveBar", color: color, shape: "arrowDown", info: info, id: "fm|" + day))
+            out.append(LWChartData.Marker(time: day, text: text, position: "aboveBar", color: color, shape: "arrowDown", info: info, id: "fpill"))
         }
         return out
     }
