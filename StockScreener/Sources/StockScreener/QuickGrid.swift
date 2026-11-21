@@ -4,9 +4,10 @@ import AppKit
 
 /// "Quick": pictures of today's gainers' charts in a 2×2 / 3×3 grid that turns its own pages.
 /// Every hour (and on Refresh) it opens each gainer's Chart 1 / Chart 2 (TradingView) — and optionally its delivery
-/// chart — in a hidden window, waits for them to draw, takes a picture and closes them again (one page at a time,
-/// so memory stays low). Each tile rotates through the stock's pictures; pages of tiles rotate too.
-@MainActor final class QuickCenter: NSObject, ObservableObject, WKNavigationDelegate {
+/// chart — in pages hidden BEHIND the grid of the Quick window (a page in an off-screen window doesn't draw its chart),
+/// waits until the chart shows prices, takes a picture, and moves on. Chart 1, Chart 2 and Delivery run side by side,
+/// optionally with more than one page each.
+@MainActor final class QuickCenter: NSObject, ObservableObject {
     static let shared = QuickCenter()
 
     struct Tile: Identifiable { let id: String; var change: Double; var images: [Int: NSImage] = [:] }   // 0 Chart 1, 1 Chart 2, 2 Delivery
@@ -14,18 +15,19 @@ import AppKit
     @Published private(set) var running = false
     @Published private(set) var progress = ""
     @Published private(set) var updatedAt: Date?
+    @Published private(set) var lastRun = ""
 
-    private var window: NSWindow?
-    private var web: WKWebView?
-    private var webAccount = -1
+    /// The view (inside the Quick window, under the grid) that hosts the pages while pictures are taken.
+    weak var host: NSView?
+    private var pages: [WKWebView] = []
     private var lw: LWChartHolder?
-    private var loaded: CheckedContinuation<Void, Never>?
-    private var loadToken = 0
     private var job: Task<Void, Never>?
     private var hourly: Timer?
+    private var done = 0, total = 0
 
     var maxStocks: Int { let v = UserDefaults.standard.integer(forKey: "quick.max"); return v > 0 ? v : 18 }
-    var renderWait: Double { let v = UserDefaults.standard.double(forKey: "quick.wait"); return v > 0 ? v : 7 }
+    var maxWait: Double { let v = UserDefaults.standard.double(forKey: "quick.maxWait"); return v > 0 ? v : 15 }
+    var parallel: Int { let v = UserDefaults.standard.integer(forKey: "quick.parallel"); return min(3, max(1, v == 0 ? 1 : v)) }
     var charts: [Int] {
         var c: [Int] = []
         if UserDefaults.standard.object(forKey: "quick.c1") as? Bool ?? true { c.append(0) }
@@ -46,114 +48,137 @@ import AppKit
     func end() {
         hourly?.invalidate(); hourly = nil
         job?.cancel(); job = nil
-        finishLoad()
         teardown()
         running = false; progress = ""
     }
 
+    func stop() { job?.cancel() }
+
     func refresh(_ vm: ScreenerViewModel) {
         guard !running else { return }
+        guard host?.window != nil else { progress = "Open the Quick window to take pictures."; return }
         let day = vm.currentGainerDay
         var seen = Set<String>()
         let list = Array(vm.gainers(on: day).filter { seen.insert($0.symbol).inserted }.prefix(maxStocks))
         guard !list.isEmpty else { progress = "No gainers on \(day) with the current Daily Gainers settings."; return }
-        // keep pictures of stocks still in the list; new stocks start empty
         let old = Dictionary(tiles.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         tiles = list.map { g in var t = old[g.symbol] ?? Tile(id: g.symbol, change: g.change); t.change = g.change; return t }
         running = true
+        let syms = list.map(\.symbol)
         let want = charts
+        let par = parallel
+        done = 0; total = syms.count * want.count
+        let started = Date()
         job = Task { @MainActor in
-            for (k, g) in list.enumerated() {
+            await withTaskGroup(of: Void.self) { group in
                 for c in want {
-                    if Task.isCancelled { break }
-                    progress = "\(k + 1)/\(list.count) \(g.symbol) · \(c == 2 ? "Delivery" : "Chart \(c + 1)")"
-                    if let img = await capture(vm, g.symbol, chart: c), let i = tiles.firstIndex(where: { $0.id == g.symbol }) {
-                        tiles[i].images[c] = img
+                    let lanes = c == 2 ? 1 : par
+                    for lane in 0..<lanes {
+                        let mine = syms.enumerated().filter { $0.offset % lanes == lane }.map(\.element)
+                        group.addTask { @MainActor in await self.worker(vm, chart: c, symbols: mine) }
                     }
                 }
             }
             teardown()
+            let secs = Int(Date().timeIntervalSince(started))
+            lastRun = "\(done) pictures in \(secs / 60)m \(secs % 60)s"
             updatedAt = Date(); running = false; progress = ""
             MemoryRelief.giveBack()
         }
     }
 
+    private func worker(_ vm: ScreenerViewModel, chart c: Int, symbols: [String]) async {
+        for sym in symbols {
+            if Task.isCancelled { return }
+            let img = c == 2 ? await deliveryPicture(vm, sym) : await tvPicture(vm, sym, chart: c)
+            done += 1
+            progress = "\(done)/\(total) · \(sym) \(c == 2 ? "Delivery" : "Chart \(c + 1)")"
+            if let img, let i = tiles.firstIndex(where: { $0.id == sym }) { tiles[i].images[c] = img }
+        }
+    }
+
     // MARK: Taking the pictures
 
-    private func host() -> NSView {
-        if let w = window, let v = w.contentView { return v }
-        let w = NSWindow(contentRect: NSRect(x: -30000, y: -30000, width: 1280, height: 760), styleMask: [.borderless], backing: .buffered, defer: false)
-        w.isReleasedWhenClosed = false
-        w.alphaValue = 0.01
-        w.ignoresMouseEvents = true
-        w.orderFrontRegardless()
-        window = w
-        return w.contentView!
-    }
-
     private func teardown() {
-        if let v = web { v.stopLoading(); v.removeFromSuperview(); v.navigationDelegate = nil }
-        web = nil; webAccount = -1
+        for v in pages { v.stopLoading(); v.removeFromSuperview() }
+        pages = []; owned = [:]
         lw?.view.removeFromSuperview(); lw = nil
-        window?.orderOut(nil); window?.close(); window = nil
     }
 
-    private func capture(_ vm: ScreenerViewModel, _ sym: String, chart c: Int) async -> NSImage? {
-        let root = host()
-        if c == 2 {
-            guard let s = DeliveryCenter.shared.book.series[sym] else { return nil }
-            if lw == nil { let h = LWChartHolder(); h.view.frame = root.bounds; root.addSubview(h.view); lw = h }
-            let d = UserDefaults.standard
-            let signal = DeliveryMetric(rawValue: d.string(forKey: "deliv.metric") ?? "") ?? .value
-            let metric = DeliveryChartBasis.metric(signal: signal, basis: d.string(forKey: DeliveryChartBasis.key) ?? "")
-            let layers = ChartLayer.decode(d.string(forKey: "viewer.delivLayers") ?? "")
-            let length = d.object(forKey: "deliv.length") as? Int ?? 300
-            let full = d.object(forKey: "deliv.full") as? Bool ?? true
-            let rises = d.object(forKey: "deliv.onlyRises") as? Bool ?? true
-            let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let candles = CandleCache.shared.candles(sym) ?? DeliveryMiniChart.candles(vm.priceBook.series(for: sym), nse: s)
-            let data = LWChartData.make(symbol: sym, series: s, candles: candles, metric: metric, length: max(2, length),
-                                        full: full, onlyRises: rises, range: "6M", dark: dark,
-                                        calendar: DeliveryCenter.shared.calendar, layers: layers,
-                                        events: LWChartData.eventMarkers(sym, layers: layers),
-                                        deals: LWChartData.dealBars(sym, layers: layers))
-            lw?.show(data)
-            try? await Task.sleep(nanoseconds: 2_500_000_000)     // first time the chart page itself loads
-            guard let v = lw?.view else { return nil }
-            return await snap(v)
-        }
+    private func newPage(account: Int) -> WKWebView? {
+        guard let root = host else { return nil }
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = TVAccounts.store(account)
+        TVPopupBlocker.install(config)
+        let v = WKWebView(frame: root.bounds, configuration: config)
+        v.autoresizingMask = [.width, .height]
+        v.customUserAgent = WebHolder.userAgent
+        root.addSubview(v)
+        pages.append(v)
+        return v
+    }
+
+    /// True once TradingView's legend shows prices (O 123.4 H 125 L …) instead of "O∅ H∅ L∅".
+    private static let readyJS = """
+    (() => { const t = document.body ? document.body.innerText : '';
+      return /O\\s*[0-9][0-9,.]*\\s*H\\s*[0-9][0-9,.]*\\s*L\\s*[0-9]/.test(t); })()
+    """
+
+    private func tvPicture(_ vm: ScreenerViewModel, _ sym: String, chart c: Int) async -> NSImage? {
         guard let url = vm.chartURL(sym, column: min(c, max(0, vm.chartCount - 1))) else { return nil }
-        let acct = TVAccounts.account(forChart: c)
-        if web == nil || webAccount != acct {
-            if let v = web { v.stopLoading(); v.removeFromSuperview() }
-            let config = WKWebViewConfiguration()
-            config.websiteDataStore = TVAccounts.store(acct)
-            TVPopupBlocker.install(config)
-            let v = WKWebView(frame: root.bounds, configuration: config)
-            v.customUserAgent = WebHolder.userAgent
-            v.navigationDelegate = self
-            root.addSubview(v)
-            web = v; webAccount = acct
+        guard let v = pageFor(sym: sym, chart: c) else { return nil }
+        v.load(URLRequest(url: url))
+        let deadline = Date().addingTimeInterval(maxWait)
+        var ready = false
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        while Date() < deadline && !Task.isCancelled {
+            if (try? await v.evaluateJavaScript(Self.readyJS)) as? Bool == true { ready = true; break }
+            try? await Task.sleep(nanoseconds: 400_000_000)
         }
-        guard let v = web else { return nil }
-        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in
-            loaded = k
-            loadToken += 1
-            let token = loadToken
-            v.load(URLRequest(url: url))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in     // give up waiting
-                guard let self, self.loadToken == token else { return }
-                self.finishLoad()
-            }
-        }
-        try? await Task.sleep(nanoseconds: UInt64(renderWait * 1_000_000_000))      // TradingView draws after "loaded"
+        try? await Task.sleep(nanoseconds: ready ? 900_000_000 : 0)    // let the candles finish drawing
         return await snap(v)
     }
 
-    private func finishLoad() { loaded?.resume(); loaded = nil }
-    nonisolated func webView(_ w: WKWebView, didFinish n: WKNavigation!) { Task { @MainActor in self.finishLoad() } }
-    nonisolated func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) { Task { @MainActor in self.finishLoad() } }
-    nonisolated func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) { Task { @MainActor in self.finishLoad() } }
+    /// Which page a symbol's chart is loaded in: workers own pages by (chart, lane).
+    private var owned: [String: WKWebView] = [:]
+    private func pageFor(sym: String, chart c: Int) -> WKWebView? {
+        let lanes = parallel
+        let lane = (tiles.firstIndex(where: { $0.id == sym }) ?? 0) % lanes
+        let key = "\(c)-\(lane)"
+        if let v = owned[key], v.superview != nil { return v }
+        let v = newPage(account: TVAccounts.account(forChart: c))
+        owned[key] = v
+        return v
+    }
+
+    private func deliveryPicture(_ vm: ScreenerViewModel, _ sym: String) async -> NSImage? {
+        guard let root = host, let s = DeliveryCenter.shared.book.series[sym] else { return nil }
+        if lw == nil {
+            let h = LWChartHolder(); h.view.frame = root.bounds; h.view.autoresizingMask = [.width, .height]; root.addSubview(h.view); lw = h
+            for _ in 0..<40 {      // wait for the chart page (up to ~10 s)
+                if (try? await h.view.evaluateJavaScript("typeof window.setData === 'function'")) as? Bool == true { break }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+        guard let lw else { return nil }
+        let d = UserDefaults.standard
+        let signal = DeliveryMetric(rawValue: d.string(forKey: "deliv.metric") ?? "") ?? .value
+        let metric = DeliveryChartBasis.metric(signal: signal, basis: d.string(forKey: DeliveryChartBasis.key) ?? "")
+        let layers = ChartLayer.decode(d.string(forKey: "viewer.delivLayers") ?? "")
+        let length = d.object(forKey: "deliv.length") as? Int ?? 300
+        let full = d.object(forKey: "deliv.full") as? Bool ?? true
+        let rises = d.object(forKey: "deliv.onlyRises") as? Bool ?? true
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let candles = CandleCache.shared.candles(sym) ?? DeliveryMiniChart.candles(vm.priceBook.series(for: sym), nse: s)
+        let data = LWChartData.make(symbol: sym, series: s, candles: candles, metric: metric, length: max(2, length),
+                                    full: full, onlyRises: rises, range: "6M", dark: dark,
+                                    calendar: DeliveryCenter.shared.calendar, layers: layers,
+                                    events: LWChartData.eventMarkers(sym, layers: layers),
+                                    deals: LWChartData.dealBars(sym, layers: layers))
+        lw.show(data)
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        return await snap(lw.view)
+    }
 
     /// A picture of the page, scaled down to ~900 px wide (keeps memory small).
     private func snap(_ v: WKWebView) async -> NSImage? {
@@ -170,6 +195,16 @@ import AppKit
     }
 }
 
+/// The spot under the grid where Quick's pages live while it takes pictures (they must be in a visible window to draw).
+struct QuickCaptureHost: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        QuickCenter.shared.host = v
+        return v
+    }
+    func updateNSView(_ v: NSView, context: Context) { QuickCenter.shared.host = v }
+}
+
 struct QuickGridView: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var q = QuickCenter.shared
@@ -181,6 +216,7 @@ struct QuickGridView: View {
     @AppStorage("quick.c2") private var c2 = true
     @AppStorage("quick.deliv") private var deliv = true
     @AppStorage("quick.max") private var maxStocks = 18
+    @AppStorage("quick.parallel") private var parallel = 1
     @State private var page = 0
     @State private var phase = 0
     @State private var pageTimer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
@@ -190,6 +226,16 @@ struct QuickGridView: View {
     private var pages: Int { max(1, Int((Double(q.tiles.count) / Double(perPage)).rounded(.up))) }
 
     var body: some View {
+        ZStack {
+            // the pages being photographed sit here (same size as the window), hidden under the grid
+            QuickCaptureHost().allowsHitTesting(false)
+            main.background(Color(nsColor: .windowBackgroundColor))
+        }
+        .onAppear { retime(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { q.begin(vm) } }
+        .onDisappear { q.end() }
+    }
+
+    private var main: some View {
         VStack(spacing: 6) {
             HStack(spacing: 10) {
                 Picker("", selection: $grid) { Text("2 × 2").tag(2); Text("3 × 3").tag(3) }.pickerStyle(.segmented).fixedSize()
@@ -197,10 +243,17 @@ struct QuickGridView: View {
                 Picker("Stocks", selection: $maxStocks) { ForEach([4, 9, 12, 18, 27, 36], id: \.self) { Text("\($0)").tag($0) } }.fixedSize()
                 Picker("Page every", selection: $pageSec) { Text("off").tag(0); ForEach([10, 20, 30, 60], id: \.self) { Text("\($0) s").tag($0) } }.fixedSize()
                 Picker("Chart every", selection: $tileSec) { Text("off").tag(0); ForEach([4, 6, 10, 15], id: \.self) { Text("\($0) s").tag($0) } }.fixedSize()
+                Picker("Pages at once", selection: $parallel) { ForEach(1...3, id: \.self) { Text("\($0)").tag($0) } }.fixedSize()
+                    .help("TradingView pages loaded side by side for each chart. 2–3 is faster but uses more memory.")
                 Spacer()
-                if q.running { ProgressView().controlSize(.small); Text(q.progress).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                else if let t = q.updatedAt { Text("updated \(t.formatted(date: .omitted, time: .shortened)) · every hour").font(.caption).foregroundStyle(.secondary) }
-                Button("Refresh") { q.refresh(vm) }.disabled(q.running)
+                if q.running {
+                    ProgressView().controlSize(.small); Text(q.progress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Button("Stop") { q.stop() }
+                } else {
+                    if let t = q.updatedAt { Text("updated \(t.formatted(date: .omitted, time: .shortened)) · \(q.lastRun) · every hour").font(.caption).foregroundStyle(.secondary) }
+                    else if !q.progress.isEmpty { Text(q.progress).font(.caption).foregroundStyle(.secondary) }
+                    Button("Refresh") { q.refresh(vm) }
+                }
                 Button { page = (page - 1 + pages) % pages } label: { Image(systemName: "chevron.left") }
                 Text("\(page + 1)/\(pages)").monospacedDigit().font(.caption)
                 Button { page = (page + 1) % pages } label: { Image(systemName: "chevron.right") }
@@ -214,8 +267,6 @@ struct QuickGridView: View {
             Spacer(minLength: 0)
         }
         .padding(8)
-        .onAppear { q.begin(vm); retime() }
-        .onDisappear { q.end() }
         .onChange(of: pageSec) { _ in retime() }
         .onChange(of: tileSec) { _ in retime() }
         .onReceive(pageTimer) { _ in if pageSec > 0 && pages > 1 { page = (page + 1) % pages } }
@@ -245,7 +296,7 @@ struct QuickGridView: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            .aspectRatio(1280 / 760, contentMode: .fit)
+            .aspectRatio(16.0 / 10.0, contentMode: .fit)
             .contentShape(Rectangle())
             .onTapGesture { vm.openChart(t.id, queue: q.tiles.map(\.id), context: .gainers, openWindow: openWindow) }
             .help("Click to open \(t.id) in the chart viewer")
