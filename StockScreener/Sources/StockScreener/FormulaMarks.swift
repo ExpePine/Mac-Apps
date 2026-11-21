@@ -14,6 +14,10 @@ import SwiftUI
     var f1: String { UserDefaults.standard.string(forKey: "fmarks.f1") ?? "" }
     var f2: String { UserDefaults.standard.string(forKey: "fmarks.f2") ?? "" }
     var freshAll: Bool { UserDefaults.standard.bool(forKey: "fmarks.fresh") }
+    /// All stored formulas are matched automatically (default); off = only the one or two you pick.
+    var auto: Bool { UserDefaults.standard.object(forKey: "fmarks.auto") as? Bool ?? true }
+    /// Formula keys of the last run, by formula number.
+    private(set) var active: [String] = []
 
     /// formula key → day → symbols true that day (after the "just became true" rule when chosen)
     private var hits: [String: [String: Set<String>]] = [:]
@@ -27,10 +31,15 @@ import SwiftUI
     /// Computes the marks if the chosen formulas or the stored days changed. Cheap to call often.
     func ensure(_ vm: ScreenerViewModel, force: Bool = false) {
         self.vm = vm
-        let chosen = [f1, f2].filter { !$0.isEmpty }
-        guard !chosen.isEmpty else { if !hits.isEmpty { hits = [:]; revision += 1 }; signature = ""; return }
-        let all = FormulaDaysCenter.shared.formulas(vm, includeHidden: true)
-        let fs = chosen.compactMap { k in all.first { $0.key == k } }
+        let fs: [FFormula]
+        if auto {
+            fs = FormulaDaysCenter.shared.formulas(vm).sorted { $0.num < $1.num }
+        } else {
+            let all = FormulaDaysCenter.shared.formulas(vm, includeHidden: true)
+            fs = [f1, f2].filter { !$0.isEmpty }.compactMap { k in all.first { $0.key == k } }
+        }
+        let chosen = fs.map(\.key)
+        guard !chosen.isEmpty else { if !hits.isEmpty { hits = [:]; active = []; revision += 1 }; signature = ""; return }
         let liveKey = HistoryStore.dayKey(vm.dataDay(of: vm.table))
         let stored = HistoryStore.days().filter { $0 < liveKey }
         let sig = chosen.joined(separator: "|") + "#\(freshAll)#\(stored.count)#\(stored.last ?? "")#\(liveKey)#\(vm.table.rows.count)"
@@ -72,6 +81,7 @@ import SwiftUI
                 out[f.key] = n
             }
             hits = out
+            active = fs.map(\.key)
             names = Dictionary(fs.map { ($0.key, $0.titled) }, uniquingKeysWith: { a, _ in a })
             labels = Dictionary(fs.map { ($0.key, $0.label) }, uniquingKeysWith: { a, _ in a })
             coverage = days.count > 1 ? "\(days.count) days · from \(days.first!)" : "only today (no stored days yet)"
@@ -83,33 +93,33 @@ import SwiftUI
 
     func name(_ key: String) -> String { names[key] ?? key }
 
-    /// The other stocks the chosen formula(s) — the ones true for `symbol` that day — were true for on `day`.
+    /// The other stocks the formula(s) true for `symbol` on `day` were also true for.
     func others(_ symbol: String, _ day: String) -> (title: String, symbols: [String]) {
         let sym = symbol.uppercased()
         var set = Set<String>(), which: [String] = []
-        for (i, k) in [f1, f2].enumerated() where !k.isEmpty {
+        for k in active {
             guard let s = hits[k]?[day], s.contains(sym) else { continue }
-            set.formUnion(s); which.append(name(k)); _ = i
+            set.formUnion(s); which.append(name(k))
         }
         set.remove(sym)
         return (which.joined(separator: " · "), set.sorted())
     }
 
-    /// Markers for one stock: F (one formula) or F1 / F2 / F1+2 above the candle.
+    /// One marker per day above the candle: every formula true that day with how many other stocks it was true for — "1F11 3F4".
     func markers(_ symbol: String, from: String = "") -> [LWChartData.Marker] {
         let sym = symbol.uppercased()
-        let k1 = f1, k2 = f2
-        let d1 = Set((hits[k1] ?? [:]).filter { $0.value.contains(sym) }.keys)
-        let d2 = Set((hits[k2] ?? [:]).filter { $0.value.contains(sym) }.keys)
+        var byDay: [String: [String]] = [:]          // day → formula keys true for this stock
+        for k in active {
+            for (day, s) in hits[k] ?? [:] where day >= from && s.contains(sym) { byDay[day, default: []].append(k) }
+        }
         var out: [LWChartData.Marker] = []
-        for day in d1.union(d2).sorted() where day >= from {
-            let a = d1.contains(day), b = d2.contains(day)
-            let n = others(sym, day).symbols.count
-            let tag = a && b ? "\(label(k1))+\(label(k2))" : (a ? label(k1) : label(k2))
-            let text = n > 0 ? "\(tag) \(n)" : tag
-            let color = a && b ? "#FFD600" : (a ? "#E040FB" : "#00B8D4")
-            let info = [a ? name(k1) : nil, b ? name(k2) : nil].compactMap { $0 }.joined(separator: "  ·  ")
-                + (n > 0 ? " — also true for \(n) other stock\(n == 1 ? "" : "s") (click to see them)" : "")
+        for day in byDay.keys.sorted() {
+            let ks = active.filter { byDay[day]!.contains($0) }
+            let parts = ks.map { k -> String in let n = (hits[k]?[day]?.count ?? 1) - 1; return label(k) + (n > 0 ? "\(n)" : "") }
+            let text = parts.prefix(4).joined(separator: " ") + (parts.count > 4 ? " +\(parts.count - 4)" : "")
+            let color = ks.count > 1 ? "#FFD600" : "#E040FB"
+            let info = ks.map { k in let n = (hits[k]?[day]?.count ?? 1) - 1; return name(k) + " (\(n) other\(n == 1 ? "" : "s"))" }.joined(separator: "  ·  ")
+                + " — click to see the other stocks"
             out.append(LWChartData.Marker(time: day, text: text, position: "aboveBar", color: color, shape: "arrowDown", info: info, id: "fm|" + day))
         }
         return out
@@ -123,21 +133,24 @@ struct FormulaMarkControl: View {
     @AppStorage("fmarks.f1") private var f1 = ""
     @AppStorage("fmarks.f2") private var f2 = ""
     @AppStorage("fmarks.fresh") private var fresh = false
+    @AppStorage("fmarks.auto") private var auto = true
 
     var body: some View {
         let fs = FormulaDaysCenter.shared.formulas(vm, includeHidden: true)
         Menu {
-            Picker("First formula (pink)", selection: $f1) {
+            Toggle("Match all my formulas automatically", isOn: $auto)
+            Divider()
+            Picker("Or just this formula", selection: $f1) {
                 Text("None").tag("")
                 ForEach(fs) { f in Text(short(f.titled) + "  — " + String(f.source.prefix(30))).tag(f.key) }
             }
-            Picker("Second formula (cyan)", selection: $f2) {
+            Picker("…and this one", selection: $f2) {
                 Text("None").tag("")
                 ForEach(fs) { f in Text(short(f.titled) + "  — " + String(f.source.prefix(30))).tag(f.key) }
             }
             Toggle("Only when it just became true", isOn: $fresh)
             Divider()
-            Text(fm.running ? "Working… \(fm.progress)" : (fm.coverage.isEmpty ? "Pick a formula" : "Judged on \(fm.coverage)"))
+            Text(fm.running ? "Working… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing matched yet" : "Judged on \(fm.coverage)"))
             Button("Recalculate") { fm.ensure(vm, force: true) }
         } label: {
             HStack(spacing: 3) {
@@ -146,14 +159,16 @@ struct FormulaMarkControl: View {
             }
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .help("F marks: days the chosen formula(s) were true for this stock, labelled with the formula's number (3F = formula 3). First formula pink, second cyan, both on the same day gold (3F+5F). The number after it = how many other stocks it was true for that day. Judged on the sheet snapshots the app has stored, so marks only go back as far as those days.")
+        .help("F marks: on each day, every formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click to see them in Quick). Gold when more than one formula was true. Matches all your formulas automatically, or just one or two you pick. Judged on the sheet snapshots the app has stored, so marks only go back as far as those days.")
         .onAppear { fm.ensure(vm) }
-        .onChange(of: f1) { _ in fm.ensure(vm) }
-        .onChange(of: f2) { _ in fm.ensure(vm) }
+        .onChange(of: f1) { v in if !v.isEmpty && auto { auto = false } else { fm.ensure(vm) } }
+        .onChange(of: f2) { v in if !v.isEmpty && auto { auto = false } else { fm.ensure(vm) } }
         .onChange(of: fresh) { _ in fm.ensure(vm, force: true) }
+        .onChange(of: auto) { _ in fm.ensure(vm, force: true) }
     }
 
     private var label: String {
+        if auto { return "all formulas" }
         let n = [f1, f2].filter { !$0.isEmpty }.count
         return n == 0 ? "pick formula" : (n == 1 ? short(fm.name(f1.isEmpty ? f2 : f1), 22) : fm.label(f1) + " · " + fm.label(f2))
     }
