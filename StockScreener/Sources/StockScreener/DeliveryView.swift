@@ -250,7 +250,7 @@ struct DeliveryView: View {
                         ChartStyleButton().controlSize(.small)
                         DelsmacLevelControl(level: $mainShadeLevel).controlSize(.small)
                         ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize()
-                        if ChartLayer.decode(layersRaw).contains(.fmark) { FormulaMarkControl().controlSize(.small) }
+                        if ChartLayer.decode(layersRaw).contains(.fmark) { FormulaMarkControl(symbol: s).controlSize(.small) }
                     }
                     Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
@@ -592,7 +592,7 @@ struct DeliveryMiniChart: View {
                             .help(layer.label(metric.pine, length))
                         }
                         if L.contains(.zpmark) { ZPLevelControl(level: $zpLevel).controlSize(.mini).fixedSize() }
-                        if L.contains(.fmark) { FormulaMarkControl().controlSize(.mini) }
+                        if L.contains(.fmark) { FormulaMarkControl(symbol: SymbolBook.clean(symbol)).controlSize(.mini) }
                         if L.contains(.deals) { dealsNote }
                         if L.contains(.steep) {
                             Menu {

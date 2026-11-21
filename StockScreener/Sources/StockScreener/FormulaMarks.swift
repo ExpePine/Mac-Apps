@@ -91,6 +91,12 @@ import Combine
 
     func name(_ key: String) -> String { names[key] ?? key }
 
+    /// Days (newest first) a formula was true for a stock, in the counted days.
+    func days(_ key: String, _ symbol: String) -> [String] {
+        let sym = symbol.uppercased()
+        return (hits[key] ?? [:]).filter { $0.value.contains(sym) }.keys.sorted(by: >)
+    }
+
     /// The other stocks the formula(s) true for `symbol` on `day` were also true for.
     func others(_ symbol: String, _ day: String) -> (title: String, symbols: [String]) {
         let sym = symbol.uppercased()
@@ -126,7 +132,9 @@ import Combine
 
 /// The Formula-marks button in the delivery chart's header: all formulas, or tick the ones to match.
 struct FormulaMarkControl: View {
+    var symbol: String = ""
     @EnvironmentObject var vm: ScreenerViewModel
+    @State private var workbench = false
     @ObservedObject private var fm = FormulaMarks.shared
     @AppStorage("fmarks.fresh") private var fresh = false
     @AppStorage("fmarks.auto") private var auto = true
@@ -135,6 +143,17 @@ struct FormulaMarkControl: View {
     @State private var search = ""
 
     var body: some View {
+        HStack(spacing: 4) {
+            menuButton
+            Button { workbench = true } label: { Image(systemName: "square.and.pencil") }
+                .buttonStyle(.borderless)
+                .help("Edit formulas right here: change one, add a new one, and see the marks update on this chart")
+                .sheet(isPresented: $workbench) { FormulaWorkbench(symbol: symbol).environmentObject(vm) }
+        }
+        .fixedSize()
+    }
+
+    private var menuButton: some View {
         Button { open.toggle() } label: {
             HStack(spacing: 3) {
                 if fm.running { ProgressView().controlSize(.mini) }
@@ -216,5 +235,66 @@ enum FormulaNumbers {
         map[identity] = n
         UserDefaults.standard.set(map, forKey: key)
         return n
+    }
+}
+
+/// Edit formulas without leaving the chart: every formula with its number, whether it's true for this stock
+/// (today / last time), Edit or New — saving recounts and the chart's marks update.
+struct FormulaWorkbench: View {
+    let symbol: String
+    @EnvironmentObject var vm: ScreenerViewModel
+    @ObservedObject private var c = FormulaDaysCenter.shared
+    @ObservedObject private var fm = FormulaMarks.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing: FFormula?
+    @State private var adding = false
+    @State private var search = ""
+
+    var body: some View {
+        let fs = c.formulas(vm, includeHidden: true).sorted { $0.num < $1.num }
+        let q = search.lowercased()
+        let shown = q.isEmpty ? fs : fs.filter { $0.titled.lowercased().contains(q) || ($0.quick ?? "").lowercased().contains(q) }
+        let today = c.days.last ?? ""
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Formulas" + (symbol.isEmpty ? "" : " · \(symbol.uppercased())")).font(.headline)
+                if c.running { ProgressView().controlSize(.small); Text("recounting \(Int(c.progress * 100))%").font(.caption).foregroundStyle(.secondary) }
+                Spacer()
+                TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 180)
+                Button { adding = true } label: { Label("New formula", systemImage: "plus") }
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            List(shown) { f in
+                let ds = symbol.isEmpty ? [] : fm.days(f.key, symbol)
+                HStack(spacing: 8) {
+                    Circle().fill(ds.first == today && !today.isEmpty ? Color.green : (ds.isEmpty ? Color.secondary.opacity(0.3) : Color.orange))
+                        .frame(width: 8, height: 8)
+                        .help(ds.first == today ? "True for \(symbol) today" : (ds.first.map { "Last true for \(symbol) on \($0)" } ?? "Not true for \(symbol) in the counted days"))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(f.titled).font(.callout.monospaced()).lineLimit(1)
+                        HStack(spacing: 6) {
+                            Text(f.source).lineLimit(1)
+                            if !ds.isEmpty { Text("· true \(ds.count)× for \(symbol.uppercased()), last \(ds.first!)") }
+                            if let n = c.counts[f.key]?[today], let n { Text("· \(n.count) stocks today") }
+                        }
+                        .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Edit") { editing = f }
+                }
+            }
+            Text("Saving recounts Formula counts; the marks on the chart update when it finishes. Edited note / Filter formulas are saved as new My formulas.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(width: 720, height: 520)
+        .sheet(item: $editing) { f in FormulaEditor(start: f) { recount() }.environmentObject(vm) }
+        .sheet(isPresented: $adding) { FormulaEditor(start: nil) { recount() }.environmentObject(vm) }
+    }
+
+    private func recount() {
+        let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
+        c.run(vm, lastDays: max(1, n))
+        fm.ensure(vm)
     }
 }
