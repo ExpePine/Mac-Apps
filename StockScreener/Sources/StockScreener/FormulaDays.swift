@@ -191,7 +191,7 @@ struct FFormula: Identifiable, Hashable {
     }
 
     /// Symbols meeting the formula in `t`; nil when a column it uses has no values that day.
-    static func evaluate(_ f: FFormula, table t: SheetTable, label: Int) -> [String]? {
+    nonisolated static func evaluate(_ f: FFormula, table t: SheetTable, label: Int) -> [String]? {
         let used = t.headers.indices.filter { i in f.key.contains(t.headers[i]) && t.headers[i].count > 1 }
         for i in used where !t.rows.contains(where: { $0.number(i) != nil || !$0.text(i).isEmpty }) { return nil }
         var issues: [String] = []

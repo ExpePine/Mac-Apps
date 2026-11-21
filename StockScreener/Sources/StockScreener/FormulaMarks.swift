@@ -25,6 +25,29 @@ import SwiftUI
     private var labels: [String: String] = [:]
     func label(_ key: String) -> String { labels[key] ?? "F" }
     private var signature = ""
+    private var liveAt = Date.distantPast
+    /// "day|formula key" → symbols (nil = couldn't be judged); past days only — they never change.
+    private var cache: [String: Set<String>?] = [:]
+    private var dirty = false
+    private var diskLoaded = false
+    private static var cacheURL: URL { HistoryStore.folder.deletingLastPathComponent().appendingPathComponent("formula_marks_cache.json") }
+
+    private func loadDiskCache() {
+        guard !diskLoaded else { return }
+        diskLoaded = true
+        guard let d = try? Data(contentsOf: Self.cacheURL),
+              let m = try? JSONDecoder().decode([String: [String]?].self, from: d) else { return }
+        let keep = Set(HistoryStore.days())
+        for (k, v) in m where keep.contains(String(k.prefix(10))) { cache[k] = .some(v.map(Set.init)) }
+    }
+    private func saveDiskCache() {
+        guard dirty else { return }
+        dirty = false
+        if cache.count > 60_000 { cache.removeAll() }          // bounded; re-judged on demand
+        let m = cache.mapValues { $0.map { Array($0) } }
+        let url = Self.cacheURL
+        Task.detached(priority: .background) { if let d = try? JSONEncoder().encode(m) { try? d.write(to: url, options: .atomic) } }
+    }
     private var task: Task<Void, Never>?
     weak var vm: ScreenerViewModel?
 
@@ -42,34 +65,51 @@ import SwiftUI
         guard !chosen.isEmpty else { if !hits.isEmpty { hits = [:]; active = []; revision += 1 }; signature = ""; return }
         let liveKey = HistoryStore.dayKey(vm.dataDay(of: vm.table))
         let stored = HistoryStore.days().filter { $0 < liveKey }
-        let sig = chosen.joined(separator: "|") + "#\(freshAll)#\(stored.count)#\(stored.last ?? "")#\(liveKey)#\(vm.table.rows.count)"
-        guard force || sig != signature else { return }
+        let sig = chosen.joined(separator: "|") + "#\(freshAll)#\(stored.count)#\(stored.last ?? "")#\(liveKey)"
+        // the live day is re-judged at most every 15 minutes (the sheet refreshes often)
+        let liveStale = Date().timeIntervalSince(liveAt) > 900
+        if !force && sig == signature && (!liveStale || running) { return }
         signature = sig
         task?.cancel()
         guard let label = vm.labelIndex, !fs.isEmpty else { hits = [:]; revision += 1; return }
         let days = stored + [liveKey]
         let fresh = freshAll
         running = true
+        loadDiskCache()
         task = Task { @MainActor in
             var out: [String: [String: Set<String>]] = [:]
             let current = vm.table
             for (k, d) in days.enumerated() {
                 if Task.isCancelled { return }
-                progress = "\(k + 1)/\(days.count) days"
                 let isLive = k == days.count - 1
+                // past days never change: judged once, then kept (also on disk)
+                var todo: [FFormula] = []
+                for f in fs {
+                    if !isLive, let c = cache[d + "|" + f.key] { if let c { out[f.key, default: [:]][d] = c } }
+                    else { todo.append(f) }
+                }
+                if todo.isEmpty { continue }
+                progress = "\(k + 1)/\(days.count) days"
                 var table: SheetTable? = isLive ? current : await Task.detached(priority: .utility) {
                     HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) }
                 }.value
                 if !isLive, let tt = table {
                     let del = tt.headers.filter { ScreenerViewModel.isDeliveryColumn($0) }
-                    if fs.contains(where: { f in del.contains { f.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
+                    if todo.contains(where: { f in del.contains { f.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
                 }
                 guard let t = table else { continue }
-                for f in fs {
-                    if let syms = FormulaDaysCenter.evaluate(f, table: t, label: label) { out[f.key, default: [:]][d] = Set(syms) }
+                let work = todo
+                let res: [(String, Set<String>?)] = await Task.detached(priority: .utility) {
+                    work.map { f in (f.key, FormulaDaysCenter.evaluate(f, table: t, label: label).map(Set.init)) }
+                }.value
+                for (key, r) in res {
+                    if let r { out[key, default: [:]][d] = r }
+                    if !isLive { cache[d + "|" + key] = .some(r); dirty = true }
                 }
-                if k % 10 == 0 { await Task.yield() }
+                await Task.yield()
             }
+            liveAt = Date()
+            saveDiskCache()
             // "only when it just became true": drop a stock on a day it was already true the stored day before
             for f in fs where fresh || f.fresh {
                 guard let m = out[f.key] else { continue }
