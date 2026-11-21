@@ -697,6 +697,9 @@ struct FormulaEditor: View {
     @Environment(\.dismiss) private var dismiss
     let start: FFormula?
     let saved: () -> Void
+    /// Set when the editor sits inside a window (not a sheet): called instead of dismissing.
+    var onClose: (() -> Void)? = nil
+    private func close() { if let onClose { onClose() } else { dismiss() } }
     @State private var name = ""
     @State private var quick = ""
     @State private var error: String?
@@ -721,7 +724,7 @@ struct FormulaEditor: View {
             HStack {
                 if start?.mineID == nil, start != nil { Text(note).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { close() }.keyboardShortcut(.cancelAction)
                 Button(start?.mineID != nil || start?.alertID != nil || start == nil ? "Save" : "Save as my formula") { save() }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(error != nil || quick.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -759,6 +762,6 @@ struct FormulaEditor: View {
             if let s = start, s.mineID == nil, s.alertID == nil, s.quick != nil { c.hidden.insert(s.key) }   // the edited copy replaces the note's row
         }
         saved()
-        dismiss()
+        close()
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AppKit
 
 /// Formula marks on the delivery charts: the days your stored formulas (My formulas, note formulas, F alerts,
 /// F combinations, Filter conditions) were true for the stock on the chart.
@@ -11,6 +12,8 @@ import Combine
     @Published private(set) var running = false
     @Published private(set) var progress = ""
     @Published private(set) var coverage = ""
+    /// The stock on the delivery chart (the floating Formulas window follows it).
+    @Published var chartSymbol = ""
 
     /// Formulas you ticked (by their permanent identity), used when "all" is off.
     var picked: Set<String> { Set(UserDefaults.standard.stringArray(forKey: "fmarks.picked") ?? []) }
@@ -145,10 +148,10 @@ struct FormulaMarkControl: View {
     var body: some View {
         HStack(spacing: 4) {
             menuButton
-            Button { workbench = true } label: { Image(systemName: "square.and.pencil") }
+            Button { fm.chartSymbol = symbol; FormulaWorkbenchPanel.shared.show(vm) } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless)
-                .help("Edit formulas right here: change one, add a new one, and see the marks update on this chart")
-                .sheet(isPresented: $workbench) { FormulaWorkbench(symbol: symbol).environmentObject(vm) }
+                .help("Formulas in a floating window: keep it open over the chart while you change or add formulas — the marks update on this chart")
+
         }
         .fixedSize()
     }
@@ -164,7 +167,8 @@ struct FormulaMarkControl: View {
         .buttonStyle(.borderless).fixedSize()
         .help("Formula marks: on each day, every chosen formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click the mark to see them in Quick). Gold when more than one formula was true. Uses Formula counts' results: the same days (its Days setting) and its \"Also require\".")
         .popover(isPresented: $open, arrowEdge: .bottom) { panel }
-        .onAppear { fm.ensure(vm) }
+        .onAppear { fm.ensure(vm); if !symbol.isEmpty { fm.chartSymbol = symbol } }
+        .onChange(of: symbol) { s in if !s.isEmpty { fm.chartSymbol = s } }
         .onChange(of: fresh) { _ in fm.ensure(vm, force: true) }
         .onChange(of: auto) { _ in fm.ensure(vm, force: true) }
         .onChange(of: picked) { p in UserDefaults.standard.set(Array(p), forKey: "fmarks.picked"); fm.ensure(vm, force: true) }
@@ -241,7 +245,6 @@ enum FormulaNumbers {
 /// Edit formulas without leaving the chart: every formula with its number, whether it's true for this stock
 /// (today / last time), Edit or New — saving recounts and the chart's marks update.
 struct FormulaWorkbench: View {
-    let symbol: String
     @EnvironmentObject var vm: ScreenerViewModel
     @ObservedObject private var c = FormulaDaysCenter.shared
     @ObservedObject private var fm = FormulaMarks.shared
@@ -249,6 +252,7 @@ struct FormulaWorkbench: View {
     @State private var editing: FFormula?
     @State private var adding = false
     @State private var search = ""
+    private var symbol: String { fm.chartSymbol }
 
     var body: some View {
         let fs = c.formulas(vm, includeHidden: true).sorted { $0.num < $1.num }
@@ -261,8 +265,13 @@ struct FormulaWorkbench: View {
                 if c.running { ProgressView().controlSize(.small); Text("recounting \(Int(c.progress * 100))%").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
                 TextField("Search", text: $search).textFieldStyle(.roundedBorder).frame(width: 180)
-                Button { adding = true } label: { Label("New formula", systemImage: "plus") }
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button { editing = nil; adding = true } label: { Label("New formula", systemImage: "plus") }
+                Button("Close") { FormulaWorkbenchPanel.shared.close() }
+            }
+            if adding || editing != nil {
+                FormulaEditor(start: editing, saved: { recount() }, onClose: { editing = nil; adding = false })
+                    .id(editing?.key ?? "new")
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
             }
             List(shown) { f in
                 let ds = symbol.isEmpty ? [] : fm.days(f.key, symbol)
@@ -280,16 +289,14 @@ struct FormulaWorkbench: View {
                         .font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Edit") { editing = f }
+                    Button("Edit") { adding = false; editing = f }
                 }
             }
             Text("Saving recounts Formula counts; the marks on the chart update when it finishes. Edited note / Filter formulas are saved as new My formulas.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(12)
-        .frame(width: 720, height: 520)
-        .sheet(item: $editing) { f in FormulaEditor(start: f) { recount() }.environmentObject(vm) }
-        .sheet(isPresented: $adding) { FormulaEditor(start: nil) { recount() }.environmentObject(vm) }
+        .frame(minWidth: 600, minHeight: 360)
     }
 
     private func recount() {
@@ -297,4 +304,34 @@ struct FormulaWorkbench: View {
         c.run(vm, lastDays: max(1, n))
         fm.ensure(vm)
     }
+}
+
+/// The Formulas window floats above the charts (stays on top, doesn't hide when you click the chart).
+@MainActor final class FormulaWorkbenchPanel {
+    static let shared = FormulaWorkbenchPanel()
+    private var panel: NSPanel?
+
+    func show(_ vm: ScreenerViewModel) {
+        if panel == nil {
+            let host = NSHostingController(rootView: FormulaWorkbench().environmentObject(vm))
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+                            styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
+            p.title = "Formulas"
+            p.isFloatingPanel = true
+            p.level = .floating
+            p.hidesOnDeactivate = false
+            p.becomesKeyOnlyIfNeeded = false
+            p.isReleasedWhenClosed = false
+            p.contentViewController = host
+            p.setContentSize(NSSize(width: 720, height: 520))
+            p.setFrameAutosaveName("FormulaWorkbenchPanel")
+            if !p.setFrameUsingName("FormulaWorkbenchPanel"), let s = NSScreen.main?.visibleFrame {
+                p.setFrameTopLeftPoint(NSPoint(x: s.maxX - 740, y: s.maxY - 40))
+            }
+            panel = p
+        }
+        panel?.makeKeyAndOrderFront(nil)
+    }
+
+    func close() { panel?.orderOut(nil) }
 }
