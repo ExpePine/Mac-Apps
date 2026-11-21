@@ -29,6 +29,14 @@ import AppKit
     private var labels: [String: String] = [:]
     func label(_ key: String) -> String { labels[key] ?? "F" }
     private var wanted: [FFormula] = []
+    /// Trace-back for the stock on the chart: formula key → (first counted day of a run → the day the run really began).
+    private var traced: [String: [String: String]] = [:]
+    private var tracedSymbol = ""
+    private var traceTask: Task<Void, Never>?
+    @Published private(set) var tracing = false
+    /// Marks go on the day each run began (gaps up to `runGap` days don't end a run), traced back day by day.
+    static var originMode: Bool { UserDefaults.standard.object(forKey: "fmarks.origin") as? Bool ?? true }
+    static var runGap: Int { UserDefaults.standard.object(forKey: "fmarks.gap") as? Int ?? 2 }
     private var bag = Set<AnyCancellable>()
     weak var vm: ScreenerViewModel?
 
@@ -85,9 +93,11 @@ import AppKit
             var per: [String: Set<String>] = [:]
             for (d, v) in m { if let v { per[d] = Set(v) } }
             // "only when it just became true" for every formula (a formula's own tick is already applied by Formula counts)
-            if freshAll && !f.fresh {
+            if (freshAll || Self.originMode) && !f.fresh {
                 let all = Array(Set(m.keys)).sorted()
-                let starts = FormulaDaysCenter.runStarts(m, days: all, mode: FormulaDaysCenter.freshMode, gap: FormulaDaysCenter.freshGap)
+                let starts = Self.originMode
+                    ? FormulaDaysCenter.runStarts(m, days: all, mode: 1, gap: Self.runGap)
+                    : FormulaDaysCenter.runStarts(m, days: all, mode: FormulaDaysCenter.freshMode, gap: FormulaDaysCenter.freshGap)
                 per = [:]
                 for (d, v) in starts { if let v, !v.isEmpty { per[d] = Set(v) } }
             }
@@ -98,7 +108,63 @@ import AppKit
         names = Dictionary(wanted.map { ($0.key, $0.titled) }, uniquingKeysWith: { a, _ in a })
         labels = Dictionary(wanted.map { ($0.key, $0.label) }, uniquingKeysWith: { a, _ in a })
         coverage = days.isEmpty ? "" : "Formula counts' \(days.count) days · from \(days.first!)"
+        traced = [:]; tracedSymbol = ""
         revision += 1
+        if Self.originMode, !chartSymbol.isEmpty { trace(chartSymbol) }
+    }
+
+    /// Walks each of this stock's runs back, one NSE trading day at a time (not only the days with a stored sheet),
+    /// while the formula keeps being true — gaps of up to `runGap` days allowed — and moves the mark to that first day.
+    /// Delivery columns are recomputed for each earlier day; other columns come from the nearest stored sheet on or
+    /// before that day (or the run's first counted day when there is none).
+    func trace(_ symbol: String) {
+        let sym = symbol.uppercased()
+        guard let vm, let label = vm.labelIndex, !sym.isEmpty else { return }
+        traceTask?.cancel()
+        let fs = wanted.filter { active.contains($0.key) }
+        // (key shown, formula as Formula counts judges it — with "Also require", counted day)
+        let starts: [(String, FFormula, String)] = fs.flatMap { f in
+            (hits[f.key] ?? [:]).filter { $0.value.contains(sym) }.keys.map { (f.key, FormulaDaysCenter.shared.effective(f), $0) }
+        }
+        guard !starts.isEmpty else { return }
+        let dc = DeliveryCenter.shared
+        let cal = (dc.calendar.isEmpty ? dc.book.days : dc.calendar)
+        let storedDays = Set(HistoryStore.days())
+        let current = vm.table
+        tracing = true
+        traceTask = Task { @MainActor in
+            var sheets: [String: SheetTable] = [:]      // day → this stock's one-row sheet
+            func row(on d: String) async -> SheetTable? {
+                if let t = sheets[d] { return t }
+                let t: SheetTable? = await Task.detached(priority: .utility) {
+                    HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) }
+                }.value
+                guard let t else { return nil }
+                let one = SheetTable(headers: t.headers, rows: t.rows.filter { $0.text(label).trimmingCharacters(in: .whitespaces).uppercased() == sym }, originalHeaders: t.originalHeaders)
+                sheets[d] = one
+                return one
+            }
+            var out: [String: [String: String]] = [:]
+            for (key, f, d0) in starts {
+                if Task.isCancelled { return }
+                guard var k = cal.firstIndex(of: d0) ?? cal.lastIndex(where: { $0 < d0 }).map({ $0 + 1 }) else { continue }
+                guard let base0 = await row(on: d0), !base0.rows.isEmpty else { continue }
+                var base = base0, origin = d0, misses = 0, steps = 0
+                while k > 0 && misses <= Self.runGap && steps < 250 {
+                    k -= 1; steps += 1
+                    let d = cal[k]
+                    if storedDays.contains(d), let r = await row(on: d), !r.rows.isEmpty { base = r }
+                    let t = vm.withDeliveryValues(base, asOf: d)
+                    let ok = FormulaDaysCenter.evaluate(f, table: t, label: label)?.isEmpty == false
+                    if ok { origin = d; misses = 0 } else { misses += 1 }
+                    if steps % 20 == 0 { await Task.yield() }
+                }
+                if origin != d0 { out[key, default: [:]][d0] = origin }
+            }
+            traced = out; tracedSymbol = sym
+            tracing = false
+            revision += 1
+        }
     }
 
     func name(_ key: String) -> String { names[key] ?? key }
@@ -110,8 +176,9 @@ import AppKit
     }
 
     /// The other stocks the formula(s) true for `symbol` on `day` were also true for.
-    func others(_ symbol: String, _ day: String) -> (title: String, symbols: [String]) {
+    func others(_ symbol: String, _ day0: String) -> (title: String, symbols: [String]) {
         let sym = symbol.uppercased()
+        let day = countedDay(sym, day0)
         var set = Set<String>(), which: [String] = []
         for k in active {
             guard let s = hits[k]?[day], s.contains(sym) else { continue }
@@ -124,21 +191,35 @@ import AppKit
     /// One marker per day above the candle: every formula true that day with how many other stocks it was true for — "1F11 3F4".
     func markers(_ symbol: String, from: String = "") -> [LWChartData.Marker] {
         let sym = symbol.uppercased()
-        var byDay: [String: [String]] = [:]          // day → formula keys true for this stock
+        let tr = sym == tracedSymbol ? traced : [:]
+        // shown day → [(formula key, counted day)]
+        var byDay: [String: [(String, String)]] = [:]
         for k in active {
-            for (day, s) in hits[k] ?? [:] where day >= from && s.contains(sym) { byDay[day, default: []].append(k) }
+            for (day, s) in hits[k] ?? [:] where s.contains(sym) {
+                let shown = tr[k]?[day] ?? day
+                if shown >= from { byDay[shown, default: []].append((k, day)) }
+            }
         }
         var out: [LWChartData.Marker] = []
         for day in byDay.keys.sorted() {
-            let ks = active.filter { byDay[day]!.contains($0) }
-            let parts = ks.map { k -> String in let n = (hits[k]?[day]?.count ?? 1) - 1; return label(k) + (n > 0 ? " \(n)" : "") }
+            let items = byDay[day]!.sorted { (active.firstIndex(of: $0.0) ?? 0) < (active.firstIndex(of: $1.0) ?? 0) }
+            let parts = items.map { (k, d0) -> String in let n = (hits[k]?[d0]?.count ?? 1) - 1; return label(k) + (n > 0 ? " \(n)" : "") }
             let text = parts.prefix(3).joined(separator: " · ") + (parts.count > 3 ? " +\(parts.count - 3)" : "")
-            let color = ks.count > 1 ? "#FFC400" : "#E040FB"
-            let info = ks.map { k in let n = (hits[k]?[day]?.count ?? 1) - 1; return name(k) + " (\(n) other\(n == 1 ? "" : "s"))" }.joined(separator: "  ·  ")
-                + " — click to see the other stocks"
+            let color = items.count > 1 ? "#FFC400" : "#E040FB"
+            let info = items.map { (k, d0) -> String in
+                let n = (hits[k]?[d0]?.count ?? 1) - 1
+                return name(k) + " (\(n) other\(n == 1 ? "" : "s") on \(d0))" + (d0 != day ? " — traced back: true since \(day)" : "")
+            }.joined(separator: "  ·  ") + " — click to see the other stocks"
             out.append(LWChartData.Marker(time: day, text: text, position: "aboveBar", color: color, shape: "arrowDown", info: info, id: "fpill"))
         }
         return out
+    }
+
+    /// A clicked badge's day may be a traced-back day: the counted day it stands for.
+    func countedDay(_ symbol: String, _ day: String) -> String {
+        guard symbol.uppercased() == tracedSymbol else { return day }
+        for (_, m) in traced { if let d0 = m.first(where: { $0.value == day })?.key { return d0 } }
+        return day
     }
 }
 
@@ -151,6 +232,8 @@ struct FormulaMarkControl: View {
     @AppStorage("fmarks.fresh") private var fresh = false
     @AppStorage("fmarks.auto") private var auto = true
     @AppStorage("fmarks.full") private var full = false
+    @AppStorage("fmarks.origin") private var origin = true
+    @AppStorage("fmarks.gap") private var gap = 2
     @State private var picked: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "fmarks.picked") ?? [])
     @State private var open = false
     @State private var search = ""
@@ -173,7 +256,7 @@ struct FormulaMarkControl: View {
     private var menuButton: some View {
         Button { open.toggle() } label: {
             HStack(spacing: 3) {
-                if fm.running { ProgressView().controlSize(.mini) }
+                if fm.running || fm.tracing { ProgressView().controlSize(.mini) }
                 Text(label).font(.caption2).lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 7))
             }
@@ -181,10 +264,12 @@ struct FormulaMarkControl: View {
         .buttonStyle(.borderless).fixedSize()
         .help("Formula marks: on each day, every chosen formula that was true for this stock — 1F11 = formula 1, true for 11 other stocks that day (click the mark to see them in Quick). Gold when more than one formula was true. Uses Formula counts' results: the same days (its Days setting) and its \"Also require\".")
         .popover(isPresented: $open, arrowEdge: .bottom) { panel }
-        .onAppear { fm.ensure(vm); if !symbol.isEmpty { fm.chartSymbol = symbol } }
-        .onChange(of: symbol) { s in if !s.isEmpty { fm.chartSymbol = s } }
+        .onAppear { if !symbol.isEmpty { fm.chartSymbol = symbol }; fm.ensure(vm) }
+        .onChange(of: symbol) { s in if !s.isEmpty { fm.chartSymbol = s; fm.trace(s) } }
         .onChange(of: fresh) { _ in fm.ensure(vm, force: true) }
         .onChange(of: auto) { _ in fm.ensure(vm, force: true) }
+        .onChange(of: origin) { _ in fm.rebuild() }
+        .onChange(of: gap) { _ in fm.rebuild() }
         .onChange(of: picked) { p in UserDefaults.standard.set(Array(p), forKey: "fmarks.picked"); fm.ensure(vm, force: true) }
     }
 
@@ -226,6 +311,12 @@ struct FormulaMarkControl: View {
             Divider()
             Toggle("Only when it just became true", isOn: $fresh).toggleStyle(.checkbox)
             FreshModePicker { fm.ensure(vm, force: true) }
+            Divider()
+            Toggle("Mark where each run began (traced back day by day)", isOn: $origin).toggleStyle(.checkbox)
+                .help("A formula true for days 1–10 gets one mark, on day 1 — walked back on every NSE trading day, not just days with a stored sheet")
+            if origin {
+                Stepper("Gaps of up to \(gap) day\(gap == 1 ? "" : "s") don't end a run", value: $gap, in: 0...10).font(.caption)
+            }
             HStack {
                 Text(fm.running ? "Counting… \(fm.progress)" : (fm.coverage.isEmpty ? "Nothing counted yet" : "Uses \(fm.coverage) (set Days in Formula counts)"))
                     .font(.caption).foregroundStyle(.secondary)

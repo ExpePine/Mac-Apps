@@ -50,7 +50,17 @@ extension ScreenerViewModel {
         guard !dc.storedDays.isEmpty, let label = labelIndex else { return t }
         let idx = t.headers.enumerated().filter { Self.isDeliveryColumn($0.element) }.map { (n: $0.element.hasSuffix(" (NSE)") ? String($0.element.dropLast(6)) : $0.element, i: $0.offset) }
         guard !idx.isEmpty else { return t }
-        let cols = DeliveryColumns.all(dc.book, asOf: day)
+        // only the stocks in this table (a one-row table — the trace-back — then costs one stock, not all of them)
+        let cols: [String: DeliveryColumns] = {
+            if t.rows.count > 50 { return DeliveryColumns.all(dc.book, asOf: day) }
+            var o: [String: DeliveryColumns] = [:]
+            let d = dc.book.days.last(where: { $0 <= day }) ?? dc.book.days.last ?? ""
+            for r in t.rows {
+                let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+                if let s = dc.book.series[sym] { o[sym] = DeliveryColumns.of(s, latestDay: d) }
+            }
+            return o
+        }()
         let rows = t.rows.map { r -> SheetRow in
             var cells = r.cells, nums = r.numbers
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
