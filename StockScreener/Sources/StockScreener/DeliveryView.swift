@@ -38,6 +38,7 @@ struct DeliveryView: View {
     @ObservedObject private var i5m = Intraday5mCenter.shared
     @ObservedObject private var dealsC = DealsCenter.shared
     @ObservedObject private var fmarks = FormulaMarks.shared
+    @ObservedObject private var pine = PineCenter.shared
     @AppStorage("t3.rev") private var t3Rev = 0
     @Environment(\.colorScheme) private var colorScheme
 
@@ -251,6 +252,7 @@ struct DeliveryView: View {
                         DelsmacLevelControl(level: $mainShadeLevel).controlSize(.small)
                         ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length).controlSize(.small).fixedSize()
                         if ChartLayer.decode(layersRaw).contains(.fmark) { FormulaMarkControl(symbol: s).controlSize(.small) }
+                        PineButton().controlSize(.small)
                     }
                     Picker("", selection: $pane) { Text("Chart").tag("Chart"); Text("Data").tag("Data") }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
@@ -301,6 +303,7 @@ struct DeliveryView: View {
         .onChange(of: newsTL.revision) { _ in pushChart() }
         .onChange(of: dealsC.revision) { _ in pushChart() }
         .onChange(of: fmarks.revision) { _ in pushChart() }
+        .onChange(of: pine.revision) { _ in pushChart() }
         .onAppear { if ChartLayer.decode(layersRaw).contains(.deals) { DealsCenter.shared.update(days: 1800) } }
     }
 
@@ -478,6 +481,7 @@ struct DeliveryMiniChart: View {
     @ObservedObject private var news = NewsTimeline.shared
     @ObservedObject private var deals = DealsCenter.shared
     @ObservedObject private var fmarks = FormulaMarks.shared
+    @ObservedObject private var pine = PineCenter.shared
     @AppStorage("steep.span") private var steepSpan = 5
     @AppStorage("zp.level") private var zpLevel = 99.0
     @AppStorage("steep.source") private var steepSource = "delsma"
@@ -593,6 +597,7 @@ struct DeliveryMiniChart: View {
                         }
                         if L.contains(.zpmark) { ZPLevelControl(level: $zpLevel).controlSize(.mini).fixedSize() }
                         if L.contains(.fmark) { FormulaMarkControl(symbol: SymbolBook.clean(symbol)).controlSize(.mini) }
+                        PineButton().controlSize(.mini)
                         if L.contains(.deals) { dealsNote }
                         if L.contains(.steep) {
                             Menu {
@@ -641,6 +646,7 @@ struct DeliveryMiniChart: View {
         .task(id: symbol + "|" + (focus ?? "")) { push() }
         .onChange(of: dc.revision) { _ in push() }
         .onChange(of: fmarks.revision) { _ in push() }
+        .onChange(of: pine.revision) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: basis) { _ in push() }

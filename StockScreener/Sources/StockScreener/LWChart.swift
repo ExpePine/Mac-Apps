@@ -139,6 +139,16 @@ struct LWChartData: Encodable {
     var high: [Point] = []
     var bands: [Point] = []
     var markers: [Marker] = []
+    /// Your Pine scripts' plots (PineCenter): drawn on a pane and / or shown as a legend number.
+    struct PineJS: Encodable {
+        let key: String, title: String, color: String
+        let pane: String                  // none (legend only) · price · deliv · own
+        let style: String                 // line · hist · step
+        let width: Double
+        let legend: Bool
+        let points: [Point]
+    }
+    var pine: [PineJS] = []
     var fpills: [Marker] = []         // formula pills (1F11 …): drawn as badges in their own lane above the delivery pane
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
@@ -486,7 +496,13 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         view.loadHTMLString(Self.html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
     }
 
-    func show(_ data: LWChartData) {
+    @MainActor func show(_ data: LWChartData) {
+        var data = data
+        if !data.title.isEmpty, !PineCenter.shared.scripts.isEmpty {
+            let o = PineCenter.shared.chartOutputs(data.title)
+            data.pine = o.plots
+            data.markers += o.marks
+        }
         let js = "window.setData(\(data.json))"
         if ready { view.evaluateJavaScript(js) { [weak self] r, e in self?.handle(r, e) } } else { pending = js }
     }
@@ -722,8 +738,16 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(d2v&&d2v.value!=null) P.del2c=sp('del2c',(S.d2c||'#FFC400'),'DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):''));
       if(hv&&hv.value!=null) P.hit3=sp('hit3','#FF8A65','HI/T3 '+hv.value.toFixed(2));
       if(t3v&&t3v.value!=null){ var tc=t3v.color||'#26a69a'; P.t3='<span style="color:'+tc+'">'+(last.t3Name||'T3')+' '+fmt(t3v.value)+(tc==='#26a69a'?' ▲':' ▼')+'</span>'; }
+      (last.pine||[]).forEach(function(p){
+        if(!p.legend) return;
+        var m=window._pv?window._pv[p.key]:null; if(!m) return;
+        var k=tk||(p.points.length?p.points[p.points.length-1].time:null), v=k!=null?m[k]:null;
+        if(v==null && !t && p.points.length){ for(var i=p.points.length-1;i>=0;i--){ if(p.points[i].value!=null){ v=p.points[i].value; break; } } }
+        if(v!=null) P['pine:'+p.key]=sp('pine:'+p.key,p.color,p.title+' '+(Math.abs(v)>=1000?v.toFixed(0):(Math.abs(v)>=10?v.toFixed(2):v.toFixed(3))));
+      });
       var order=(S.legendOrder&&S.legendOrder.length)?S.legendOrder.slice():[];
       ['metric','highest','sma22','sma66','percentrank','delsmac','series','dealprank','z','dealsize','deals','filled','deliv','del2c','hit3','t3'].forEach(function(k){ if(order.indexOf(k)<0) order.push(k); });
+      Object.keys(P).forEach(function(k){ if(k.indexOf('pine:')===0 && order.indexOf(k)<0) order.push(k); });
       var hidden={}; (S.legendHidden||[]).forEach(function(k){ hidden[k]=1; });
       var lines=S.legendLines||1, shown=order.filter(function(k){ return P[k] && !hidden[k]; }).map(function(k){ return P[k]; });
       if(lines>1){ var per=Math.ceil(shown.length/lines), out=[]; for(var i=0;i<shown.length;i+=per) out.push(shown.slice(i,i+per).join(' &nbsp;')); s+=out.join('<br>'); }
@@ -849,6 +873,18 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       window._quiet=true;
       if(n && len>n) chart.timeScale().setVisibleLogicalRange({from:len-n,to:len+4}); else chart.timeScale().fitContent();
       clearTimeout(window._qt); window._qt=setTimeout(function(){ window._quiet=false; },350);
+      // your Pine plots: a series per drawn plot; every plot's values kept for the legend
+      (window._pineS||[]).forEach(function(x){ try{ chart.removeSeries(x); }catch(e){} }); window._pineS=[]; window._pv={};
+      (d.pine||[]).forEach(function(p){
+        var m={}; p.points.forEach(function(x){ if(x.value!=null) m[x.time]=x.value; }); window._pv[p.key]=m;
+        if(p.pane==='none') return;
+        var sid=p.pane==='price'?'right':(p.pane==='deliv'?'deliv':'pine_'+p.key);
+        var opt={priceScaleId:sid,color:p.color,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false};
+        var se=p.style==='hist'?chart.addHistogramSeries(opt):chart.addLineSeries(Object.assign(opt,{lineWidth:Math.max(1,Math.min(4,p.width||1)),lineType:p.style==='step'?1:0}));
+        if(p.pane==='own') chart.priceScale(sid).applyOptions({scaleMargins:low, visible:false});
+        se.setData(p.points.filter(function(x){ return x.value!=null; }).map(function(x){ var o={time:x.time,value:x.value}; if(x.color) o.color=x.color; return o; }));
+        window._pineS.push(se);
+      });
       window._fp=d.fpills||[]; setTimeout(drawPills,30);
       legendLast();
       return 'ok';
@@ -1116,6 +1152,9 @@ struct ChartStyle: Codable, Equatable {
     private var store: [String: [YahooClient.Candle]] = [:]
     private var order: [String] = []
     private var loading = Set<String>()
+
+    /// Already-fetched candles only (no download).
+    func peek(_ sym: String) -> [YahooClient.Candle]? { store[sym] }
 
     func candles(_ sym: String) -> [YahooClient.Candle]? {
         if let c = store[sym] { return c }

@@ -713,7 +713,7 @@ final class ScreenerViewModel: ObservableObject {
 
     private func setTable(_ downloaded: SheetTable) {
         rawTable = downloaded
-        let base = withScores(withEarningsColumns(withPriceT3Columns(withIntradayColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases)))))))
+        let base = withScores(withEarningsColumns(withPriceT3Columns(withIntradayColumns(withPineColumns(withDeliveryColumns(withManualSymbols(downloaded.renamed(with: settings.columnAliases))))))))
         let newTable = withWeights(base)
         table = newTable
         if let c = importSortColumn, c >= newTable.headers.count { importSortColumn = nil }

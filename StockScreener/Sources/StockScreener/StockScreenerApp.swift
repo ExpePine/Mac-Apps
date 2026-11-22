@@ -136,6 +136,12 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
 
+        Window("Pine scripts", id: "pine") {
+            PineView()
+                .environmentObject(vm)
+                .frame(minWidth: 900, minHeight: 620)
+        }
+
         Window("Quick", id: "quick") {
             QuickGridView()
                 .environmentObject(vm)

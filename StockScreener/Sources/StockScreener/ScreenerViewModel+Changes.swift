@@ -41,7 +41,34 @@ extension ScreenerViewModel {
                                       "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES", "DEAL_PRANK", "STEEP_Z", "Z_PRANK", "Z_PRANK_DAYS"]
     static func isDeliveryColumn(_ h: String) -> Bool {
         let base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
-        return deliveryColumnNames.contains(base)
+        return deliveryColumnNames.contains(base) || PineColumns.shared.has(h)
+    }
+
+    /// Your Pine scripts' Filter columns (PineCenter), on the sheet's data day.
+    func withPineColumns(_ t: SheetTable) -> SheetTable {
+        let names = PineColumns.shared.names
+        let pc = PineCenter.shared
+        if pc.vm == nil { pc.vm = self }
+        if names.isEmpty {
+            if !pc.autoStarted, !DeliveryCenter.shared.storedDays.isEmpty, pc.scripts.contains(where: { s in s.enabled && s.outputs.values.contains { $0.filter } }) {
+                pc.autoStarted = true
+                DispatchQueue.main.async { pc.computeColumns() }
+            }
+            return t
+        }
+        guard let label = t.index(of: settings.labelColumn) ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        let day = HistoryStore.dayKey(dataDay(of: t))
+        let rows = t.rows.map { row -> SheetRow in
+            let sym = row.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+            var cells = row.cells, nums = row.numbers
+            for n in names {
+                let v = PineColumns.shared.value(n, sym, day)
+                cells.append(v.map { String(format: abs($0) >= 1000 ? "%.0f" : "%.3f", $0) } ?? "")
+                nums.append(v)
+            }
+            return SheetRow(id: row.id, cells: cells, numbers: nums)
+        }
+        return SheetTable(headers: t.headers + names, rows: rows, originalHeaders: t.originalHeaders + names)
     }
 
     /// The delivery columns as they were on `day` (C/DL2C = that day's close ÷ that day's DEL2C).
@@ -66,6 +93,11 @@ extension ScreenerViewModel {
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
             let c = cols[sym]
             for (n, i) in idx where i < cells.count {
+                if PineColumns.shared.has(n) {
+                    let v = PineColumns.shared.value(n, sym, day)
+                    cells[i] = v.map { String(format: abs($0) >= 1000 ? "%.0f" : "%.3f", $0) } ?? ""; nums[i] = v
+                    continue
+                }
                 if n == "NSE_SERIES" {
                     var code = ""
                     if let bs = dc.book.series[sym], let k = bs.days.lastIndex(where: { $0 <= day }), k < bs.seriesCode.count { code = bs.seriesCode[k] }
