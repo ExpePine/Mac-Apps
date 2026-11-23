@@ -44,35 +44,45 @@ struct LayoutCodeMenu: View {
     @ObservedObject private var store = LayoutCodeStore.shared
     @State private var manage = false
 
-    var body: some View {
-        let c = min(vm.settings.chartLinkColumn, vm.chartCount - 1)
-        let col = vm.chartName(c)
-        let isSheet = c < max(1, vm.chartBook.columns.count)
-        let current = vm.settings.chartLayoutOverride[col] ?? ""
-        Menu {
-            if isSheet {
-                Text("Chart \(c + 1) opens every stock in:")
-                Button { vm.settings.chartLayoutOverride[col] = nil } label: {
-                    Text((current.isEmpty ? "✓ " : "") + "Each stock's own link from the sheet")
-                }
-                Divider()
-                ForEach(store.codes) { l in
-                    Button { vm.settings.chartLayoutOverride[col] = l.code } label: {
-                        Text((current == l.code ? "✓ " : "") + l.name + " · " + l.code + (l.account.isEmpty ? "" : " · " + l.account))
-                    }
-                }
-            } else {
-                Text("Extra layouts are set in Chart settings")
-            }
+    private var chartIndex: Int { min(vm.settings.chartLinkColumn, vm.chartCount - 1) }
+    private var column: String { vm.chartName(chartIndex) }
+    private var isSheet: Bool { chartIndex < max(1, vm.chartBook.columns.count) }
+    private var current: String { vm.settings.chartLayoutOverride[column] ?? "" }
+
+    private func title(_ l: LayoutCode) -> String {
+        let mark = current == l.code ? "✓ " : ""
+        let acct = l.account.isEmpty ? "" : " · " + l.account
+        return mark + l.name + " · " + l.code + acct
+    }
+
+    private func pick(_ code: String?) { vm.settings.chartLayoutOverride[column] = code }
+
+    @ViewBuilder private var items: some View {
+        if isSheet {
+            Text("Chart \(chartIndex + 1) opens every stock in:")
+            Button(current.isEmpty ? "✓ Each stock's own link from the sheet" : "Each stock's own link from the sheet") { pick(nil) }
             Divider()
-            Button("Manage layout codes…") { manage = true }
-        } label: {
-            Text(current.isEmpty ? "Layout: sheet" : "Layout: \(store.name(of: current) ?? current)").font(.caption)
+            ForEach(store.codes) { l in
+                Button(title(l)) { pick(l.code) }
+            }
+        } else {
+            Text("Extra layouts are set in Chart settings")
         }
-        .menuStyle(.borderlessButton).fixedSize()
-        .help("Which TradingView layout Chart \(c + 1) uses for every stock — pick one of your saved codes")
-        .sheet(isPresented: $manage) { LayoutCodesView().environmentObject(vm) }
-        .onAppear { store.seed(vm) }
+        Divider()
+        Button("Manage layout codes…") { manage = true }
+    }
+
+    private var label: String {
+        if current.isEmpty { return "Layout: sheet" }
+        return "Layout: " + (store.name(of: current) ?? current)
+    }
+
+    var body: some View {
+        Menu { items } label: { Text(label).font(.caption) }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Which TradingView layout this chart uses for every stock — pick one of your saved codes")
+            .sheet(isPresented: $manage) { LayoutCodesView().environmentObject(vm) }
+            .onAppear { store.seed(vm) }
     }
 }
 
@@ -103,14 +113,7 @@ struct LayoutCodesView: View {
                         TextField("Code", text: $l.code).font(.body.monospaced()).frame(width: 110)
                         TextField("Name", text: $l.name).frame(width: 140)
                         TextField("Account", text: $l.account).frame(width: 170)
-                        ForEach(0..<min(2, max(1, vm.chartBook.columns.count)), id: \.self) { c in
-                            let col = vm.chartName(c)
-                            let on = vm.settings.chartLayoutOverride[col] == l.code
-                            Button(on ? "✓ Chart \(c + 1)" : "Use for Chart \(c + 1)") {
-                                vm.settings.chartLayoutOverride[col] = on ? nil : l.code
-                            }
-                            .buttonStyle(.bordered).tint(on ? .accentColor : nil)
-                        }
+                        ForEach(0..<chartsShown, id: \.self) { c in useButton(c, l.code) }
                         Spacer()
                         Button(role: .destructive) { store.codes.removeAll { $0.id == l.id } } label: { Image(systemName: "trash") }
                             .buttonStyle(.borderless)
@@ -132,6 +135,16 @@ struct LayoutCodesView: View {
         }
         .padding(14)
         .frame(width: 820, height: 460)
+    }
+
+    private var chartsShown: Int { min(2, max(1, vm.chartBook.columns.count)) }
+
+    private func useButton(_ c: Int, _ code: String) -> some View {
+        let col = vm.chartName(c)
+        let on = vm.settings.chartLayoutOverride[col] == code
+        let text: String = on ? "✓ Chart \(c + 1)" : "Use for Chart \(c + 1)"
+        return Button(text) { vm.settings.chartLayoutOverride[col] = on ? nil : code }
+            .buttonStyle(.bordered)
     }
 
     private func add() {
