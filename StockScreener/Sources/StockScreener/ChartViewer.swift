@@ -433,6 +433,8 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
     var onSignedIn: ((Int) -> Void)?
     private var signTimer: Timer?
     private var signAccount = 0
+    private var signStarted = Date.distantPast
+    private var cookieSeen = false
     private var views: [Int: WKWebView] = [:]
     private var popups: [(window: NSWindow, web: WKWebView)] = []
 
@@ -573,9 +575,22 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         use(account: a)
         signingIn = true
         signAccount = a
-        if let u = URL(string: "https://www.tradingview.com/accounts/signin/") { view.load(URLRequest(url: u)) }
+        signStarted = Date()
+        cookieSeen = false
         signTimer?.invalidate()
-        signTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.checkSignedIn() }
+        // A logged-out TradingView can leave its old session cookie behind; clear it first, so only a session made
+        // by THIS sign-in counts (otherwise the app jumped back to the chart before TradingView had finished).
+        let store = TVAccounts.store(a).httpCookieStore
+        store.getAllCookies { [weak self] cookies in
+            let old = cookies.filter { $0.domain.contains("tradingview.com") && $0.name.lowercased().hasPrefix("sessionid") }
+            let group = DispatchGroup()
+            for c in old { group.enter(); store.delete(c) { group.leave() } }
+            group.notify(queue: .main) {
+                guard let self else { return }
+                if let u = URL(string: "https://www.tradingview.com/accounts/signin/") { self.view.load(URLRequest(url: u)) }
+                self.signTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.checkSignedIn() }
+            }
+        }
     }
 
     private func stopWatchingSignIn() { signTimer?.invalidate(); signTimer = nil }
@@ -589,6 +604,10 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
             guard ok else { return }
             DispatchQueue.main.async {
                 guard let self, self.signingIn else { return }
+                // let TradingView finish its own redirect after the login (it may still be on the sign-in page)
+                let onSignin = self.view.url?.absoluteString.contains("/accounts/signin") ?? false
+                if self.view.isLoading { return }
+                if onSignin && !self.cookieSeen { self.cookieSeen = true; return }      // one more tick to let it settle
                 for p in self.popups { p.window.close() }
                 self.popups = []
                 self.signingIn = false
