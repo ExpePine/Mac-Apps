@@ -34,6 +34,31 @@ extension ScreenerViewModel {
         return Array(Set(table.rows.map { $0.text(sc).trimmingCharacters(in: .whitespaces) }).subtracting([""])).sorted()
     }
 
+    /// NSE renamed a stock: `from` (old) is now `to` (new). The delivery history, deals and Yahoo prices join up,
+    /// and both names find the same data.
+    func addRename(from: String, to: String) {
+        let a = SymbolBook.clean(from), b = SymbolBook.clean(to)
+        guard !a.isEmpty, !b.isEmpty, a != b else { return }
+        var list = symbolBook.renames ?? []
+        list.removeAll { $0.from == a }
+        list.append(SymbolRename(from: a, to: b))
+        symbolBook.renames = list
+        renamesChanged()
+        symbolStatus = "\(a) → \(b): NSE history and deals joined; both names now find the same data"
+    }
+
+    func removeRenames(_ froms: Set<String>) {
+        symbolBook.renames = (symbolBook.renames ?? []).filter { !froms.contains($0.from) }
+        renamesChanged()
+    }
+
+    private func renamesChanged() {
+        symbolBook.save()
+        DeliveryCenter.shared.reload()
+        DealsCenter.shared.regroup()
+        setTableKeepingRaw()
+    }
+
     private func saveSymbols() {
         symbolBook.save()
         setTableKeepingRaw()            // re-apply to every screen

@@ -9,6 +9,9 @@ struct SymbolsView: View {
     @State private var hiddenSelection = Set<String>()
     @State private var hideInput = ""
     @State private var search = ""
+    @State private var renameFrom = ""
+    @State private var renameTo = ""
+    @State private var renameSelection = Set<String>()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,7 +19,11 @@ struct SymbolsView: View {
             Divider()
             HSplitView {
                 manualList.frame(minWidth: 640)
-                hiddenList.frame(minWidth: 260, idealWidth: 300)
+                VSplitView {
+                    hiddenList.frame(minHeight: 220)
+                    renameList.frame(minHeight: 220)
+                }
+                .frame(minWidth: 280, idealWidth: 320)
             }
         }
         .navigationTitle("Symbols")
@@ -133,6 +140,45 @@ struct SymbolsView: View {
             }
         }
         .padding(12)
+    }
+
+    // MARK: NSE renames
+
+    private var renameList: some View {
+        let list = vm.symbolBook.renames ?? []
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Renamed on NSE (\(list.count))").font(.headline)
+            Text("When NSE changes a stock's symbol: its old days join the new symbol's delivery history, deals and Yahoo prices, and both names (sheet or NSE) find the same data.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 4) {
+                SymbolField(vm: vm, placeholder: "Old NSE symbol", text: $renameFrom, multi: false) { addRename() }
+                Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                SymbolField(vm: vm, placeholder: "New NSE symbol", text: $renameTo, multi: false) { addRename() }
+                Button("Add") { addRename() }
+                    .disabled(renameFrom.trimmingCharacters(in: .whitespaces).isEmpty || renameTo.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            List(list, selection: $renameSelection) { r in
+                HStack {
+                    Text(r.from).font(.body.monospaced())
+                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                    Text(r.to).font(.body.monospaced().bold())
+                    Spacer()
+                    Text(r.addedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary)
+                }
+                .tag(r.from)
+            }
+            .listStyle(.inset(alternatesRowBackgrounds: true))
+            HStack {
+                Button("Remove selected") { vm.removeRenames(renameSelection); renameSelection = [] }.disabled(renameSelection.isEmpty)
+                Spacer()
+            }
+        }
+        .padding(12)
+    }
+
+    private func addRename() {
+        vm.addRename(from: renameFrom, to: renameTo)
+        renameFrom = ""; renameTo = ""
     }
 
     // MARK: Helpers

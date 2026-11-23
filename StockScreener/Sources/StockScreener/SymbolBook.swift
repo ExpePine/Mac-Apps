@@ -14,16 +14,51 @@ struct ManualSymbol: Codable, Identifiable, Equatable {
     var yahooIndustry = ""            // Yahoo's own sector / industry wording (for reference)
 }
 
+/// An NSE symbol change: the stock traded as `from` until NSE renamed it `to`.
+struct SymbolRename: Codable, Identifiable, Equatable {
+    var id: String { from }
+    var from: String
+    var to: String
+    var addedAt = Date()
+}
+
+/// The renames, readable from anywhere (building the delivery book, Yahoo, deals).
+final class SymbolRenames: @unchecked Sendable {
+    static let shared = SymbolRenames()
+    private let lock = NSLock()
+    private var map: [String: String] = [:]
+    func set(_ list: [SymbolRename]) {
+        lock.lock(); defer { lock.unlock() }
+        map = Dictionary(list.map { ($0.from, $0.to) }, uniquingKeysWith: { _, b in b })
+    }
+    /// The stock's current NSE symbol (follows chains: A → B → C).
+    func current(_ symbol: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        var s = symbol, hops = 0
+        while let n = map[s], n != s, hops < 6 { s = n; hops += 1 }
+        return s
+    }
+    /// Every old name of each renamed stock: old → current.
+    var aliases: [String: String] {
+        lock.lock(); let keys = Array(map.keys); lock.unlock()
+        return Dictionary(keys.map { ($0, current($0)) }, uniquingKeysWith: { a, _ in a })
+    }
+    var isEmpty: Bool { lock.lock(); defer { lock.unlock() }; return map.isEmpty }
+}
+
 struct SymbolBook: Codable {
     var manual: [ManualSymbol] = []
     var hidden: [String] = []         // sheet symbols removed from the app
+    var renames: [SymbolRename]? = nil // NSE symbol changes (old → new); optional so older files still load
 
     private static var url: URL { AppFolders.base.appendingPathComponent("symbols.json") }
     static func load() -> SymbolBook {
         guard let d = try? Data(contentsOf: url), let b = try? JSONDecoder().decode(SymbolBook.self, from: d) else { return SymbolBook() }
+        SymbolRenames.shared.set(b.renames ?? [])
         return b
     }
     func save() {
+        SymbolRenames.shared.set(renames ?? [])
         try? FileManager.default.createDirectory(at: AppFolders.base, withIntermediateDirectories: true)
         if let d = try? JSONEncoder().encode(self) { try? d.write(to: Self.url, options: .atomic) }
     }

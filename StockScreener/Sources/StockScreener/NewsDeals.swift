@@ -224,14 +224,14 @@ enum CSVLine {
     /// Total bulk + block buy (₹ Cr) per day for one stock.
     func buyByDay(_ symbol: String) -> [String: Double] {
         var out: [String: Double] = [:]
-        for d in bySymbol[symbol.uppercased()] ?? [] where d.isBuy { out[d.day, default: 0] += d.valueCr }
+        for d in bySymbol[SymbolRenames.shared.current(symbol.uppercased())] ?? [] where d.isBuy { out[d.day, default: 0] += d.valueCr }
         return out
     }
 
     /// DEALSIZE: total bulk + block traded (buy + sell, ₹ Cr) per day for one stock.
     func sizeByDay(_ symbol: String) -> [String: Double] {
         var out: [String: Double] = [:]
-        for d in bySymbol[symbol.uppercased()] ?? [] { out[d.day, default: 0] += d.valueCr }
+        for d in bySymbol[SymbolRenames.shared.current(symbol.uppercased())] ?? [] { out[d.day, default: 0] += d.valueCr }
         return out
     }
 
@@ -270,10 +270,13 @@ enum CSVLine {
         }
     }
 
+    /// Regroups after an NSE symbol rename.
+    func regroup() { set(deals) }
+
     private func set(_ list: [BulkDeal]) {
         var seen = Set<String>()
         deals = list.filter { seen.insert($0.id).inserted }.sorted { $0.day < $1.day }
-        bySymbol = Dictionary(grouping: deals, by: \.symbol)
+        bySymbol = Dictionary(grouping: deals, by: { SymbolRenames.shared.current($0.symbol.uppercased()) })
         revision &+= 1
         onChange?()
     }

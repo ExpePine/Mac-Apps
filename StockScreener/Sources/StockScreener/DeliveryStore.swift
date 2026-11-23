@@ -9,7 +9,7 @@ import SwiftUI
 // aren't requested again. New days are added every day; old days are kept.
 
 struct DeliveryRow {
-    let symbol: String
+    var symbol: String
     let series: String
     let close: Double
     let tradedQty: Double
@@ -192,9 +192,13 @@ struct DeliveryBook {
     /// Builds per-symbol series from stored days (EQ preferred when a symbol trades in several series).
     static func build(days: [String], load: (String) -> [DeliveryRow]) -> DeliveryBook {
         var book = DeliveryBook(days: days)
+        let renamed = !SymbolRenames.shared.isEmpty
         for d in days {
             var best: [String: DeliveryRow] = [:]
-            for r in load(d) where equitySeries.contains(r.series) {
+            for r0 in load(d) where equitySeries.contains(r0.series) {
+                // a renamed stock: its days under the old NSE symbol join the new one's history
+                var r = r0
+                if renamed { r.symbol = SymbolRenames.shared.current(r0.symbol) }
                 if let e = best[r.symbol], e.series == "EQ" || (r.series != "EQ" && e.delivQty >= r.delivQty) { continue }
                 best[r.symbol] = r
             }
@@ -207,6 +211,8 @@ struct DeliveryBook {
                 book.series[s]!.seriesCode.append(r.series)
             }
         }
+        // …and the old symbol finds the same history (a sheet that still uses it)
+        for (old, new) in SymbolRenames.shared.aliases where book.series[old] == nil { book.series[old] = book.series[new] }
         return book
     }
 }
@@ -819,6 +825,7 @@ struct DeliveryColumns {
     }
 
     func reload() {
+        if SymbolRenames.shared.isEmpty { _ = SymbolBook.load() }          // NSE renames, before the history is built
         isLoading = true
         Task {
             let days = DeliveryFiles.days()
