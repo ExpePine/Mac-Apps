@@ -133,6 +133,7 @@ struct ChartViewer: View {
             }
         }
         .onChange(of: vm.settings.chartLinkColumn) { _ in load() }
+        .onChange(of: vm.settings.chartLayoutOverride) { _ in load() }
         .sheet(isPresented: $showSettings) { ChartLinkSettings().environmentObject(vm) }
     }
 
@@ -167,6 +168,7 @@ struct ChartViewer: View {
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             .help(vm.chartCount > 1 ? "Switch chart layout (⌘1, ⌘2…)" : "Add a Link2 column to your chart sheet (or an extra layout in Chart settings) for Chart 2")
+            LayoutCodeMenu()
             ForEach(0..<min(vm.chartCount, 9), id: \.self) { i in
                 Button("") { vm.settings.chartLinkColumn = i }
                     .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
