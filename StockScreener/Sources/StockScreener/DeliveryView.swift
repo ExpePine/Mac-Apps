@@ -504,6 +504,72 @@ struct DeliveryMiniChart: View {
     }
 
     /// A small one-line status capsule.
+    /// The overlay switches, full names, never squeezed; each switch's own setting sits right after it.
+    private var layerRow: some View {
+        let L = ChartLayer.decode(layersRaw)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                layerToggle(.candles, L)
+                layerToggle(.del2c, L)
+                layerToggle(.hit3, L)
+                group {
+                    layerToggle(.shade, L)
+                    DelsmacLevelControl(level: $shadeLevel).controlSize(.mini).fixedSize()
+                }
+                layerToggle(.dsmark, L)
+                group {
+                    layerToggle(.zpmark, L)
+                    if L.contains(.zpmark) { ZPLevelControl(level: $zpLevel).controlSize(.mini).fixedSize() }
+                }
+                group {
+                    layerToggle(.fmark, L)
+                    if L.contains(.fmark) { FormulaMarkControl(symbol: SymbolBook.clean(symbol)).controlSize(.mini) }
+                }
+                group {
+                    layerToggle(.deals, L)
+                    if L.contains(.deals) { dealsNote }
+                }
+                group {
+                    layerToggle(.steep, L)
+                    if L.contains(.steep) { steepMenu }
+                }
+                Divider().frame(height: 14)
+                PineButton().controlSize(.mini)
+            }
+            .lineLimit(1)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A switch and its settings, boxed together so it's clear which setting belongs to which switch.
+    private func group<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+        HStack(spacing: 3) { c() }
+            .padding(.horizontal, 3).padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.10)))
+    }
+
+    private func layerToggle(_ layer: ChartLayer, _ L: Set<ChartLayer>) -> some View {
+        Toggle(Self.quickName(layer), isOn: Binding(get: { L.contains(layer) }, set: { on in
+            var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
+            layersRaw = ChartLayer.encode(x)
+        }))
+        .toggleStyle(.button).controlSize(.mini).fixedSize()
+        .help(layer.label(metric.pine, length))
+    }
+
+    private var steepMenu: some View {
+        Menu {
+            Picker("Measured on", selection: $steepSource) {
+                Text("DELSMA").tag("delsma"); Text("Delivery value — EMA 66").tag("value")
+            }
+            Picker("Steepness span", selection: $steepSpan) { ForEach([3, 5, 10, 20], id: \.self) { Text("\($0) days").tag($0) } }
+            Picker("Normal-steepness window", selection: $steepNorm) { ForEach([100, 150, 250, 500], id: \.self) { Text("\($0) days").tag($0) } }
+            Picker("Steep = σ above normal", selection: $steepTrig) { ForEach([1.5, 2.0, 2.5, 3.0], id: \.self) { Text(String(format: "%.1f σ", $0)).tag($0) } }
+        } label: { Text("\(steepSpan)d·\(String(format: "%g", steepTrig))σ").font(.caption2.monospacedDigit()) }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help("Sustained steepness: src = DELSMA (or ta.ema(DELIV_QTY×CLOSE, 66)); g = (src/src[span] − 1)×100; z = (g − sma(g, window)) / stdev(g, window); steep = z > σ; run = days steep in a row; energy = Σ z while steep")
+    }
+
     private func chip(_ text: String, _ color: Color) -> some View {
         Text(text).font(.caption2.monospacedDigit()).foregroundStyle(color).lineLimit(1).fixedSize()
             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -583,37 +649,6 @@ struct DeliveryMiniChart: View {
                 if let e = lw.lastError { Text(e).font(.caption2).foregroundStyle(.red).lineLimit(1) }
                 Spacer(minLength: 4)
 
-                // ── layers ──
-                if !showChart3 {
-                    let L = ChartLayer.decode(layersRaw)
-                    HStack(spacing: 2) {
-                        ForEach([ChartLayer.candles, .del2c, .hit3, .shade, .dsmark, .zpmark, .fmark, .deals, .steep], id: \.self) { layer in
-                            Toggle(Self.quickName(layer), isOn: Binding(get: { L.contains(layer) }, set: { on in
-                                var x = L; if on { x.insert(layer); if layer == .deals { DealsCenter.shared.update(days: 1800) } } else { x.remove(layer) }
-                                layersRaw = ChartLayer.encode(x)
-                            }))
-                            .toggleStyle(.button).controlSize(.mini)
-                            .help(layer.label(metric.pine, length))
-                        }
-                        if L.contains(.zpmark) { ZPLevelControl(level: $zpLevel).controlSize(.mini).fixedSize() }
-                        if L.contains(.fmark) { FormulaMarkControl(symbol: SymbolBook.clean(symbol)).controlSize(.mini) }
-                        PineButton().controlSize(.mini)
-                        if L.contains(.deals) { dealsNote }
-                        if L.contains(.steep) {
-                            Menu {
-                                Picker("Measured on", selection: $steepSource) {
-                                    Text("DELSMA").tag("delsma"); Text("Delivery value — EMA 66").tag("value")
-                                }
-                                Picker("Steepness span", selection: $steepSpan) { ForEach([3, 5, 10, 20], id: \.self) { Text("\($0) days").tag($0) } }
-                                Picker("Normal-steepness window", selection: $steepNorm) { ForEach([100, 150, 250, 500], id: \.self) { Text("\($0) days").tag($0) } }
-                                Picker("Steep = σ above normal", selection: $steepTrig) { ForEach([1.5, 2.0, 2.5, 3.0], id: \.self) { Text(String(format: "%.1f σ", $0)).tag($0) } }
-                            } label: { Text("\(steepSpan)d·\(String(format: "%g", steepTrig))σ").font(.caption2.monospacedDigit()) }
-                            .menuStyle(.borderlessButton).fixedSize()
-                            .help("Sustained steepness: src = DELSMA (or ta.ema(DELIV_QTY×CLOSE, 66)); g = (src/src[span] − 1)×100; z = (g − sma(g, window)) / stdev(g, window); steep = z > σ; run = days steep in a row; energy = Σ z while steep")
-                        }
-                    }
-                    DelsmacLevelControl(level: $shadeLevel).controlSize(.mini).fixedSize()
-                }
                 ChartStyleButton().buttonStyle(.borderless).controlSize(.mini)
                 ChartLayersButton(raw: $layersRaw, metric: metric.pine, length: length,
                                   options: ChartLayer.allCases)
@@ -632,7 +667,9 @@ struct DeliveryMiniChart: View {
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
             }
             .lineLimit(1)
-            .padding(.horizontal, 8).padding(.vertical, 3)
+            .padding(.horizontal, 8).padding(.top, 3)
+            // ── second row: what's drawn on top, each with its own setting right after it ──
+            if !showChart3 { layerRow.padding(.horizontal, 8).padding(.bottom, 3) }
             if s != nil { LWChartView(holder: lw).dealRankPopup(lw, symbol: SymbolBook.clean(symbol)) }        // the synced chart: Delivery, or Chart 3
         }
         .onChange(of: lower) { _ in push() }
