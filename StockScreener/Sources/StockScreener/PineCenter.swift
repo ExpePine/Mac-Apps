@@ -179,11 +179,21 @@ final class PineColumns: @unchecked Sendable {
         for col in need { sheetCache[col] = out[col] ?? [:] }
     }
 
+    /// Other stocks a script reads with request.security("NSE:XYZ", …).
+    func others(_ p: PineProgram, except symbol: String) -> [String: PineInput] {
+        var o: [String: PineInput] = [:]
+        for sym in p.securitySymbols where sym != symbol.uppercased() {
+            if let i = input(sym, sheetColumns: p.sheetColumns) { o[sym] = i }
+        }
+        return o
+    }
+
     /// Runs one script on one stock (the editor's Check button).
     func runOne(_ s: PineScript, symbol: String) async -> (PineProgram, PineResult?, PineInput?) {
         let p = program(s)
         await loadSheetColumns(p.sheetColumns)
-        guard let inp = input(symbol, sheetColumns: p.sheetColumns) else { return (p, nil, nil) }
+        guard var inp = input(symbol, sheetColumns: p.sheetColumns) else { return (p, nil, nil) }
+        inp.others = others(p, except: symbol)
         let r = await Task.detached(priority: .userInitiated) { PineRun(p, inp).run() }.value
         return (p, r, inp)
     }
@@ -218,10 +228,21 @@ final class PineColumns: @unchecked Sendable {
                 let o = s.outputs[pl.title] ?? Self.defaultOut(pl)
                 let color = o.color ?? Self.solid(pl.color)
                 let key = "\(s.id.uuidString.prefix(6))_\(k)"
-                if pl.kind == "shape" || pl.kind == "alert" {
+                if pl.kind == "bg" || pl.kind == "barcolor" {
+                    guard o.show != "off" else { continue }
+                    var pts: [LWChartData.Point] = []
+                    for (i, c) in pl.colors.enumerated() where i < inp.days.count {
+                        if let c { pts.append(LWChartData.Point(time: inp.days[i], value: 1, color: c)) }
+                    }
+                    out.plots.append(LWChartData.PineJS(key: key, title: pl.title, color: color, pane: pl.kind, style: pl.kind,
+                                                        width: 1, legend: false, points: pts))
+                    continue
+                }
+                if pl.kind == "shape" || pl.kind == "alert" || pl.kind == "label" {
                     guard o.show != "off" else { continue }
                     for (i, v) in pl.values.enumerated() where !v.isNaN && i < inp.days.count {
-                        let text = pl.text.isEmpty ? String(pl.title.prefix(4)) : pl.text
+                        let lt = i < pl.texts.count ? (pl.texts[i] ?? "") : ""
+                        let text = !lt.isEmpty ? lt : (pl.text.isEmpty ? String(pl.title.prefix(4)) : pl.text)
                         let below = pl.location.contains("below") || pl.location.contains("bottom")
                         out.marks.append(LWChartData.Marker(time: inp.days[i], text: text, position: below ? "belowBar" : "aboveBar",
                                                             color: pl.colors[i].map(Self.solid) ?? color,
@@ -233,9 +254,10 @@ final class PineColumns: @unchecked Sendable {
                 guard o.show != "off" else { continue }
                 var pts: [LWChartData.Point] = []
                 pts.reserveCapacity(inp.days.count)
+                let varied = Set(pl.colors.compactMap { $0 }).count > 1
                 for (i, v) in pl.values.enumerated() where i < inp.days.count {
                     pts.append(LWChartData.Point(time: inp.days[i], value: v.isNaN || v.isInfinite ? nil : v,
-                                                 color: pl.kind == "hist" ? pl.colors[i].map(Self.solid) : nil))
+                                                 color: pl.kind == "hist" || varied ? pl.colors[i].map(Self.solid) : nil))
                 }
                 let pane = o.show == "legend" ? "none" : o.show
                 let style = pl.kind == "hline" ? "line" : pl.kind
@@ -248,7 +270,8 @@ final class PineColumns: @unchecked Sendable {
 
     static func defaultOut(_ p: PinePlot) -> PineOut {
         var o = PineOut()
-        if p.kind == "shape" || p.kind == "alert" { o.show = "marks" }
+        if p.kind == "shape" || p.kind == "alert" || p.kind == "label" { o.show = "marks" }
+        if p.kind == "bg" || p.kind == "barcolor" { o.show = "chart"; o.legend = false }
         return o
     }
 
@@ -303,7 +326,12 @@ final class PineColumns: @unchecked Sendable {
                     if Task.isCancelled { columnsRunning = false; return }
                     let chunk = Array(syms[k..<min(syms.count, k + 40)])
                     k += 40
-                    let inputs: [PineInput] = chunk.compactMap { input($0, bars: bars, sheetColumns: p.sheetColumns) }
+                    let shared = others(p, except: "")
+                    let inputs: [PineInput] = chunk.compactMap { sym -> PineInput? in
+                        guard var i = input(sym, bars: bars, sheetColumns: p.sheetColumns) else { return nil }
+                        i.others = shared
+                        return i
+                    }
                     let results: [(String, [String], PineResult)] = await Task.detached(priority: .utility) {
                         inputs.map { ($0.symbol, $0.days, PineRun(p, $0).run()) }
                     }.value
@@ -347,9 +375,11 @@ final class PineColumns: @unchecked Sendable {
     roc rsi crossover crossunder cross percentrank barssince valuewhen cum tr atr macd bb rising falling cci mfi swma; \
     math.abs max min avg round floor ceil sqrt log log10 exp pow sign sum; str.tostring. Outputs: plot, plotshape, \
     plotchar, hline, alertcondition (title = … named argument).
-    NOT supported (rewrite them away): request.security and other request.*, arrays, matrices, maps, labels, lines, \
-    boxes, tables, strategy.*, switch, while loops, 'if' or 'switch' used as a value (x = if …), methods, types, \
-    imports, libraries, varip, fill, bgcolor. The chart is daily; drop other timeframes.
+    Also supported: switch (statement and value), x = if …, while, break, continue, arrays (array.new_*, push, pop, get, \
+    set, size, sum, avg, max, min, sort …, and a.push(x) method calls), bgcolor, barcolor, label.new(x, y, text), \
+    request.security(symbol, timeframe, expr) for NSE stocks with timeframes D, W, M, 3M, 12M.
+    NOT supported (rewrite them away): intraday timeframes, other request.* calls, matrices, maps, lines, boxes, \
+    tables, strategy.*, user-defined types and methods, imports, libraries, fill. The data is daily NSE.
     Reply with ONLY the complete rewritten script — no explanations, no markdown fences.
     """
 
@@ -483,18 +513,21 @@ struct PineView: View {
     }
 
     private func outputRow(_ pl: PinePlot) -> some View {
-        let isShape = pl.kind == "shape" || pl.kind == "alert"
+        let isShape = pl.kind == "shape" || pl.kind == "alert" || pl.kind == "label"
+        let isColour = pl.kind == "bg" || pl.kind == "barcolor"
         let o = draft.outputs[pl.title] ?? PineCenter.defaultOut(pl)
         let lastV = pl.values.last(where: { !$0.isNaN })
         let hits = pl.values.filter { !$0.isNaN }.count
         return HStack(spacing: 8) {
             Circle().fill(Color(pine: o.color ?? pl.color) ?? .blue).frame(width: 9, height: 9)
             Text(pl.title).font(.caption.monospaced()).frame(width: 160, alignment: .leading).lineLimit(1)
-            Text(isShape ? "\(hits) days" : (lastV.map { String(format: abs($0) >= 1000 ? "%.0f" : "%.3f", $0) } ?? "na"))
+            Text(isShape || isColour ? "\(hits) days" : (lastV.map { String(format: abs($0) >= 1000 ? "%.0f" : "%.3f", $0) } ?? "na"))
                 .font(.caption.monospacedDigit()).frame(width: 70, alignment: .trailing)
             Picker("", selection: binding(pl.title, pl, \.show)) {
                 if isShape {
                     Text("Marks on candles").tag("marks"); Text("Off").tag("off")
+                } else if isColour {
+                    Text(pl.kind == "bg" ? "Shade the chart" : "Colour the candles").tag("chart"); Text("Off").tag("off")
                 } else {
                     Text("Legend number only").tag("legend")
                     Text("Price pane").tag("price")
@@ -504,7 +537,7 @@ struct PineView: View {
                 }
             }
             .labelsHidden().frame(width: 190)
-            if !isShape && o.show != "legend" && o.show != "off" {
+            if !isShape && !isColour && o.show != "legend" && o.show != "off" {
                 Toggle("legend", isOn: binding(pl.title, pl, \.legend)).toggleStyle(.checkbox).font(.caption)
             }
             Toggle("Filter column", isOn: binding(pl.title, pl, \.filter)).toggleStyle(.checkbox).font(.caption)
@@ -541,7 +574,8 @@ struct PineView: View {
             Text("What scripts can use").font(.headline)
             Text("Bars are NSE trading days (daily). Series: open high low close volume hl2 hlc3 ohlc4 bar_index · deliv_qty deliv_pct deliv_value nse_close · delsmac (DELSMAC) · dealsize dealbuy dealsell (₹ Cr) · sheet(\"COLUMN\") = a column of your sheet on days the app stored it.")
             Text("Runs: variables, var, :=, if / else, for, functions (=>), ternary, x[n], ta.* (sma ema rma wma vwma stdev highest lowest change roc rsi crossover crossunder percentrank barssince valuewhen atr macd bb cci mfi …), math.*, input.*, plot, plotshape, plotchar, hline, alertcondition.")
-            Text("Not run: request.security, arrays, labels / lines / boxes / tables, strategy.*, switch, while. Use Fix with Groq to rewrite them.")
+            Text("Also: if / switch as values (x = if …), switch, while, break / continue, arrays (array.* and a.push(…)), bgcolor (shades the chart), barcolor (colours candles), label.new (marks), request.security — other NSE stocks (\"NSE:XYZ\") and W / M / 3M / 12M bars built from the daily ones.")
+            Text("Not run: intraday timeframes, other exchanges / indices not in NSE delivery data, lines / boxes / tables (skipped), strategy.*, matrices, maps. Fix with Groq can rewrite those.")
             Text("Each output: legend number, drawn on the price or delivery pane, marks on candles, and/or a Filter column (usable in formulas and Formula counts).")
         }
         .font(.caption)

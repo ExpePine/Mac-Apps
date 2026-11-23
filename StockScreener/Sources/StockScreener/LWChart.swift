@@ -878,6 +878,18 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       (d.pine||[]).forEach(function(p){
         var m={}; p.points.forEach(function(x){ if(x.value!=null) m[x.time]=x.value; }); window._pv[p.key]=m;
         if(p.pane==='none') return;
+        if(p.style==='barcolor'){          // colour the candles
+          var cm={}; p.points.forEach(function(x){ cm[x.time]=x.color; });
+          candle.setData((d.candles||[]).map(function(c){ var k=cm[c.time]; return k?Object.assign({},c,{color:k,wickColor:k,borderColor:k}):c; }));
+          return;
+        }
+        if(p.style==='bg'){                // shade the whole height behind those days
+          var bs=chart.addHistogramSeries({priceScaleId:'pinebg_'+p.key,lastValueVisible:false,priceLineVisible:false,priceFormat:{type:'custom',formatter:function(){return '';}}});
+          chart.priceScale('pinebg_'+p.key).applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
+          bs.setData(p.points.map(function(x){ return {time:x.time,value:1,color:x.color}; }));
+          window._pineS.push(bs);
+          return;
+        }
         var sid=p.pane==='price'?'right':(p.pane==='deliv'?'deliv':'pine_'+p.key);
         var opt={priceScaleId:sid,color:p.color,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false};
         var se=p.style==='hist'?chart.addHistogramSeries(opt):chart.addLineSeries(Object.assign(opt,{lineWidth:Math.max(1,Math.min(4,p.width||1)),lineType:p.style==='step'?1:0}));

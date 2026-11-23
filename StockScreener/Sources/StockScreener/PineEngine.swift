@@ -17,6 +17,7 @@ indirect enum PExpr {
     case tern(PExpr, PExpr, PExpr)
     case call(String, [PExpr], [String: PExpr], Int)
     case list([PExpr])
+    case stmt(PStmt)                             // if / switch used as a value: the last value of the branch taken
 }
 
 indirect enum PStmt {
@@ -27,12 +28,22 @@ indirect enum PStmt {
     case ifs(PExpr, [PStmt], [PStmt])
     case loop(String, PExpr, PExpr, PExpr?, [PStmt])
     case fn(String, [String], [PStmt])
+    case whileS(PExpr, [PStmt])
+    case switchS(PExpr?, [PCase])
+    case brk
+    case cont
 }
+
+struct PCase { var pattern: PExpr?; var body: [PStmt] }     // pattern nil = default
+
+/// Pine arrays (array.new_float …): a shared, growable list.
+final class PineArray { var v: [PVal] = []; init(_ v: [PVal] = []) { self.v = v } }
 
 enum PVal {
     case n(Double)
     case s(String)
     case t([PVal])
+    case a(PineArray)
     var num: Double { if case .n(let d) = self { return d }; return .nan }
     var str: String? { if case .s(let s) = self { return s }; return nil }
     var truthy: Bool { let d = num; return !d.isNaN && d != 0 }
@@ -44,6 +55,7 @@ struct PineProgram {
     var functions: [String: ([String], [PStmt])] = [:]
     var issues: [String] = []                    // what can't run (with line numbers)
     var sheetColumns: [String] = []              // sheet("COL") used
+    var securitySymbols: [String] = []           // other stocks request.security asks for
     var sites = 0
 }
 
@@ -53,10 +65,22 @@ enum PineParser {
     enum Tok: Equatable { case num(Double), str(String), id(String), op(String) }
     struct Line { let no: Int; let indent: Int; var toks: [Tok] }
 
-    static let unsupportedPrefixes = ["request.", "array.", "matrix.", "map.", "label.", "line.", "box.", "table.", "linefill.",
-                                      "strategy.", "polyline.", "chart.point", "ticker.", "timeframe.change", "str.split", "log."]
-    static let ignoredCalls: Set<String> = ["indicator", "study", "strategy", "fill", "bgcolor", "barcolor", "plotcandle", "plotbar",
+    static let unsupportedPrefixes = ["matrix.", "map.", "strategy.", "chart.point", "ticker.", "timeframe.change", "str.split"]
+    /// Drawing objects other than label.new are skipped quietly (the chart can't draw them).
+    static let ignoredPrefixes = ["line.", "box.", "table.", "linefill.", "polyline.", "label.", "log.", "runtime."]
+    static let ignoredCalls: Set<String> = ["indicator", "study", "strategy", "fill", "plotcandle", "plotbar",
                                             "plotarrow", "library", "export", "max_bars_back", "runtime.error"]
+    /// Namespaces — a call like `myArray.push(x)` is a method on a variable, not one of these.
+    static let namespaces: Set<String> = ["ta", "math", "input", "str", "color", "array", "request", "label", "line", "box", "table",
+        "strategy", "syminfo", "barstate", "timeframe", "chart", "ticker", "matrix", "map", "location", "shape", "size", "plot",
+        "display", "hline", "text", "position", "format", "scale", "extend", "xloc", "yloc", "font", "alert", "barmerge",
+        "polyline", "runtime", "log", "session", "linefill", "dayofweek", "currency", "order", "adjustment", "earnings", "dividends", "splits"]
+
+    static func cleanSymbol(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespaces).uppercased()
+        if let c = t.lastIndex(of: ":") { return String(t[t.index(after: c)...]) }
+        return t
+    }
 
     static func parse(_ source: String) -> PineProgram {
         var prog = PineProgram()
@@ -71,16 +95,24 @@ enum PineParser {
         func walkE(_ e: PExpr) {
             switch e {
             case .call(let n, let a, let named, _):
-                if prog.functions[n] == nil && !PineRun.knows(n) && !ignoredCalls.contains(n) && !seen.contains(n) {
+                let ns = n.split(separator: ".").first.map(String.init) ?? n
+                let isMethod = n.contains(".") && !namespaces.contains(ns)
+                let quiet = ignoredPrefixes.contains { n.hasPrefix($0) } && n != "label.new"
+                if prog.functions[n] == nil && !PineRun.knows(n) && !ignoredCalls.contains(n) && !isMethod && !quiet && !seen.contains(n) {
                     seen.insert(n); prog.issues.append("\(n)() isn't supported")
                 }
                 if n == "sheet", let f = a.first, case .str(let c) = f { prog.sheetColumns.append(c) }
+                if n == "request.security" || n == "security", let f = a.first ?? named["symbol"], case .str(let sy) = f {
+                    let c = cleanSymbol(sy)
+                    if !prog.securitySymbols.contains(c) { prog.securitySymbols.append(c) }
+                }
                 a.forEach(walkE); named.values.forEach(walkE)
             case .hist(let a, let b, _): walkE(a); walkE(b)
             case .unary(_, let a): walkE(a)
             case .bin(_, let a, let b): walkE(a); walkE(b)
             case .tern(let a, let b, let c): walkE(a); walkE(b); walkE(c)
             case .list(let xs): xs.forEach(walkE)
+            case .stmt(let st): walkS(st)
             case .ident(let n):
                 if unsupportedPrefixes.contains(where: { n.hasPrefix($0) }) && !seen.contains(n) { seen.insert(n); prog.issues.append("\(n) isn't supported") }
             default: break
@@ -92,6 +124,11 @@ enum PineParser {
             case .ifs(let c, let a, let b): walkE(c); a.forEach(walkS); b.forEach(walkS)
             case .loop(_, let a, let b, let c, let body): walkE(a); walkE(b); if let c { walkE(c) }; body.forEach(walkS)
             case .fn(_, _, let body): body.forEach(walkS)
+            case .whileS(let c, let body): walkE(c); body.forEach(walkS)
+            case .switchS(let x, let cases):
+                if let x { walkE(x) }
+                for c in cases { if let p = c.pattern { walkE(p) }; c.body.forEach(walkS) }
+            case .brk, .cont: break
             }
         }
         prog.stmts.forEach(walkS)
@@ -234,7 +271,16 @@ enum PineParser {
                 site = p.site
                 let body = block(&lines, &i, indent: indent + 1, prog: &prog, site: &site)
                 return .loop(v, a, b, by, body)
-            case "while", "switch", "import", "method", "type", "export", "enum":
+            case "while":
+                var p = P(toks: Array(toks.dropFirst()), site: site)
+                let cond = p.expr(); site = p.site
+                let body = block(&lines, &i, indent: indent + 1, prog: &prog, site: &site)
+                return .whileS(cond, body)
+            case "switch":
+                return switchStmt(Array(toks.dropFirst()), &lines, &i, indent: indent, prog: &prog, site: &site)
+            case "break": return .brk
+            case "continue": return .cont
+            case "import", "method", "type", "export", "enum":
                 prog.issues.append("line \(line.no): '\(w)' isn't supported")
                 _ = block(&lines, &i, indent: indent + 1, prog: &prog, site: &site)
                 return nil
@@ -242,6 +288,12 @@ enum PineParser {
                 toks.removeFirst()
                 while toks.count > 2, case .id(let tw) = toks[0], typeWords.contains(tw), case .id = toks[1] { toks.removeFirst() }
                 guard toks.count > 2, case .id(let name) = toks[0], toks[1] == .op("=") else { prog.issues.append("line \(line.no): var … isn't understood"); return nil }
+                if case .id(let w2) = toks[2], w2 == "if" || w2 == "switch" {
+                    i -= 1
+                    lines[i].toks = Array(toks.dropFirst(2))
+                    guard let st = statement(&lines, &i, indent: indent, prog: &prog, site: &site) else { return nil }
+                    return .decl(name, .stmt(st), true)
+                }
                 var p = P(toks: Array(toks.dropFirst(2)), site: site)
                 let e = p.expr(); site = p.site
                 return .decl(name, e, true)
@@ -282,15 +334,23 @@ enum PineParser {
             // assignment / declaration
             if toks.count > 2, case .id(let name) = toks[0], case .op(let o) = toks[1] {
                 if [":=", "+=", "-=", "*=", "/="].contains(o) {
+                    if case .id(let w2) = toks[2], w2 == "if" || w2 == "switch" {
+                        i -= 1
+                        lines[i].toks = Array(toks.dropFirst(2))
+                        guard let st = statement(&lines, &i, indent: indent, prog: &prog, site: &site) else { return nil }
+                        return .assign(name, o, .stmt(st))
+                    }
                     var p = P(toks: Array(toks.dropFirst(2)), site: site)
                     let e = p.expr(); site = p.site
                     return .assign(name, o, e)
                 }
                 if o == "=" {
                     if case .id(let w2) = toks[2], w2 == "if" || w2 == "switch" {
-                        prog.issues.append("line \(line.no): '\(name) = \(w2) …' (if / switch as a value) isn't supported")
-                        _ = block(&lines, &i, indent: indent + 1, prog: &prog, site: &site)
-                        return nil
+                        // x = if … / x = switch …: the branch's last value
+                        i -= 1
+                        lines[i].toks = Array(toks.dropFirst(2))
+                        guard let st = statement(&lines, &i, indent: indent, prog: &prog, site: &site) else { return nil }
+                        return .decl(name, .stmt(st), false)
                     }
                     var p = P(toks: Array(toks.dropFirst(2)), site: site)
                     let e = p.expr(); site = p.site
@@ -310,6 +370,39 @@ enum PineParser {
         let e = p.expr(); site = p.site
         if !p.atEnd { prog.issues.append("line \(line.no): couldn't read the whole line") }
         return .expr(e)
+    }
+
+    /// switch [x]
+    ///     pattern => value          (or `=>` then an indented block)
+    ///     => default
+    private static func switchStmt(_ head: [Tok], _ lines: inout [Line], _ i: inout Int, indent: Int, prog: inout PineProgram, site: inout Int) -> PStmt {
+        var subject: PExpr? = nil
+        if !head.isEmpty { var p = P(toks: head, site: site); subject = p.expr(); site = p.site }
+        var cases: [PCase] = []
+        while i < lines.count && lines[i].indent == indent + 1 {
+            let t = lines[i].toks
+            i += 1
+            var depth = 0, arrow = -1
+            for (k, x) in t.enumerated() {
+                if case .op(let o) = x {
+                    if o == "(" || o == "[" { depth += 1 }
+                    if o == ")" || o == "]" { depth -= 1 }
+                    if o == "=>" && depth == 0 { arrow = k; break }
+                }
+            }
+            guard arrow >= 0 else { prog.issues.append("line \(lines[i - 1].no): switch case without =>"); continue }
+            var pat: PExpr? = nil
+            if arrow > 0 { var p = P(toks: Array(t[..<arrow]), site: site); pat = p.expr(); site = p.site }
+            let rest = Array(t[(arrow + 1)...])
+            var body: [PStmt]
+            if rest.isEmpty {
+                body = block(&lines, &i, indent: indent + 2, prog: &prog, site: &site)
+            } else {
+                var p = P(toks: rest, site: site); body = [.expr(p.expr())]; site = p.site
+            }
+            cases.append(PCase(pattern: pat, body: body))
+        }
+        return .switchS(subject, cases)
     }
 
     private static func matching(_ t: [Tok], _ open: Int) -> Int? {
@@ -427,6 +520,7 @@ struct PineInput {
     var days: [String] = []
     var series: [String: [Double]] = [:]          // open high low close volume deliv_qty … (NaN = missing)
     var sheet: [String: [Double]] = [:]           // sheet("COL") per day (NaN where no stored sheet)
+    var others: [String: PineInput] = [:]         // other stocks' data, for request.security
 }
 
 struct PinePlot {
@@ -440,6 +534,7 @@ struct PinePlot {
     var text = ""
     var location = "abovebar"
     var shape = "circle"
+    var texts: [String?] = []                     // label.new: text per bar
 }
 
 struct PineResult {
@@ -462,6 +557,8 @@ final class PineRun {
     private final class PlotBox { var p = PinePlot() }
     private var plots: [Int: PlotBox] = [:]
     private var plotOrder: [Int] = []
+    private var loopCtl = 0                       // 1 break · 2 continue
+    private var secValues: [Int: [Double]] = [:]  // request.security results, by call site
     private var errors: [String] = []
 
     final class TA { var a: [Double] = []; var b: [Double] = []; var c: [Double] = []; var prev = Double.nan; var cum = 0.0; var count = 0 }
@@ -483,12 +580,13 @@ final class PineRun {
         "nz", "na", "fixnan", "int", "float", "bool", "str.tostring", "str.format", "str.contains", "color.new", "color.rgb",
         "input", "input.int", "input.float", "input.bool", "input.source", "input.string", "input.color", "input.timeframe",
         "input.session", "input.symbol", "input.price", "input.time", "input.text_area",
-        "plot", "plotshape", "plotchar", "hline", "alertcondition", "alert", "sheet",
+        "plot", "plotshape", "plotchar", "hline", "alertcondition", "alert", "sheet", "bgcolor", "barcolor", "label.new",
+        "request.security", "security",
         "sma", "ema", "rma", "wma", "stdev", "highest", "lowest", "change", "mom", "roc", "rsi", "crossover", "crossunder",
         "cross", "percentrank", "barssince", "valuewhen", "cum", "atr", "abs", "max", "min", "round", "floor", "ceil",
         "sqrt", "log", "exp", "pow", "sign", "avg", "sum", "tostring", "color", "iff", "rising", "falling", "tr", "vwma",
         "dev", "variance", "macd", "bb", "linreg"]
-    static func knows(_ f: String) -> Bool { functions.contains(f) }
+    static func knows(_ f: String) -> Bool { functions.contains(f) || f.hasPrefix("array.") }
 
     func run(maxBars: Int? = nil) -> PineResult {
         let start = maxBars.map { max(0, n - $0) } ?? 0
@@ -503,6 +601,7 @@ final class PineRun {
             }
         }
         collect(prog.stmts)
+        prepareSecurity(from: start)
         for b in start..<n {
             bar = b
             // `var` variables keep their value from the bar before
@@ -519,8 +618,18 @@ final class PineRun {
     // MARK: statements
 
     private func exec(_ stmts: [PStmt]) {
-        for s in stmts { _ = execOne(s) }
+        for s in stmts { _ = execOne(s); if loopCtl != 0 { return } }
     }
+
+    /// Runs a block; its value is the last statement's (for if / switch used as values and functions).
+    private func block(_ stmts: [PStmt]) -> PVal {
+        var last: PVal = .n(.nan)
+        for s in stmts { last = execOne(s); if loopCtl != 0 { break } }
+        return last
+    }
+
+    /// The values a variable took on every bar (for request.security's inner run).
+    func values(_ name: String) -> [Double] { vars[name] ?? [Double](repeating: .nan, count: n) }
 
     @discardableResult
     private func execOne(_ s: PStmt) -> PVal {
@@ -561,9 +670,29 @@ final class PineRun {
         case .expr(let e):
             return eval(e)
         case .ifs(let c, let a, let b):
-            var last: PVal = .n(.nan)
-            for s2 in (eval(c).truthy ? a : b) { last = execOne(s2) }
-            return last
+            return block(eval(c).truthy ? a : b)
+        case .whileS(let c, let body):
+            var guardN = 0
+            while eval(c).truthy && guardN < 10_000 {
+                _ = block(body); guardN += 1
+                if loopCtl == 1 { loopCtl = 0; break }
+                if loopCtl == 2 { loopCtl = 0 }
+            }
+            return .n(.nan)
+        case .switchS(let subj, let cases):
+            let sv = subj.map { eval($0) }
+            for c in cases {
+                guard let p = c.pattern else { return block(c.body) }
+                let hit: Bool
+                if let sv {
+                    let pv = eval(p)
+                    if let a = sv.str, let b = pv.str { hit = a == b } else { hit = sv.num == pv.num }
+                } else { hit = eval(p).truthy }
+                if hit { return block(c.body) }
+            }
+            return .n(.nan)
+        case .brk: loopCtl = 1; return .n(.nan)
+        case .cont: loopCtl = 2; return .n(.nan)
         case .loop(let v, let a, let b, let by, let body):
             let from = eval(a).num, to = eval(b).num
             var step = by.map { eval($0).num } ?? (to >= from ? 1 : -1)
@@ -571,8 +700,10 @@ final class PineRun {
             var x = from, guardN = 0
             while (step > 0 ? x <= to : x >= to) && guardN < 5000 {
                 set(v, .n(x))
-                for s2 in body { execOne(s2) }
+                _ = block(body)
                 x += step; guardN += 1
+                if loopCtl == 1 { loopCtl = 0; break }
+                if loopCtl == 2 { loopCtl = 0 }
             }
             return .n(.nan)
         case .fn:
@@ -702,6 +833,8 @@ final class PineRun {
             return eval(c).truthy ? eval(a) : eval(b)
         case .call(let name, let args, let named, let site):
             return call(name, args, named, site)
+        case .stmt(let st):
+            return execOne(st)
         }
     }
 
@@ -768,6 +901,12 @@ final class PineRun {
         case "plotshape", "plotchar": recordPlot(site, args, named, kind: "shape"); return .n(.nan)
         case "hline": recordPlot(site, args, named, kind: "hline"); return .n(.nan)
         case "alertcondition": recordPlot(site, args, named, kind: "alert"); return .n(.nan)
+        case "bgcolor": recordPlot(site, args, named, kind: "bg"); return .n(.nan)
+        case "barcolor": recordPlot(site, args, named, kind: "barcolor"); return .n(.nan)
+        case "label.new": recordPlot(site, args, named, kind: "label"); return .n(.nan)
+        case "request.security", "security":
+            guard let v = secValues[site], bar < v.count else { return .n(.nan) }
+            return .n(v[bar])
         case "sheet":
             guard let e = args.first, case .str(let c) = e, let a = input.sheet[c], bar < a.count else { return .n(.nan) }
             return .n(a[bar])
@@ -802,6 +941,13 @@ final class PineRun {
             return .s("rgba(\(Int(r)),\(Int(g)),\(Int(b)),\(String(format: "%.2f", max(0, min(1, 1 - t / 100)))))")
         case "alert": return .n(.nan)
         default: break
+        }
+        if name.hasPrefix("array.") { return arrayCall(name, args, named) }
+        // method syntax on a variable: a.push(x) → array.push(a, x)
+        if let dot = name.firstIndex(of: "."), !PineParser.namespaces.contains(String(name[..<dot])) {
+            let recv = String(name[..<dot]), m = String(name[name.index(after: dot)...])
+            if case .a = get(recv) { return arrayCall("array." + m, [.ident(recv)] + args, named) }
+            return .n(.nan)
         }
         if name.hasPrefix("math.") { return mathCall(name, args, named, site) }
         if name.hasPrefix("ta.") { return taCall(name, args, named, site) }
@@ -842,11 +988,202 @@ final class PineRun {
         let saved = ctx
         ctx = ctx &* 31 &+ site
         frames.append(f)
-        var last: PVal = .n(.nan)
-        for s in body { last = execOne(s) }
+        let last = block(body)
+        loopCtl = 0
         frames.removeLast()
         ctx = saved
         return last
+    }
+
+    // MARK: arrays
+
+    private func arrayCall(_ name: String, _ args: [PExpr], _ named: [String: PExpr]) -> PVal {
+        let fn = String(name.dropFirst(6))
+        if fn.hasPrefix("new") {
+            let size = Int(num(args, named, 0, ["size"], 0))
+            let ini = arg(args, named, 1, ["initial_value"]).map { eval($0) } ?? .n(.nan)
+            return .a(PineArray([PVal](repeating: ini, count: max(0, min(size, 100_000)))))
+        }
+        if fn == "from" { return .a(PineArray(args.map { eval($0) })) }
+        guard let first = args.first, case .a(let arr) = eval(first) else { return .n(.nan) }
+        let rest = Array(args.dropFirst())
+        func at(_ i: Int) -> Int? {
+            guard let e = i < rest.count ? rest[i] : nil else { return nil }
+            var k = Int(eval(e).num)
+            if k < 0 { k += arr.v.count }
+            return k >= 0 && k < arr.v.count ? k : nil
+        }
+        let nums: () -> [Double] = { arr.v.map { $0.num }.filter { !$0.isNaN } }
+        switch fn {
+        case "push": arr.v.append(rest.first.map { eval($0) } ?? .n(.nan)); return .n(.nan)
+        case "unshift": arr.v.insert(rest.first.map { eval($0) } ?? .n(.nan), at: 0); return .n(.nan)
+        case "pop": return arr.v.popLast() ?? .n(.nan)
+        case "shift": return arr.v.isEmpty ? .n(.nan) : arr.v.removeFirst()
+        case "get": return at(0).map { arr.v[$0] } ?? .n(.nan)
+        case "set": if let k = at(0), rest.count > 1 { arr.v[k] = eval(rest[1]) }; return .n(.nan)
+        case "insert":
+            let k = Int(rest.first.map { eval($0).num } ?? 0)
+            if k >= 0 && k <= arr.v.count, rest.count > 1 { arr.v.insert(eval(rest[1]), at: k) }
+            return .n(.nan)
+        case "remove": if let k = at(0) { return arr.v.remove(at: k) }; return .n(.nan)
+        case "clear": arr.v.removeAll(); return .n(.nan)
+        case "size": return .n(Double(arr.v.count))
+        case "first": return arr.v.first ?? .n(.nan)
+        case "last": return arr.v.last ?? .n(.nan)
+        case "sum": return .n(nums().reduce(0, +))
+        case "avg": let x = nums(); return .n(x.isEmpty ? .nan : x.reduce(0, +) / Double(x.count))
+        case "max": return .n(nums().max() ?? .nan)
+        case "min": return .n(nums().min() ?? .nan)
+        case "range": let x = nums(); return .n((x.max() ?? .nan) - (x.min() ?? .nan))
+        case "median":
+            let x = nums().sorted(); guard !x.isEmpty else { return .n(.nan) }
+            return .n(x.count % 2 == 1 ? x[x.count / 2] : (x[x.count / 2 - 1] + x[x.count / 2]) / 2)
+        case "stdev", "variance":
+            let x = nums(); guard !x.isEmpty else { return .n(.nan) }
+            let m = x.reduce(0, +) / Double(x.count)
+            let v = x.reduce(0) { $0 + ($1 - m) * ($1 - m) } / Double(x.count)
+            return .n(fn == "stdev" ? v.squareRoot() : v)
+        case "includes":
+            let t = rest.first.map { eval($0).num } ?? .nan
+            return .n(arr.v.contains { $0.num == t } ? 1 : 0)
+        case "indexof":
+            let t = rest.first.map { eval($0).num } ?? .nan
+            return .n(Double(arr.v.firstIndex { $0.num == t } ?? -1))
+        case "sort":
+            let desc = named["order"].map { "\($0)".contains("descending") } ?? (rest.first.map { eval($0).str?.contains("descending") ?? false } ?? false)
+            arr.v.sort { desc ? $0.num > $1.num : $0.num < $1.num }
+            return .n(.nan)
+        case "reverse": arr.v.reverse(); return .n(.nan)
+        case "copy": return .a(PineArray(arr.v))
+        case "slice":
+            let a = max(0, Int(rest.first.map { eval($0).num } ?? 0))
+            let b = min(arr.v.count, Int(rest.count > 1 ? eval(rest[1]).num : Double(arr.v.count)))
+            return .a(PineArray(a < b ? Array(arr.v[a..<b]) : []))
+        case "percentrank":
+            guard let k = at(0) else { return .n(.nan) }
+            let x = arr.v[k].num, all = nums()
+            return .n(all.isEmpty ? .nan : Double(all.filter { $0 <= x }.count - 1) / Double(max(1, all.count - 1)) * 100)
+        default: return .n(.nan)
+        }
+    }
+
+    // MARK: request.security — other stocks (daily) and weekly / monthly bars built from the daily ones
+
+    private func prepareSecurity(from start: Int) {
+        var sites: [(Int, [PExpr], [String: PExpr])] = []
+        func walkE(_ e: PExpr) {
+            switch e {
+            case .call(let nm, let a, let named, let site):
+                if nm == "request.security" || nm == "security" { sites.append((site, a, named)) }
+                a.forEach(walkE); named.values.forEach(walkE)
+            case .hist(let a, let b, _): walkE(a); walkE(b)
+            case .unary(_, let a): walkE(a)
+            case .bin(_, let a, let b): walkE(a); walkE(b)
+            case .tern(let a, let b, let c): walkE(a); walkE(b); walkE(c)
+            case .list(let xs): xs.forEach(walkE)
+            case .stmt(let st): walkS(st)
+            default: break
+            }
+        }
+        func walkS(_ st: PStmt) {
+            switch st {
+            case .decl(_, let e, _), .assign(_, _, let e), .tupleDecl(_, let e), .expr(let e): walkE(e)
+            case .ifs(let c, let a, let b): walkE(c); a.forEach(walkS); b.forEach(walkS)
+            case .loop(_, let a, let b, let c, let body): walkE(a); walkE(b); if let c { walkE(c) }; body.forEach(walkS)
+            case .fn(_, _, let body): body.forEach(walkS)
+            case .whileS(let c, let body): walkE(c); body.forEach(walkS)
+            case .switchS(let x, let cs): if let x { walkE(x) }; for c in cs { if let p = c.pattern { walkE(p) }; c.body.forEach(walkS) }
+            case .brk, .cont: break
+            }
+        }
+        prog.stmts.forEach(walkS)
+        guard !sites.isEmpty else { return }
+        for (site, a, named) in sites {
+            guard let ex = arg(a, named, 2, ["expression"]) else { continue }
+            var sym = input.symbol
+            if let se = arg(a, named, 0, ["symbol"]), case .str(let raw) = se { sym = PineParser.cleanSymbol(raw) }
+            var tf = "D"
+            if let te = arg(a, named, 1, ["timeframe"]), case .str(let raw) = te { tf = raw.uppercased() }
+            var look = false
+            if let le = named["lookahead"], case .ident(let x) = le { look = x.hasSuffix("on") }
+            let src: PineInput? = sym == input.symbol ? input : input.others[sym]
+            guard let src else { secValues[site] = [Double](repeating: .nan, count: n); continue }
+            secValues[site] = Self.security(ex, functions: prog.functions, source: src, tf: tf, lookahead: look, onto: input.days)
+        }
+    }
+
+    /// Runs `ex` on `source` at timeframe `tf` and lines the result up with `days` (no peeking: a week's value appears on
+    /// its last trading day, earlier days show the week before — as TradingView does on history; lookahead_on peeks).
+    static func security(_ ex: PExpr, functions: [String: ([String], [PStmt])], source: PineInput, tf: String,
+                         lookahead: Bool, onto days: [String]) -> [Double] {
+        let key = groupKey(tf)
+        var agg = PineInput()
+        agg.symbol = source.symbol
+        agg.sheet = [:]
+        var groupOf: [String] = []                    // group key per source day
+        var last: [String] = []                       // last day per group
+        var idx: [[Int]] = []
+        for (i, d) in source.days.enumerated() {
+            let g = key(d)
+            if groupOf.last != g { groupOf.append(g); last.append(d); idx.append([i]) } else { last[last.count - 1] = d; idx[idx.count - 1].append(i) }
+        }
+        agg.days = last
+        for (name, arr) in source.series {
+            agg.series[name] = idx.map { ii -> Double in
+                let xs = ii.compactMap { $0 < arr.count ? arr[$0] : nil }.filter { !$0.isNaN }
+                guard let f = xs.first, let l = xs.last else { return .nan }
+                switch name {
+                case "open": return f
+                case "high": return xs.max()!
+                case "low": return xs.min()!
+                case "volume", "deliv_qty", "deliv_value", "dealsize", "dealbuy", "dealsell": return xs.reduce(0, +)
+                default: return l
+                }
+            }
+        }
+        var sub = PineProgram()
+        sub.stmts = [.decl("__sec", ex, false)]
+        sub.functions = functions
+        let r = PineRun(sub, agg)
+        _ = r.run()
+        let vals = r.values("__sec")
+        // line up with the chart's days
+        var out = [Double](repeating: .nan, count: days.count)
+        let pos = Dictionary(groupOf.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { a, _ in a })
+        var j = 0
+        for (k, d) in days.enumerated() {
+            if let g = pos[key(d)] {
+                if lookahead || d >= last[g] { out[k] = g < vals.count ? vals[g] : .nan }
+                else { out[k] = g - 1 >= 0 && g - 1 < vals.count ? vals[g - 1] : .nan }
+            } else {
+                while j + 1 < last.count && last[j + 1] <= d { j += 1 }
+                if j < last.count && last[j] <= d && j < vals.count { out[k] = vals[j] }
+            }
+        }
+        return out
+    }
+
+    /// Bars of a timeframe: "D" per day, "W" per ISO week, "M" per month, "3M" per quarter, "12M"/"Y" per year.
+    static func groupKey(_ tf: String) -> (String) -> String {
+        let t = tf.trimmingCharacters(in: .whitespaces)
+        if t.hasSuffix("W") {
+            let g = Calendar(identifier: .iso8601)
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "UTC")
+            return { d in
+                guard let dt = f.date(from: d) else { return d }
+                let c = g.dateComponents([.yearForWeekOfYear, .weekOfYear], from: dt)
+                return "\(c.yearForWeekOfYear ?? 0)-W\(c.weekOfYear ?? 0)"
+            }
+        }
+        if t == "12M" || t == "Y" || t == "1Y" { return { String($0.prefix(4)) } }
+        if t == "3M" || t == "Q" {
+            return { d in
+                let m = Int(d.dropFirst(5).prefix(2)) ?? 1
+                return String(d.prefix(4)) + "-Q\((m - 1) / 3)"
+            }
+        }
+        if t.hasSuffix("M") && !t.hasSuffix("MIN") { return { String($0.prefix(7)) } }
+        return { $0 }
     }
 
     private func mathCall(_ name: String, _ args: [PExpr], _ named: [String: PExpr], _ site: Int) -> PVal {
@@ -1103,12 +1440,16 @@ final class PineRun {
             q.site = site; q.kind = kind
             q.values = [Double](repeating: .nan, count: n)
             q.colors = [String?](repeating: nil, count: n)
-            if let t = arg(args, named, 1, ["title"]).flatMap({ eval($0).str }) { q.title = t }
+            if kind == "label" { q.texts = [String?](repeating: nil, count: n) }
+            if kind != "label", let t = (kind == "bg" || kind == "barcolor" ? named["title"] : arg(args, named, 1, ["title"])).flatMap({ eval($0).str }) { q.title = t }
             if q.title.isEmpty {
                 switch kind {
                 case "hline": q.title = "Level \(plotOrder.count + 1)"
                 case "alert": q.title = "Alert \(plotOrder.count + 1)"
                 case "shape": q.title = "Shape \(plotOrder.count + 1)"
+                case "bg": q.title = "Background \(plotOrder.count + 1)"
+                case "barcolor": q.title = "Bar colour \(plotOrder.count + 1)"
+                case "label": q.title = "Label \(plotOrder.count + 1)"
                 default: q.title = "Plot \(plotOrder.count + 1)"
                 }
             }
@@ -1125,6 +1466,21 @@ final class PineRun {
             box.p = q
             plots[site] = box
             plotOrder.append(site)
+        }
+        if kind == "bg" || kind == "barcolor" {
+            let c = arg(args, named, 0, ["color"]).flatMap { eval($0).str }
+            box.p.values[bar] = c == nil ? .nan : 1
+            box.p.colors[bar] = c
+            if let c, box.p.color == "#2962FF" { box.p.color = c }
+            return
+        }
+        if kind == "label" {
+            let text = arg(args, named, 2, ["text"]).flatMap { eval($0).str } ?? ""
+            box.p.values[bar] = 1
+            box.p.texts[bar] = text
+            if let st = named["style"].flatMap({ eval($0).str }) { box.p.location = st.contains("up") ? "belowbar" : "abovebar" }
+            if let c = named["color"].flatMap({ eval($0).str }) { box.p.colors[bar] = c; box.p.color = c }
+            return
         }
         let v = eval(args.first ?? .num(.nan))
         if kind == "shape" || kind == "alert" { box.p.values[bar] = v.truthy ? 1 : .nan }
