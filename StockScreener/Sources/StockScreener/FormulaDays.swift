@@ -54,6 +54,38 @@ struct FFormula: Identifiable, Hashable {
     @Published private(set) var running = false
     @Published private(set) var progress = 0.0
     private var cache: [String: [String]?] = [:]             // "day|formula" → symbols
+    // Past days never change, so their results are kept on disk too: after the first count, opening the app or a
+    // chart only judges today (and days not seen before) — no stored sheets are re-read.
+    private var cacheLoaded = false
+    private var cacheDirty = false
+    private static var cacheURL: URL { AppFolders.base.appendingPathComponent("formula_days_cache.json") }
+
+    private func loadCache() async {
+        guard !cacheLoaded else { return }
+        cacheLoaded = true
+        let url = Self.cacheURL
+        let disk: [String: [String]?] = await Task.detached(priority: .userInitiated) {
+            guard let d = try? Data(contentsOf: url), let m = try? JSONDecoder().decode([String: [String]?].self, from: d) else { return [:] }
+            return m
+        }.value
+        for (k, v) in disk where cache[k] == nil { cache[k] = .some(v) }
+    }
+
+    private func saveCache() {
+        guard cacheDirty else { return }
+        cacheDirty = false
+        let snap = cache, url = Self.cacheURL
+        Task.detached(priority: .background) {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let d = try? JSONEncoder().encode(snap) { try? d.write(to: url, options: .atomic) }
+        }
+    }
+
+    /// Forget every stored result (e.g. after NSE delivery history was re-downloaded) and count again.
+    func clearCache() {
+        cache = [:]; cacheDirty = false
+        try? FileManager.default.removeItem(at: Self.cacheURL)
+    }
 
     /// Formulas you typed or edited here (kept for good).
     struct Mine: Codable, Identifiable, Equatable { var id = UUID(); var name: String; var quick: String; var fresh: Bool? = nil }
@@ -137,6 +169,7 @@ struct FFormula: Identifiable, Hashable {
         let evalDays = before + days
         running = true; progress = 0
         task = Task { @MainActor in
+            await loadCache()
             var result: [String: [String: [String]?]] = [:]
             let current = vm.table
             for (k, d) in evalDays.enumerated() {
@@ -158,8 +191,9 @@ struct FFormula: Identifiable, Hashable {
                         guard let t = table else { result[p.orig.key, default: [:]][d] = .some(nil); continue }
                         let r = Self.evaluate(p.eff, table: t, label: label)
                         if !isLive {
-                            if cache.count > 80_000 { cache.removeAll() }    // bounded: re-evaluated on demand
+                            if cache.count > 150_000 { cache.removeAll() }    // bounded: re-evaluated on demand
                             cache[d + "|" + p.eff.key] = .some(r)
+                            cacheDirty = true
                         }
                         result[p.orig.key, default: [:]][d] = .some(r)
                     }
@@ -169,6 +203,7 @@ struct FFormula: Identifiable, Hashable {
             }
             counts = Self.freshOnly(result, fs.map(\.orig), evalDays)
             running = false
+            saveCache()
             MemoryRelief.giveBack()
         }
     }

@@ -113,6 +113,21 @@ import AppKit
         if Self.originMode, !chartSymbol.isEmpty { trace(chartSymbol) }
     }
 
+    // Traced starts never change for past days: kept (memory + disk) so a chart shows them instantly next time.
+    private static var traceURL: URL { AppFolders.base.appendingPathComponent("formula_trace_cache.json") }
+    static var traceCache: [String: String] = {
+        guard let d = try? Data(contentsOf: traceURL), let m = try? JSONDecoder().decode([String: String].self, from: d) else { return [:] }
+        return m
+    }()
+    static var traceDirty = false
+    static func saveTrace() {
+        guard traceDirty else { return }
+        traceDirty = false
+        if traceCache.count > 50_000 { traceCache = [:] }
+        let snap = traceCache, url = traceURL
+        Task.detached(priority: .background) { if let d = try? JSONEncoder().encode(snap) { try? d.write(to: url, options: .atomic) } }
+    }
+
     /// Walks each of this stock's runs back, one NSE trading day at a time (not only the days with a stored sheet),
     /// while the formula keeps being true — gaps of up to `runGap` days allowed — and moves the mark to that first day.
     /// Delivery columns are recomputed for each earlier day; other columns come from the nearest stored sheet on or
@@ -146,6 +161,8 @@ import AppKit
             }
             var out: [String: [String: String]] = [:]
             for (key, f, d0) in starts {
+                let ck = "\(sym)|\(key)|\(d0)|\(Self.runGap)"
+                if let o = Self.traceCache[ck] { if !o.isEmpty { out[key, default: [:]][d0] = o }; continue }
                 if Task.isCancelled { return }
                 guard var k = cal.firstIndex(of: d0) ?? cal.lastIndex(where: { $0 < d0 }).map({ $0 + 1 }) else { continue }
                 guard let base0 = await row(on: d0), !base0.rows.isEmpty else { continue }
@@ -160,8 +177,11 @@ import AppKit
                     if steps % 20 == 0 { await Task.yield() }
                 }
                 if origin != d0 { out[key, default: [:]][d0] = origin }
+                Self.traceCache[ck] = origin != d0 ? origin : ""
+                Self.traceDirty = true
             }
             traced = out; tracedSymbol = sym
+            Self.saveTrace()
             tracing = false
             revision += 1
         }
@@ -322,6 +342,12 @@ struct FormulaMarkControl: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Recalculate") { fm.ensure(vm, force: true) }
+                Button("From scratch") {
+                    FormulaDaysCenter.shared.clearCache()
+                    FormulaMarks.traceCache = [:]; FormulaMarks.traceDirty = true; FormulaMarks.saveTrace()
+                    fm.ensure(vm, force: true)
+                }
+                .help("Past days' results are kept so marks show at once. Use this after re-downloading NSE delivery history, to judge every day again.")
             }
         }
         .padding(12)

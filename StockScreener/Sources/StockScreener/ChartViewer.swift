@@ -34,6 +34,19 @@ struct ChartViewer: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
+            if web.signingIn {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Sign in below (Google / email). The chart comes back by itself once TradingView has signed you in.")
+                        .font(.caption)
+                    Spacer()
+                    Button("Check now") { web.checkSignedIn() }
+                    Button("Back to the chart") { web.signingIn = false; load() }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.accentColor.opacity(0.12))
+                Divider()
+            }
             if symbol.isEmpty && !web.signingIn {
                 VStack(spacing: 10) {
                     Image(systemName: "chart.xyaxis.line").font(.system(size: 44)).foregroundStyle(.secondary)
@@ -86,7 +99,13 @@ struct ChartViewer: View {
         }
         .navigationTitle(symbol.isEmpty ? "Chart" : "Chart — \(symbol)")
         .task(id: symbol + "|" + (vm.chartGoTo ?? "")) { if !symbol.isEmpty { MBNoteFocus.shared.setChart(symbol, day: vm.chartGoTo) } }
-        .onAppear { load(); vm.refreshChartLinksIfStale(); ImpressionStore.shared.begin(symbol, place: "Chart viewer") }
+        .onAppear {
+            web.onSignedIn = { a in
+                load()
+                vm.chartStatus = "Signed in to TradingView — \(TVAccounts.name(a)) ✓ · " + (vm.chartStatus ?? "")
+            }
+            load(); vm.refreshChartLinksIfStale(); ImpressionStore.shared.begin(symbol, place: "Chart viewer")
+        }
         .onChange(of: vm.chartBook.importedAt) { _ in load() }
         .onChange(of: vm.chartSymbol) { new in
             if let o = prevSymbol, let a = vm.chartQueue.firstIndex(of: o), let b = new.flatMap({ vm.chartQueue.firstIndex(of: $0) }) { lastStep = b >= a ? 1 : -1 }
@@ -409,7 +428,11 @@ enum TVAccounts {
 final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDelegate {
     static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     @Published private(set) var account = 0
-    @Published var signingIn = false         // show the web view even without a stock (sign-in page)
+    @Published var signingIn = false { didSet { if !signingIn { stopWatchingSignIn() } } }   // show the web view even without a stock (sign-in page)
+    /// Called once the sign-in went through (the chart window then reloads the stock's chart).
+    var onSignedIn: ((Int) -> Void)?
+    private var signTimer: Timer?
+    private var signAccount = 0
     private var views: [Int: WKWebView] = [:]
     private var popups: [(window: NSWindow, web: WKWebView)] = []
 
@@ -518,7 +541,7 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         if let i = popups.firstIndex(where: { $0.web === webView }) {
             popups[i].window.close()
             popups.remove(at: i)
-            view.reload()                        // pick up the new login
+            if signingIn { checkSignedIn() } else { view.reload() }      // pick up the new login
         }
     }
 
@@ -544,11 +567,46 @@ final class WebHolder: NSObject, ObservableObject, WKUIDelegate, WKNavigationDel
         decisionHandler(.allow)
     }
 
-    /// Opens TradingView's sign-in page for an account in the chart window.
+    /// Opens TradingView's sign-in page for an account in the chart window, then watches for the sign-in to land
+    /// (TradingView's session cookie) and goes straight back to the chart — no blank page left behind.
     func openSignIn(account a: Int) {
         use(account: a)
         signingIn = true
-        if let u = URL(string: "https://in.tradingview.com/accounts/signin/") { view.load(URLRequest(url: u)) }
+        signAccount = a
+        if let u = URL(string: "https://www.tradingview.com/accounts/signin/") { view.load(URLRequest(url: u)) }
+        signTimer?.invalidate()
+        signTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.checkSignedIn() }
+    }
+
+    private func stopWatchingSignIn() { signTimer?.invalidate(); signTimer = nil }
+
+    /// Signed in = TradingView's session cookie is in this account's store.
+    func checkSignedIn() {
+        guard signingIn else { return }
+        let a = signAccount
+        TVAccounts.store(a).httpCookieStore.getAllCookies { [weak self] cookies in
+            let ok = cookies.contains { $0.domain.contains("tradingview.com") && $0.name.lowercased().hasPrefix("sessionid") && !$0.value.isEmpty }
+            guard ok else { return }
+            DispatchQueue.main.async {
+                guard let self, self.signingIn else { return }
+                for p in self.popups { p.window.close() }
+                self.popups = []
+                self.signingIn = false
+                self.onSignedIn?(a)
+            }
+        }
+    }
+
+    /// Is this account signed in (for the menu's ✓)?
+    static func isSignedIn(_ a: Int, _ done: @escaping (Bool) -> Void) {
+        TVAccounts.store(a).httpCookieStore.getAllCookies { cookies in
+            let ok = cookies.contains { $0.domain.contains("tradingview.com") && $0.name.lowercased().hasPrefix("sessionid") && !$0.value.isEmpty }
+            DispatchQueue.main.async { done(ok) }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if signingIn { checkSignedIn() }
     }
 
     /// Clears one account's cookies (signs that account out).
