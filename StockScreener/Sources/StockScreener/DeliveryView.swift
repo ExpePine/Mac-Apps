@@ -461,6 +461,7 @@ struct DeliveryView: View {
 /// Delivery panel under the TradingView chart in the Chart viewer: the stock's delivery bars, the rolling
 /// ta.highest line and its signal days — zoom / pan like TradingView.
 struct DeliveryMiniChart: View {
+    @State private var periodTick = 0
     let symbol: String
     @ObservedObject var lw: LWChartHolder
     var syncNote: String? = nil
@@ -661,6 +662,7 @@ struct DeliveryMiniChart: View {
                     .controlSize(.mini).fixedSize()
                     .help(n + " — fine-tune: shift the delivery chart by a few bars if it doesn't line up with TradingView")
                 }
+                periodPicker
                 Picker("", selection: $range) { ForEach(["6M", "1Y", "2Y", "All"], id: \.self) { Text($0).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
             }
@@ -682,6 +684,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: dc.revision) { _ in push() }
         .onChange(of: fmarks.revision) { _ in push() }
         .onChange(of: pine.revision) { _ in push() }
+        .onChange(of: vm.settings.chartLinkColumn) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: basis) { _ in push() }
@@ -705,10 +708,27 @@ struct DeliveryMiniChart: View {
         let c3 = LWChartData.chart3(symbol: sym, series: s, prices: vm.priceBook.series(for: sym), length: del2Len == 300 ? 300 : 100,
                                     full: full, range: range, dark: colorScheme == .dark)
         if lower == "chart3" { lw.show(c3); centre(); return }
-        lw.show(LWChartData.make(symbol: sym, series: s, candles: CandleCache.shared.candles(sym) ?? Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
-                                 full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
-                                 layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw)), deals: LWChartData.dealBars(sym, layers: ChartLayer.decode(layersRaw))))
+        var data = LWChartData.make(symbol: sym, series: s, candles: CandleCache.shared.candles(sym) ?? Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
+                                    full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
+                                    layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw)), deals: LWChartData.dealBars(sym, layers: ChartLayer.decode(layersRaw)))
+        data.period = period
+        if period == "M" && (range == "6M" || range == "1Y") { data.range = "All" }     // 6 / 12 bars would be too few
+        lw.show(data)
         centre()
+    }
+
+    /// D / W / M for the TradingView chart now shown above (Chart 2 = monthly unless you change it).
+    private var chartIndex: Int { min(vm.settings.chartLinkColumn, max(0, vm.chartCount - 1)) }
+    private var period: String {
+        UserDefaults.standard.string(forKey: "deliv.period.\(chartIndex)") ?? (chartIndex == 1 ? "M" : "D")
+    }
+    private var periodPicker: some View {
+        Picker("", selection: Binding(get: { period }, set: { v in
+            UserDefaults.standard.set(v, forKey: "deliv.period.\(chartIndex)"); periodTick &+= 1; push()
+        })) { Text("D").tag("D"); Text("W").tag("W"); Text("M").tag("M") }
+        .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.mini)
+        .help("Delivery chart bars: daily, weekly or monthly — remembered for each TradingView chart (Chart \(chartIndex + 1)). Monthly: one bar per month (delivery and deals totalled, lines at month-end).")
+        .id(periodTick)
     }
 
     private func centre() {

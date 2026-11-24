@@ -179,6 +179,7 @@ struct LWChartData: Encodable {
     var metric = ""
     var range = "1Y"          // 6M / 1Y / 2Y / All
     var dark = true
+    var period = "D"          // D · W · M — weekly / monthly collapse the days into one bar each (see collapsed)
 
     /// Builds the chart data for one stock from its delivery series and (optional) Yahoo candles.
     static func make(symbol: String, series: DeliverySeries?, candles: [YahooClient.Candle], metric: DeliveryMetric,
@@ -504,6 +505,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             data.pine = o.plots
             data.markers += o.marks
         }
+        if data.period != "D" { data = data.collapsed(data.period) }
         let js = "window.setData(\(data.json))"
         if ready { view.evaluateJavaScript(js) { [weak self] r, e in self?.handle(r, e) } } else { pending = js }
     }
@@ -1298,4 +1300,96 @@ enum ZPLevel {
     static var level: Double { UserDefaults.standard.object(forKey: "zp.level") as? Double ?? 99 }
     static func hit(_ v: Double) -> Bool { level >= 100 ? v >= 100 : v > level }
     static var text: String { level >= 100 ? "= 100" : "> " + (level == level.rounded() ? String(format: "%.0f", level) : String(format: "%.1f", level)) }
+}
+
+
+// MARK: - Weekly / monthly delivery chart (follows a weekly or monthly TradingView chart)
+
+extension LWChartData {
+    /// One bar per week / month: candles = the period's OHLC; delivery bars and deal bars = the period's total;
+    /// lines (SMA, percentrank, DELSMAC, T3, DEL2C …) = their value on the period's last trading day (the daily
+    /// calculation is kept, so 300-day windows still mean 300 days); marks move to the period's last day.
+    func collapsed(_ tf: String) -> LWChartData {
+        let key = PineRun.groupKey(tf == "W" ? "W" : "M")
+        var d = self
+        // the period's last day, from every dated series
+        var lastDay: [String: String] = [:]
+        func note(_ t: String) { let k = key(t); if (lastDay[k] ?? "") < t { lastDay[k] = t } }
+        candles.forEach { note($0.time) }; deliv.forEach { note($0.time) }; dsmac.forEach { note($0.time) }
+        func rep(_ t: String) -> String { lastDay[key(t)] ?? t }
+
+        // candles
+        var cs: [Candle] = []
+        for c in candles {
+            if let l = cs.last, key(l.time) == key(c.time) {
+                cs[cs.count - 1] = Candle(time: rep(c.time), open: l.open, high: max(l.high, c.high), low: min(l.low, c.low), close: c.close)
+            } else { cs.append(Candle(time: rep(c.time), open: c.open, high: c.high, low: c.low, close: c.close)) }
+        }
+        d.candles = cs
+
+        func total(_ ps: [Point]) -> [Point] {
+            var out: [Point] = []
+            for p in ps {
+                if let l = out.last, key(l.time) == key(p.time) {
+                    let v: Double? = (l.value == nil && p.value == nil) ? nil : (l.value ?? 0) + (p.value ?? 0)
+                    out[out.count - 1] = Point(time: rep(p.time), value: v, color: p.color ?? l.color)
+                } else { out.append(Point(time: rep(p.time), value: p.value, color: p.color)) }
+            }
+            return out
+        }
+        func lastOf(_ ps: [Point]) -> [Point] {
+            var out: [Point] = []
+            for p in ps {
+                if let l = out.last, key(l.time) == key(p.time) {
+                    out[out.count - 1] = Point(time: rep(p.time), value: p.value ?? l.value, color: p.value == nil ? l.color : p.color)
+                } else { out.append(Point(time: rep(p.time), value: p.value, color: p.color)) }
+            }
+            return out
+        }
+        func anyOf(_ ps: [Point]) -> [Point] {                 // bands: on if any day in the period was
+            var out: [Point] = []
+            for p in ps {
+                if let l = out.last, key(l.time) == key(p.time) {
+                    if l.value == nil, p.value != nil { out[out.count - 1] = Point(time: rep(p.time), value: p.value, color: p.color) }
+                } else { out.append(Point(time: rep(p.time), value: p.value, color: p.color)) }
+            }
+            return out
+        }
+        let raw = metric != "smooth QTY"
+        d.deliv = raw ? total(deliv) : lastOf(deliv)
+        d.dealBuy = total(dealBuy); d.dealSell = total(dealSell)
+        d.high = lastOf(high); d.prank = lastOf(prank); d.dprank = lastOf(dprank); d.dsmac = lastOf(dsmac)
+        d.sma22 = lastOf(sma22); d.sma66 = lastOf(sma66); d.per = lastOf(per); d.t3 = lastOf(t3); d.hit3 = lastOf(hit3)
+        d.del2c = lastOf(del2c); d.steepEnergy = lastOf(steepEnergy)
+        d.bands = anyOf(bands); d.steepBand = anyOf(steepBand); d.filledBand = anyOf(filledBand)
+
+        // marks: one per period and label
+        func moveMarks(_ ms: [Marker]) -> [Marker] {
+            var seen = Set<String>(), out: [Marker] = []
+            for m in ms {
+                let r = rep(m.time)
+                guard seen.insert(r + "|" + m.text + "|" + m.position).inserted else { continue }
+                var x = Marker(time: r, text: m.text, position: m.position, color: m.color, shape: m.shape, info: m.info, full: m.full, id: m.id)
+                if let id = m.id, id.contains("|") { x.id = id }
+                out.append(x)
+            }
+            return out
+        }
+        d.markers = moveMarks(markers)
+        d.fpills = moveMarks(fpills)
+        d.dealGold = Array(Set(dealGold.map(rep)))
+        d.zpDays = Array(Set(zpDays.map(rep)))
+        func lastDict<T>(_ m: [String: T]) -> [String: T] {
+            var out: [String: T] = [:], when: [String: String] = [:]
+            for (t, v) in m { let r = rep(t); if (when[r] ?? "") <= t { when[r] = t; out[r] = v } }
+            return out
+        }
+        d.steepZ = lastDict(steepZ); d.steepRun = lastDict(steepRun); d.steepZPR = lastDict(steepZPR); d.seriesCodes = lastDict(seriesCodes)
+        d.pine = pine.map { p in
+            let pts = p.style == "hist" ? total(p.points) : (p.style == "bg" || p.style == "barcolor" ? anyOf(p.points) : lastOf(p.points))
+            return PineJS(key: p.key, title: p.title, color: p.color, pane: p.pane, style: p.style, width: p.width, legend: p.legend, points: pts)
+        }
+        d.period = "D"
+        return d
+    }
 }
