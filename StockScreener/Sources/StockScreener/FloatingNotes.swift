@@ -81,7 +81,8 @@ struct DayNote: Codable, Identifiable, Equatable {
     @Published var crossDay: String?          // the day under Chart 1's crosshair right now
     @Published var lastSaved = ""
     private var panel: NSPanel?
-    var isOpen: Bool { panel?.isVisible ?? false }
+    var padOpen = false                       // the Patterns pad uses the same date capture
+    var isOpen: Bool { (panel?.isVisible ?? false) || padOpen }
 
     func show(symbol: String, vm: ScreenerViewModel) {
         if !symbol.isEmpty { self.symbol = symbol.uppercased() }

@@ -166,6 +166,12 @@ struct StockScreenerApp: App {
                 .frame(minWidth: 820, minHeight: 520)
         }
 
+        Window("Patterns board", id: "patterns") {
+            PatternBoardView()
+                .environmentObject(vm)
+                .frame(minWidth: 900, minHeight: 560)
+        }
+
         Window("F Notes", id: "mbnotes") {
             MBNotesWindow()
                 .environmentObject(vm)

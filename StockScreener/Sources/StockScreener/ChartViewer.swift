@@ -150,7 +150,7 @@ struct ChartViewer: View {
             if let p = pos, vm.chartQueue.count > 1 {
                 Text("\(p + 1) / \(vm.chartQueue.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            QuickFButton()
+            PatternPadButton(symbol: symbol)
             ChartCentreMenu(context: vm.chartContext).id(vm.chartContext)
             SymbolField(vm: vm, placeholder: "Symbol", text: $typed) {
                 let s = SymbolBook.clean(typed)
@@ -201,7 +201,6 @@ struct ChartViewer: View {
                 .disabled(symbol.isEmpty)
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .help("Store the chart as a dated screenshot of \(symbol) (⇧⌘S) — the S column turns green")
-            FloatingNoteButton(symbol: symbol)
             Button { vm.shotSymbol = symbol; openWindow(id: "shots") } label: { Label("Annotate", systemImage: "pencil.tip.crop.circle") }
                 .disabled(symbol.isEmpty).help("Open this stock's screenshots to draw on them")
             Menu {

@@ -194,7 +194,7 @@ struct GainerChartsView: View {
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             Text("\(count) stock\(count == 1 ? "" : "s") · \(count * perStock) charts").font(.caption.bold()).fixedSize()
             Toggle("Delivery chart", isOn: $showDelivery).toggleStyle(.checkbox).fixedSize()
-            QuickFButton()
+            PatternPadButton(symbol: MBNoteFocus.shared.event?.symbol ?? "")
             ChartCentreMenu(context: .gainers)
             Toggle("🔗 Sync dates", isOn: $sync).toggleStyle(.checkbox).fixedSize()
                 .help("Keep the delivery chart on the same dates as the TradingView chart (and back)")

@@ -389,7 +389,7 @@ struct ChartReelView: View {
                 if fOn, mbf.ready { Text("F: \(mbf.matched.count)").font(.caption.bold()).foregroundStyle(Color.accentColor) }
                 Button("Multibaggers…") { openWindow(id: "multibaggers") }
             }
-            QuickFButton()
+            PatternPadButton(symbol: MBNoteFocus.shared.event?.symbol ?? "")
             Picker("", selection: $sortMode) {
                 ForEach(["List order", "A → Z", "Day % (high first)"], id: \.self) { Text($0).tag($0) }
             }
