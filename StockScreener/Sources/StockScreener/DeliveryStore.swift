@@ -148,6 +148,7 @@ enum NSEDeliveryClient {
 // MARK: - Per-symbol series and the "new highest delivery" signal
 
 struct DeliverySeries {
+    var symbol = ""
     var days: [String] = []
     var qty: [Double] = []
     var per: [Double] = []
@@ -203,7 +204,7 @@ struct DeliveryBook {
                 best[r.symbol] = r
             }
             for (s, r) in best {
-                book.series[s, default: DeliverySeries()].days.append(d)
+                book.series[s, default: DeliverySeries(symbol: s)].days.append(d)
                 book.series[s]!.qty.append(r.delivQty)
                 book.series[s]!.per.append(r.delivPer)
                 book.series[s]!.close.append(r.close)

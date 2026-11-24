@@ -15,8 +15,31 @@ enum Steep {
 
     struct Result { var z: [Double?]; var run: [Int]; var energy: [Double]; var steep: [Bool] }
 
+    /// Sources besides DELSMA / smoothed delivery value: the series itself, bar by bar (nil = DELSMA or EMA path).
+    static func rawSource(_ s: DeliverySeries, count n: Int) -> [Double?]? {
+        let src = source
+        switch src {
+        case "delsma", "value": return nil
+        case "delsmac": return Array(DeliveryColumns.delSmaCSeries(s).prefix(n))
+        case "dvalue": return (0..<n).map { s.qty[$0] * s.close[$0] }
+        case "qty": return (0..<n).map { s.qty[$0] }
+        case "pct": return (0..<n).map { $0 < s.per.count ? s.per[$0] : nil }
+        case "close": return (0..<n).map { s.close[$0] }
+        default:
+            if src.hasPrefix("pine:") {
+                let col = String(src.dropFirst(5))
+                return (0..<n).map { $0 < s.days.count ? PineColumns.shared.value(col, s.symbol, s.days[$0]) : nil }
+            }
+            return nil
+        }
+    }
+
+    /// 0–100 sources: the divisor is floored at 1 so a rank of 0 doesn't divide by zero.
+    static var floored: Bool { ["delsma", "delsmac", "pct"].contains(source) }
+
     static func series(_ s: DeliverySeries) -> Result {
         let n = min(s.qty.count, s.close.count)
+        if let raw = rawSource(s, count: n) { return compute(src: raw, span: span, norm: norm, trig: trig) }
         if source == "delsma" {
             // DELSMA = ta.percentrank(ta.sma(DELIV_QTY×CLOSE, 22 / as the Delivery signal), 300), 0–100 — already smooth,
             // so it is used as src directly (no extra EMA)
@@ -90,6 +113,7 @@ enum Steep {
     static func zTail(_ s: DeliverySeries, at i: Int, count: Int) -> [Double?] {
         let n = min(s.qty.count, s.close.count)
         guard i < n, count > 0 else { return [] }
+        if let raw = rawSource(s, count: i + 1) { return Array(compute(src: raw, span: span, norm: norm, trig: trig).z.suffix(count)) }
         let need = norm + span + count - 1
         let from = max(0, i - need + 1)
         var src = [Double?](repeating: nil, count: i - from + 1)
@@ -112,6 +136,10 @@ enum Steep {
         let n = min(s.qty.count, s.close.count)
         guard i < n else { return nil }
         let sp = span, nm = norm
+        if let raw = rawSource(s, count: i + 1) {
+            let tail = Array(raw.suffix(nm + sp))
+            return compute(src: tail, span: sp, norm: nm, trig: trig).z.last ?? nil
+        }
         let need = nm + sp                                     // src[i − need + 1 … i]
         guard i - need + 1 >= 0 else { return nil }
         var src = [Double?](repeating: nil, count: need)
@@ -152,9 +180,13 @@ enum Steep {
     /// rank of 0 doesn't divide by zero.
     static func compute(src: [Double?], span: Int, norm: Int, trig: Double) -> Result {
         let n = src.count
+        let floor0 = floored
         var g = [Double?](repeating: nil, count: n)
         for i in 0..<n where i >= span {
-            if let c = src[i], let p = src[i - span] { g[i] = (c / max(p, 1) - 1) * 100 }
+            if let c = src[i], let p = src[i - span] {
+                let d = floor0 ? max(p, 1) : p
+                if d != 0 { g[i] = (c / d - 1) * 100 }
+            }
         }
         var z = [Double?](repeating: nil, count: n), run = [Int](repeating: 0, count: n)
         var energy = [Double](repeating: 0, count: n), steep = [Bool](repeating: false, count: n)

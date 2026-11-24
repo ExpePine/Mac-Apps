@@ -559,9 +559,7 @@ struct DeliveryMiniChart: View {
 
     private var steepMenu: some View {
         Menu {
-            Picker("Measured on", selection: $steepSource) {
-                Text("DELSMA").tag("delsma"); Text("Delivery value — EMA 66").tag("value")
-            }
+            SteepSourcePicker(source: $steepSource)
             Picker("Steepness span", selection: $steepSpan) { ForEach([3, 5, 10, 20], id: \.self) { Text("\($0) days").tag($0) } }
             Picker("Normal-steepness window", selection: $steepNorm) { ForEach([100, 150, 250, 500], id: \.self) { Text("\($0) days").tag($0) } }
             Picker("Steep = σ above normal", selection: $steepTrig) { ForEach([1.5, 2.0, 2.5, 3.0], id: \.self) { Text(String(format: "%.1f σ", $0)).tag($0) } }
@@ -693,7 +691,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: syncOffset) { _ in lw.refollow() }
         .onChange(of: steepSpan) { _ in push() }
         .onChange(of: zpLevel) { _ in push() }
-        .onChange(of: steepSource) { _ in push() }
+        .onChange(of: steepSource) { _ in push(); DeliveryCenter.shared.refreshColumns() }
         .onChange(of: steepNorm) { _ in push() }
         .onChange(of: steepTrig) { _ in push() }
         .onChange(of: news.revision) { _ in push() }
@@ -1172,4 +1170,27 @@ struct DelsmacLevelControl: View {
     }
 
     private func label(_ v: Double) -> String { v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v) }
+}
+
+
+/// What Z (sustained steepness) is measured on — any delivery series, the price, or one of your Pine Filter columns.
+struct SteepSourcePicker: View {
+    @Binding var source: String
+    @AppStorage("steep.ema") private var ema = 66
+    var body: some View {
+        Picker("Z measured on", selection: $source) {
+            Text("DELSMA (default)").tag("delsma")
+            Text("DELSMAC").tag("delsmac")
+            Text("Delivery value — EMA \(ema)").tag("value")
+            Text("Delivery value (raw)").tag("dvalue")
+            Text("Delivery quantity").tag("qty")
+            Text("Delivery %").tag("pct")
+            Text("Close price").tag("close")
+            if !PineColumns.shared.names.isEmpty {
+                Divider()
+                ForEach(PineColumns.shared.names, id: \.self) { c in Text("Pine: \(c)").tag("pine:" + c) }
+            }
+        }
+        Picker("EMA for “Delivery value — EMA”", selection: $ema) { ForEach([10, 22, 44, 66, 100], id: \.self) { Text("\($0)").tag($0) } }
+    }
 }
