@@ -51,6 +51,7 @@ struct GainersView: View {
         let _ = (periodRaw, calendarOn, thWeekly, thMonthly, universeRaw, mcapMin)       // redraw when these change
         let gainers = vm.gainers(on: day)
         VStack(spacing: 0) {
+            HolidayBanner()
             ScraperHealthBanner()
             indexStrip
                 .overlay(alignment: .trailing) { ScraperHealthBadge().controlSize(.small).padding(.trailing, 6) }

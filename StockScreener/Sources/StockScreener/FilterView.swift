@@ -47,6 +47,7 @@ struct FilterView: View {
         } detail: {
             VStack(spacing: 0) {
                 AlertsBanner()
+                HolidayBanner()
                 ScraperHealthBanner()
                 PastDayBanner()
                 if !vm.hasData {
