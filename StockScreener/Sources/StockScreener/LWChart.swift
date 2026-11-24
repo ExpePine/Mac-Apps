@@ -1393,3 +1393,18 @@ extension LWChartData {
         return d
     }
 }
+
+
+extension DeliverySeries {
+    /// The series with bulk / block deal shares added to each day's delivered quantity (delivery chart's "+ Deals").
+    @MainActor func withDeals(_ symbol: String) -> DeliverySeries {
+        let add = DealsCenter.shared.dealQtyByDay(symbol)
+        guard !add.isEmpty else { return self }
+        var s = self
+        for (i, d) in days.enumerated() where i < s.qty.count { if let q = add[d] { s.qty[i] += q } }
+        return s
+    }
+
+    /// "+ Deals" switch on the delivery chart (UserDefaults "deliv.addDeals").
+    static var addDeals: Bool { UserDefaults.standard.bool(forKey: "deliv.addDeals") }
+}

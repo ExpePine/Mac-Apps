@@ -240,7 +240,8 @@ import AppKit
 
     /// The delivery chart as the chart viewer draws it (your Delivery settings), 6 months.
     static func deliveryData(_ vm: ScreenerViewModel, _ sym: String) -> LWChartData? {
-        guard let s = DeliveryCenter.shared.book.series[sym] else { return nil }
+        guard let s0 = DeliveryCenter.shared.book.series[sym] else { return nil }
+        let s = DeliverySeries.addDeals ? s0.withDeals(sym) : s0
         let d = UserDefaults.standard
         let signal = DeliveryMetric(rawValue: d.string(forKey: "deliv.metric") ?? "") ?? .value
         let metric = DeliveryChartBasis.metric(signal: signal, basis: d.string(forKey: DeliveryChartBasis.key) ?? "")

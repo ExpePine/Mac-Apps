@@ -338,7 +338,8 @@ struct DeliveryView: View {
 
     private func pushChart() {
         guard let s = selected else { return }
-        lw.show(LWChartData.make(symbol: s, series: dc.book.series[s], candles: candles, metric: metric, length: max(2, length),
+        let ser = dc.book.series[s].map { DeliverySeries.addDeals ? $0.withDeals(s) : $0 }
+        lw.show(LWChartData.make(symbol: s, series: ser, candles: candles, metric: metric, length: max(2, length),
                                  full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                  layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(s, layers: ChartLayer.decode(layersRaw)), deals: LWChartData.dealBars(s, layers: ChartLayer.decode(layersRaw))))
     }
@@ -462,11 +463,14 @@ struct DeliveryView: View {
 /// ta.highest line and its signal days — zoom / pan like TradingView.
 struct DeliveryMiniChart: View {
     @State private var periodTick = 0
+    @AppStorage("deliv.addDeals") private var addDeals = false
     let symbol: String
     @ObservedObject var lw: LWChartHolder
     var syncNote: String? = nil
     /// Optional day (yyyy-MM-dd) to centre the chart on, e.g. a multibagger's move — about 4 months before to 3 after.
     var focus: String? = nil
+    /// The TradingView chart shown with it (its D / W / M setting); nil = the chart viewer's current chart.
+    var forChart: Int? = nil
     @ObservedObject private var dc = DeliveryCenter.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("deliv.length") private var length = 300
@@ -529,6 +533,8 @@ struct DeliveryMiniChart: View {
                 group {
                     layerToggle(.deals, L)
                     if L.contains(.deals) { dealsNote }
+                    Toggle("+ to delivery", isOn: $addDeals).toggleStyle(.button).controlSize(.mini).fixedSize()
+                        .help("Add bulk / block deal shares to each day's delivered quantity (the larger of the buy and sell sides) — delivery bars, DELSMA, percentrank and the lines are drawn with them. Off = NSE's delivery as published.")
                 }
                 group {
                     layerToggle(.steep, L)
@@ -685,6 +691,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: fmarks.revision) { _ in push() }
         .onChange(of: pine.revision) { _ in push() }
         .onChange(of: vm.settings.chartLinkColumn) { _ in push() }
+        .onChange(of: addDeals) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: basis) { _ in push() }
@@ -708,7 +715,8 @@ struct DeliveryMiniChart: View {
         let c3 = LWChartData.chart3(symbol: sym, series: s, prices: vm.priceBook.series(for: sym), length: del2Len == 300 ? 300 : 100,
                                     full: full, range: range, dark: colorScheme == .dark)
         if lower == "chart3" { lw.show(c3); centre(); return }
-        var data = LWChartData.make(symbol: sym, series: s, candles: CandleCache.shared.candles(sym) ?? Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
+        let ser = DeliverySeries.addDeals ? s.withDeals(sym) : s
+        var data = LWChartData.make(symbol: sym, series: ser, candles: CandleCache.shared.candles(sym) ?? Self.candles(vm.priceBook.series(for: sym), nse: s), metric: metric, length: max(2, length),
                                     full: full, onlyRises: onlyRises, range: range, dark: colorScheme == .dark, calendar: dc.calendar,
                                     layers: ChartLayer.decode(layersRaw), events: LWChartData.eventMarkers(sym, layers: ChartLayer.decode(layersRaw)), deals: LWChartData.dealBars(sym, layers: ChartLayer.decode(layersRaw)))
         data.period = period
@@ -718,7 +726,7 @@ struct DeliveryMiniChart: View {
     }
 
     /// D / W / M for the TradingView chart now shown above (Chart 2 = monthly unless you change it).
-    private var chartIndex: Int { min(vm.settings.chartLinkColumn, max(0, vm.chartCount - 1)) }
+    private var chartIndex: Int { min(forChart ?? vm.settings.chartLinkColumn, max(0, vm.chartCount - 1)) }
     private var period: String {
         UserDefaults.standard.string(forKey: "deliv.period.\(chartIndex)") ?? (chartIndex == 1 ? "M" : "D")
     }

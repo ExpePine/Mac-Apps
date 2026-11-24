@@ -112,6 +112,7 @@ struct MultibaggerView: View {
                 Menu {
                     Button("Both charts side by side") { openReel(start: nil, layout: .side) }
                     Button("Chart 1 + Delivery chart") { openReel(start: nil, layout: .withDelivery) }
+                    Button("Chart 2 + Delivery chart") { openReel(start: nil, layout: .with2Delivery) }
                     Button("Chart 1 → Chart 2") { openReel(start: nil, layout: .sequence) }
                 } label: { Label("Chart Reel", systemImage: "film.stack") } primaryAction: { openReel(start: nil) }
                     .fixedSize()
@@ -171,6 +172,7 @@ struct MultibaggerView: View {
             .contextMenu(forSelectionType: MBEvent.ID.self) { ids in
                 if let id = ids.first, let e = rows.first(where: { $0.id == id }) {
                     Button("Chart Reel from \(e.symbol)") { openReel(start: e.id) }
+                    Button("Chart Reel (Chart 2 + Delivery) from \(e.symbol)") { openReel(start: e.id, layout: .with2Delivery) }
                     Button("Chart Reel (Chart 1 + Delivery) from \(e.symbol)") { openReel(start: e.id, layout: .withDelivery) }
                     Button("Copy date \(e.day(for: MBCenter(rawValue: centerRaw) ?? .start))") {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(e.day(for: MBCenter(rawValue: centerRaw) ?? .start), forType: .string)

@@ -270,6 +270,18 @@ enum CSVLine {
         }
     }
 
+    /// Shares traded in bulk / block deals per day: the larger of the buy and sell sides (each trade has a buyer and
+    /// a seller, but NSE only lists the clients over the threshold, so one side can be missing).
+    func dealQtyByDay(_ symbol: String) -> [String: Double] {
+        var buy: [String: Double] = [:], sell: [String: Double] = [:]
+        for d in bySymbol[SymbolRenames.shared.current(symbol.uppercased())] ?? [] {
+            if d.isBuy { buy[d.day, default: 0] += d.qty } else { sell[d.day, default: 0] += d.qty }
+        }
+        var out: [String: Double] = [:]
+        for day in Set(buy.keys).union(sell.keys) { out[day] = max(buy[day] ?? 0, sell[day] ?? 0) }
+        return out
+    }
+
     /// Regroups after an NSE symbol rename.
     func regroup() { set(deals) }
 

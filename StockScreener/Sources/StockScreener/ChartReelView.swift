@@ -298,7 +298,7 @@ struct ChartReelView: View {
         .onAppear {
             // delivery chart → TradingView: when you pan / zoom the delivery chart, Chart 1 follows
             deliveryLW.onUserRange = { from, to in
-                guard syncDelivery, ReelLayout(rawValue: layout) == .withDelivery,
+                guard syncDelivery, (ReelLayout(rawValue: layout)?.hasDelivery ?? false),
                       let web = chart1Web(), let f = TVRange.unix(from), let t = TVRange.unix(to) else { return }
                 pushedToTVAt = Date()
                 TVRange.run(web, TVRange.setBody(from: f, to: t + 86_399)) { r in
@@ -517,7 +517,7 @@ struct ChartReelView: View {
                     .help("My pick: grey → green → orange (⌘K)")
                     .keyboardShortcut("k", modifiers: .command)
                 }
-                if ReelLayout(rawValue: layout) == .withDelivery {
+                if (ReelLayout(rawValue: layout)?.hasDelivery ?? false) {
                     Toggle("🔗 Sync", isOn: $syncDelivery).toggleStyle(.button)
                         .help("Keep the delivery chart on the same dates as Chart 1 — and move Chart 1 when you pan / zoom the delivery chart")
                 }
@@ -541,10 +541,11 @@ struct ChartReelView: View {
             case .side: HSplitView { chartPane(it, 0); chartPane(it, 1) }
             case .stacked: VSplitView { chartPane(it, 0); chartPane(it, 1) }
             case .sequence: chartPane(it, phase)
-            case .withDelivery:
+            case .withDelivery, .with2Delivery:
+                let c = l == .with2Delivery ? 1 : 0
                 VSplitView {
-                    chartPane(it, 0).frame(minHeight: 250)
-                    DeliveryMiniChart(symbol: it.symbol, lw: deliveryLW, syncNote: syncDelivery ? syncNote : nil, focus: it.goTo)
+                    chartPane(it, c).frame(minHeight: 250)
+                    DeliveryMiniChart(symbol: it.symbol, lw: deliveryLW, syncNote: syncDelivery ? syncNote : nil, focus: it.goTo, forChart: c)
                         .frame(minHeight: 110, idealHeight: 230)
                 }
             }
@@ -683,15 +684,17 @@ struct ChartReelView: View {
 
     // MARK: Sync (Chart 1 ↔ delivery chart)
 
+    /// The TradingView chart the delivery chart follows: Chart 2 in "2 + Delivery", else Chart 1.
     private func chart1Web() -> WKWebView? {
         let list = items
-        guard list.indices.contains(shown), let u = vm.chartURL(list[shown].symbol, column: 0) else { return nil }
-        return pool.view(for: u, slot: 0, goTo: list[shown].goTo)
+        let c = ReelLayout(rawValue: layout) == .with2Delivery ? min(1, vm.chartCount - 1) : 0
+        guard list.indices.contains(shown), let u = vm.chartURL(list[shown].symbol, column: c) else { return nil }
+        return pool.view(for: u, slot: c, goTo: list[shown].goTo)
     }
 
     /// TradingView → delivery chart: follow Chart 1's visible dates.
     private func pollTV(_ it: ReelItem?) {
-        guard syncDelivery, ReelLayout(rawValue: layout) == .withDelivery, it != nil, !dragging,
+        guard syncDelivery, (ReelLayout(rawValue: layout)?.hasDelivery ?? false), it != nil, !dragging,
               Date().timeIntervalSince(pushedToTVAt) > 0.8, syncFails < 25,
               let web = chart1Web(), !web.isLoading else { return }
         TVRange.run(web, TVRange.getBody) { r in
@@ -735,7 +738,7 @@ struct ChartReelView: View {
         shown = i
         guard preload else { return }
         let l = ReelLayout(rawValue: layout) ?? .chart1
-        let cols: [Int] = l == .chart1 || l == .withDelivery ? [0] : (l == .chart2 ? [1] : [0, 1])
+        let cols: [Int] = l == .chart1 || l == .withDelivery ? [0] : (l == .chart2 || l == .with2Delivery ? [1] : [0, 1])
         var urls: [(URL, Int, String?)] = []
         for j in [i, i + 1, i - 1, i + 2, i + 3] where list.indices.contains(j) {
             for c in cols { if let u = vm.chartURL(list[j].symbol, column: min(c, vm.chartCount - 1)) { urls.append((u, c, list[j].goTo)) } }
@@ -785,7 +788,8 @@ enum ColumnCentre {
 }
 
 enum ReelLayout: String, CaseIterable, Identifiable {
-    case chart1 = "Chart 1", chart2 = "Chart 2", side = "Both ⇆", stacked = "Both ⇅", sequence = "1 → 2", withDelivery = "1 + Delivery"
+    var hasDelivery: Bool { self == .withDelivery || self == .with2Delivery }
+    case chart1 = "Chart 1", chart2 = "Chart 2", side = "Both ⇆", stacked = "Both ⇅", sequence = "1 → 2", withDelivery = "1 + Delivery", with2Delivery = "2 + Delivery"
     var id: String { rawValue }
 }
 
