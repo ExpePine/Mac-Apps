@@ -436,6 +436,7 @@ struct LWChartData: Encodable {
         var out: [Marker] = []
         let sym = symbol.uppercased()
         if layers.contains(.fmark) { out += FormulaMarks.shared.markers(sym, from: from) }
+        out += DayNoteStore.shared.markers(sym).filter { $0.time >= from }
         if layers.contains(.news) {
             let codes = EventCodes.all
             let minImpact = NewsImpact.minimum

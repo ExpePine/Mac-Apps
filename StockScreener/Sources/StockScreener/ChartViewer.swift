@@ -116,7 +116,8 @@ struct ChartViewer: View {
             let s = ChartCentre.title(vm.chartContext, vm)
             if !centreSig.isEmpty && s != centreSig { centreSig = s; recentre() }
         }
-        .onReceive(syncTimer) { _ in if OnScreen.visible(web.view) { pollTVRange(); pollCross(); TVCursor.poll(web.view, symbol: symbol) } }
+        .onReceive(syncTimer) { _ in if OnScreen.visible(web.view) { pollTVRange(); pollCross(); TVCursor.poll(web.view, symbol: symbol)
+            if min(vm.settings.chartLinkColumn, vm.chartCount - 1) == 0 { FloatingNotes.shared.poll(web.view, symbol: symbol) } } }
         .onChange(of: mini.crossDay) { d in if let d { crossDay = d } }
         .onChange(of: symbol) { _ in crossDay = nil; crossFails = 0 }
         .onAppear {
@@ -200,6 +201,7 @@ struct ChartViewer: View {
                 .disabled(symbol.isEmpty)
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .help("Store the chart as a dated screenshot of \(symbol) (⇧⌘S) — the S column turns green")
+            FloatingNoteButton(symbol: symbol)
             Button { vm.shotSymbol = symbol; openWindow(id: "shots") } label: { Label("Annotate", systemImage: "pencil.tip.crop.circle") }
                 .disabled(symbol.isEmpty).help("Open this stock's screenshots to draw on them")
             Menu {
