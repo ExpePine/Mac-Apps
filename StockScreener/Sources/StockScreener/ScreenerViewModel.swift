@@ -63,6 +63,8 @@ final class ScreenerViewModel: ObservableObject {
     @Published var isTimelineLoading = false
     @Published var isTimelinePlaying = false
     var timelineCache: [String: SheetTable] = [:]
+    /// M_ columns: the table's delivery columns on a month-end day, by stock (see fillMonthColumns).
+    var monthMemo: [String: [String: [String: (String, Double?)]]] = [:]
     var timelineCacheOrder: [String] = []
     var timelinePlayTask: Task<Void, Never>?
     var timelineLoadTask: Task<Void, Never>?
@@ -484,6 +486,7 @@ final class ScreenerViewModel: ObservableObject {
     /// Adds DLVR (₹ Cr on the day ta.highest(DELIV_QTY×CLOSE, 300) updated — the latest NSE day — else blank)
     /// and Safety (ta.sma(DELIV_QTY, 100) × 0.05) from the stored NSE delivery data.
     private func withDeliveryColumns(_ t: SheetTable) -> SheetTable {
+        monthMemo = [:]                                   // delivery data may have changed
         let dc = DeliveryCenter.shared
         guard !dc.storedDays.isEmpty else { return t }
         // Same day as the sheet's data (or the last NSE day before it), not each stock's own last row
@@ -554,7 +557,14 @@ final class ScreenerViewModel: ObservableObject {
             return SheetRow(id: row.id, cells: cells, numbers: nums)
         }
         let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, dpName, szName, zpName, zdName]
-        return SheetTable(headers: t.headers + extra, rows: rows, originalHeaders: t.originalHeaders + extra)
+        // monthly versions: M_ + each column = its value at the end of the last completed month
+        let mExtra = extra.map { e -> String in
+            let b = e.hasSuffix(" (NSE)") ? String(e.dropLast(6)) : e
+            return t.index(of: "M_" + b) == nil ? "M_" + b : "M_" + b + " (NSE)"
+        }
+        let rows2 = rows.map { r in SheetRow(id: r.id, cells: r.cells + mExtra.map { _ in "" }, numbers: r.numbers + mExtra.map { _ in nil }) }
+        let withM = SheetTable(headers: t.headers + extra + mExtra, rows: rows2, originalHeaders: t.originalHeaders + extra + mExtra)
+        return fillMonthColumns(withM, day: asOf)
     }
 
     /// The latest NSE close stored for a stock (when Yahoo has none).

@@ -40,8 +40,53 @@ extension ScreenerViewModel {
     static let deliveryColumnNames = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3",
                                       "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES", "DEAL_PRANK", "STEEP_Z", "Z_PRANK", "Z_PRANK_DAYS"]
     static func isDeliveryColumn(_ h: String) -> Bool {
-        let base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
+        var base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
+        if base.hasPrefix("M_") { base = String(base.dropFirst(2)) }        // monthly versions (M_DELSMA …)
         return deliveryColumnNames.contains(base) || PineColumns.shared.has(h)
+    }
+
+    /// The last NSE trading day of the month before `day`'s month (M_ columns hold the values on that day).
+    static func monthEnd(before day: String) -> String? {
+        let first = String(day.prefix(7)) + "-01"
+        return DeliveryCenter.shared.book.days.last { $0 < first }
+    }
+
+    /// Fills the M_ columns (M_DELSMA, M_Z_PRANK …) with each delivery column's value at the end of the last
+    /// completed month before `day` — a month's figure stays fixed through the next month, like a monthly chart's
+    /// closed bar.
+    func fillMonthColumns(_ t: SheetTable, day: String) -> SheetTable {
+        let mIdx = t.headers.enumerated().filter { $0.element.hasPrefix("M_") && Self.isDeliveryColumn($0.element) }
+        guard !mIdx.isEmpty, let label = labelIndex ?? (t.headers.isEmpty ? nil : 0) else { return t }
+        guard let me = Self.monthEnd(before: day) else { return t }
+        // the same table on the month-end day (memoised: every day of a month uses the same month-end)
+        let key = me + "|" + mIdx.map(\.element).joined(separator: ",")
+        var bySym: [String: [String: (String, Double?)]]
+        if let m = monthMemo[key] { bySym = m } else {
+            let base = withDeliveryValues(t, asOf: me, monthCols: false)
+            bySym = [:]
+            for r in base.rows {
+                let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
+                var m: [String: (String, Double?)] = [:]
+                for (i, h) in base.headers.enumerated() where Self.isDeliveryColumn(h) && !h.hasPrefix("M_") && i < r.cells.count {
+                    m[h] = (r.cells[i], i < r.numbers.count ? r.numbers[i] : nil)
+                }
+                bySym[sym] = m
+            }
+            if monthMemo.count > 24 { monthMemo = [:] }
+            monthMemo[key] = bySym
+        }
+        let rows = t.rows.map { r -> SheetRow in
+            var cells = r.cells, nums = r.numbers
+            let m = bySym[r.text(label).trimmingCharacters(in: .whitespaces).uppercased()] ?? [:]
+            for (i, h) in mIdx where i < cells.count {
+                let baseName = String(h.dropFirst(2))
+                let v = m[baseName] ?? m[baseName + " (NSE)"]
+                cells[i] = v?.0 ?? ""
+                if i < nums.count { nums[i] = v?.1 ?? nil }
+            }
+            return SheetRow(id: r.id, cells: cells, numbers: nums)
+        }
+        return SheetTable(headers: t.headers, rows: rows, originalHeaders: t.originalHeaders)
     }
 
     /// Your Pine scripts' Filter columns (PineCenter), on the sheet's data day.
@@ -72,7 +117,7 @@ extension ScreenerViewModel {
     }
 
     /// The delivery columns as they were on `day` (C/DL2C = that day's close ÷ that day's DEL2C).
-    func withDeliveryValues(_ t: SheetTable, asOf day: String) -> SheetTable {
+    func withDeliveryValues(_ t: SheetTable, asOf day: String, monthCols: Bool = true) -> SheetTable {
         let dc = DeliveryCenter.shared
         guard !dc.storedDays.isEmpty, let label = labelIndex else { return t }
         let idx = t.headers.enumerated().filter { Self.isDeliveryColumn($0.element) }.map { (n: $0.element.hasSuffix(" (NSE)") ? String($0.element.dropLast(6)) : $0.element, i: $0.offset) }
@@ -93,6 +138,7 @@ extension ScreenerViewModel {
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
             let c = cols[sym]
             for (n, i) in idx where i < cells.count {
+                if n.hasPrefix("M_") { continue }              // filled below from the month-end day
                 if PineColumns.shared.has(n) {
                     let v = PineColumns.shared.value(n, sym, day)
                     cells[i] = v.map { String(format: abs($0) >= 1000 ? "%.0f" : "%.3f", $0) } ?? ""; nums[i] = v
@@ -150,7 +196,8 @@ extension ScreenerViewModel {
             }
             return SheetRow(id: r.id, cells: cells, numbers: nums)
         }
-        return SheetTable(headers: t.headers, rows: rows, originalHeaders: t.originalHeaders)
+        let out = SheetTable(headers: t.headers, rows: rows, originalHeaders: t.originalHeaders)
+        return monthCols ? fillMonthColumns(out, day: day) : out
     }
 
     /// Close on (or the last trading day before) `day`: Yahoo, else NSE.
