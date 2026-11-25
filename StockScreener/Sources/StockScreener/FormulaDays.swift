@@ -358,7 +358,10 @@ struct FormulaDaysView: View {
     @AppStorage("fdays.last") private var lastDays = 60
     @AppStorage("fdays.horizon") private var horizon = 30
     @AppStorage("fdays.mode") private var mode = 0                 // 0 = stocks count, 1 = change %
-    @AppStorage("fdays.sort") private var sortBy = 0               // 0 = as listed, 1 = avg %, 2 = win %
+    @AppStorage("fdays.sort") private var sortBy = 0
+    @AppStorage("fdays.split") private var splitOn = false
+    @AppStorage("fdays.splitDays") private var splitDays = 10
+    @AppStorage("fdays.splitPct") private var splitPct = 5.0               // 0 = as listed, 1 = avg %, 2 = win %
     @State private var success: [String: FSuccess] = [:]
     @State private var lead: [String: LeadMath.Result] = [:]
     @AppStorage("lead.gain") private var leadGain = 30.0
@@ -464,25 +467,53 @@ struct FormulaDaysView: View {
     private func chart(_ key: String, name: String) -> some View {
         let pts: [(String, Int)] = c.days.compactMap { d in c.counts[key]?[d].flatMap { $0 }.map { (d, $0.count) } }
         return VStack(alignment: .leading, spacing: 2) {
-            Text(name).font(.callout.monospaced()).lineLimit(1)
-            Chart(pts, id: \.0) { p in
-                BarMark(x: .value("Day", String(p.0.suffix(5))), y: .value("Stocks", p.1))
-                    .foregroundStyle(p.0 == c.days.last ? Color.orange : Color.accentColor)
-                    .annotation(position: .top) { Text("\(p.1)").font(.system(size: 8)).foregroundStyle(.secondary) }
+            HStack(spacing: 8) {
+                Text(name).font(.callout.monospaced()).lineLimit(1)
+                Spacer()
+                splitControls
             }
-            .frame(height: 130)
-            .chartOverlay { proxy in
-                GeometryReader { geo in
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .onTapGesture { loc in
-                            let x = loc.x - geo[proxy.plotAreaFrame].origin.x
-                            guard let label: String = proxy.value(atX: x),
-                                  let day = pts.map(\.0).last(where: { $0.hasSuffix(label) }) else { return }
-                            cell = (key, day); showCell = true
-                        }
-                        .help("Click a bar for that day's stocks and how they did")
-                }
+            Group {
+                if splitOn { FSplitChart(bars: splitBars(key, pts)) { label in tap(key, pts, label) } }
+                else { countChart(pts) { label in tap(key, pts, label) } }
             }
+            .frame(height: splitOn ? 155 : 130)
+        }
+    }
+
+    private func tap(_ key: String, _ pts: [(String, Int)], _ label: String) {
+        guard let day = pts.map(\.0).last(where: { $0.hasSuffix(label) }) else { return }
+        cell = (key, day); showCell = true
+    }
+
+    private func countChart(_ pts: [(String, Int)], onTap: @escaping (String) -> Void) -> some View {
+        Chart(pts, id: \.0) { p in
+            BarMark(x: .value("Day", String(p.0.suffix(5))), y: .value("Stocks", p.1))
+                .foregroundStyle(p.0 == c.days.last ? Color.orange : Color.accentColor)
+                .annotation(position: .top) { Text("\(p.1)").font(.system(size: 8)).foregroundStyle(.secondary) }
+        }
+        .modifier(BarTap(onTap: onTap))
+    }
+
+    /// Toggle + horizon (5/10/22 trading days) + threshold %: colours each bar by how many of its stocks did well.
+    private var splitControls: some View {
+        HStack(spacing: 6) {
+            Toggle("Did they work?", isOn: $splitOn).toggleStyle(.checkbox)
+                .help("Green = stocks up at least the threshold N trading days after that day, red = the rest, grey = not N days yet")
+            if splitOn {
+                Picker("", selection: $splitDays) { Text("5d").tag(5); Text("10d").tag(10); Text("22d").tag(22) }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                Text("≥")
+                TextField("", value: $splitPct, format: .number).frame(width: 40).textFieldStyle(.roundedBorder)
+                Text("%")
+            }
+        }
+        .font(.caption)
+    }
+
+    private func splitBars(_ key: String, _ pts: [(String, Int)]) -> [FSplitBar] {
+        pts.map { p in
+            let syms = (c.counts[key]?[p.0] ?? nil) ?? []
+            return FSuccessMath.split(syms, day: p.0, horizon: max(1, splitDays), threshold: splitPct / 100, vm: vm)
         }
     }
 
@@ -728,6 +759,18 @@ enum FSuccessMath {
         return r
     }
 
+    /// One day's stocks split by how they did `horizon` trading days later: up ≥ threshold, below it, or not yet.
+    @MainActor static func split(_ syms: [String], day: String, horizon: Int, threshold: Double, vm: ScreenerViewModel) -> FSplitBar {
+        var b = FSplitBar(day: day)
+        for sym in syms {
+            let v: ([String], [Double])? = vm.priceBook.series(for: sym).flatMap { $0.days.isEmpty ? nil : ($0.days, $0.closes) }
+                ?? DeliveryCenter.shared.book.series[sym].flatMap { $0.days.isEmpty ? nil : ($0.days, $0.close) }
+            guard let (days, closes) = v, let i = index(days, day), closes[i] > 0, i + horizon <= closes.count - 1 else { b.pending += 1; continue }
+            if closes[i + horizon] / closes[i] - 1 >= threshold { b.good += 1 } else { b.bad += 1 }
+        }
+        return b
+    }
+
     static func pct(_ v: Double?) -> String { v.map { String(format: "%+.1f%%", $0 * 100) } ?? "—" }
     static func color(_ v: Double?) -> Color { guard let v else { return .secondary }; return v > 0 ? .green : (v < 0 ? .red : .secondary) }
 }
@@ -932,5 +975,69 @@ struct FormulaEditor: View {
         }
         saved()
         close()
+    }
+}
+
+
+// MARK: - Bars split green / red by how the stocks did
+
+struct FSplitBar {
+    let day: String
+    var good = 0, bad = 0, pending = 0
+    var judged: Int { good + bad }
+    var label: String { String(day.suffix(5)) }
+    var share: String { judged == 0 ? "" : "\(Int((Double(good) / Double(judged) * 100).rounded()))%" }
+}
+
+/// Stacked bars: green = up ≥ threshold after N days, red = below, grey = not N trading days yet. % on top = green share.
+struct FSplitChart: View {
+    let bars: [FSplitBar]
+    var onTap: (String) -> Void = { _ in }
+
+    private struct Seg: Identifiable {
+        let id: String; let day: String; let kind: String; let n: Int
+    }
+    private var segs: [Seg] {
+        bars.flatMap { b in
+            [Seg(id: b.day + "g", day: b.label, kind: "Did well", n: b.good),
+             Seg(id: b.day + "r", day: b.label, kind: "Didn't", n: b.bad),
+             Seg(id: b.day + "p", day: b.label, kind: "Not yet", n: b.pending)]
+        }
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(segs) { s in
+                BarMark(x: .value("Day", s.day), y: .value("Stocks", s.n))
+                    .foregroundStyle(by: .value("Result", s.kind))
+            }
+            ForEach(bars, id: \.day) { b in
+                PointMark(x: .value("Day", b.label), y: .value("Stocks", b.good + b.bad + b.pending))
+                    .opacity(0)
+                    .annotation(position: .top) {
+                        Text(b.share).font(.system(size: 8)).foregroundStyle(.secondary)
+                    }
+            }
+        }
+        .chartForegroundStyleScale(["Did well": Color.green, "Didn't": Color.red, "Not yet": Color.gray.opacity(0.5)])
+        .chartLegend(position: .bottom, alignment: .leading)
+        .modifier(BarTap(onTap: onTap))
+    }
+}
+
+/// Click a bar → its day label (the x value).
+struct BarTap: ViewModifier {
+    let onTap: (String) -> Void
+    func body(content: Content) -> some View {
+        content.chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle().fill(.clear).contentShape(Rectangle())
+                    .onTapGesture { loc in
+                        let x = loc.x - geo[proxy.plotAreaFrame].origin.x
+                        if let label: String = proxy.value(atX: x) { onTap(label) }
+                    }
+                    .help("Click a bar for that day's stocks and how they did")
+            }
+        }
     }
 }
