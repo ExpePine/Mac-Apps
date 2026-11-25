@@ -53,6 +53,8 @@ struct FFormula: Identifiable, Hashable {
     @Published private(set) var days: [String] = []          // oldest → newest; the last one is today's live data
     @Published private(set) var running = false
     @Published private(set) var progress = 0.0
+    /// Set when "Also require" uses sheet columns: days before this one (no stored sheet) were counted without them.
+    @Published private(set) var alsoSkippedBefore: String?
     private var cache: [String: [String]?] = [:]             // "day|formula" → symbols
     // Past days never change, so their results are kept on disk too: after the first count, opening the app or a
     // chart only judges today (and days not seen before) — no stored sheets are re-read.
@@ -165,15 +167,31 @@ struct FFormula: Identifiable, Hashable {
         // Formulas built only on NSE delivery columns (DELSMA, Z_PRANK, M_…, Pine) don't need a stored sheet: they
         // run on every NSE trading day, as far back as the delivery data goes (up to Days).
         let headers = vm.table.headers
-        let delOnly = Set(fs.filter { Self.deliveryOnly($0.eff, headers: headers) }.map(\.eff.key))
+        // judged on the formula itself: a sheet column in "Also require" doesn't hold it to sheet days
+        let delOnly = Set(fs.filter { Self.deliveryOnly($0.orig, headers: headers) }.map(\.eff.key))
+        // NSE-only days: "Also require" parts that use sheet columns are skipped (only fully-NSE parts are kept)
+        var nseForm: [String: FFormula] = [:]
+        var skipsAlso = false
+        for p in fs where delOnly.contains(p.eff.key) {
+            guard let a = also, a.activeCount > 0, !Self.deliveryOnly(p.eff, headers: headers) else { nseForm[p.eff.key] = p.eff; continue }
+            let keep = a.groups.filter { $0.activeCount > 0 && Self.columns(of: $0, headers: headers).allSatisfy { ScreenerViewModel.isDeliveryColumn($0) } }
+            var e = FFormula(name: p.orig.name, source: p.orig.source, group: FilterGroup(mode: .all, groups: [p.orig.group] + keep),
+                             quick: p.orig.quick, fresh: p.orig.fresh)
+            e.num = p.orig.num
+            nseForm[p.eff.key] = e
+            skipsAlso = true
+        }
         let nseAll = delOnly.isEmpty ? [] : DeliveryCenter.shared.book.days.filter { $0 < liveKey }
+        // the NSE book loads in the background at launch: count again once it's there
+        if !delOnly.isEmpty && DeliveryCenter.shared.book.days.isEmpty { waitForBook(vm, lastDays: lastDays) }
         let axisAll = Array(Set(storedAll).union(nseAll)).sorted()
         let shown = Array(axisAll.suffix(max(1, lastDays)))
         days = shown + [liveKey]
+        alsoSkippedBefore = skipsAlso && shown.contains(where: { !storedSet.contains($0) }) ? storedAll.first : nil
         // "just became true" formulas also need the day before the first one shown
         let before: [String] = (fs.contains { $0.orig.fresh } || UserDefaults.standard.bool(forKey: "fmarks.fresh"))
             ? Array(axisAll.dropLast(shown.count).suffix(Self.freshLookback)) : []
-        let usedCols: [String: Set<String>] = Dictionary(fs.map { p in (p.eff.key, Set(headers.filter { p.eff.key.contains($0) && $0.count > 1 })) },
+        let usedCols: [String: Set<String>] = Dictionary(fs.map { p in (p.eff.key, Self.columns(of: p.eff.group, headers: headers)) },
                                                          uniquingKeysWith: { a, _ in a })
         let evalDays = before + days
         running = true; progress = 0
@@ -204,7 +222,7 @@ struct FFormula: Identifiable, Hashable {
                     }
                     for p in todo {
                         guard let t = table else { result[p.orig.key, default: [:]][d] = .some(nil); continue }
-                        let r = Self.evaluate(p.eff, table: t, label: label)
+                        let r = Self.evaluate(hasSheet ? p.eff : (nseForm[p.eff.key] ?? p.eff), table: t, label: label)
                         if !isLive {
                             if cache.count > 150_000 { cache.removeAll() }    // bounded: re-evaluated on demand
                             cache[d + "|" + p.eff.key] = .some(r)
@@ -225,8 +243,56 @@ struct FFormula: Identifiable, Hashable {
 
     /// A formula that reads only columns the app computes from NSE delivery data (and Pine columns).
     static func deliveryOnly(_ f: FFormula, headers: [String]) -> Bool {
-        let used = headers.filter { f.key.contains($0) && $0.count > 1 }
+        let used = columns(of: f.group, headers: headers)
         return !used.isEmpty && used.allSatisfy { ScreenerViewModel.isDeliveryColumn($0) }
+    }
+
+    /// Sheet columns a formula reads (none = can run on NSE-only days). Shown under each formula in Formula counts.
+    func sheetColumns(_ f: FFormula, headers: [String]) -> [String] {
+        Self.columns(of: f.group, headers: headers).filter { !ScreenerViewModel.isDeliveryColumn($0) }.sorted()
+    }
+
+    /// The columns a group's enabled conditions read: the exact column names of compare conditions, and for
+    /// formula conditions every header that appears as a whole name (so DELSMA inside M_DELSMA isn't counted twice
+    /// and a short sheet header like "SMA" inside "DELSMA" isn't mistaken for a sheet column).
+    static func columns(of g: FilterGroup, headers: [String]) -> Set<String> {
+        guard g.isEnabled else { return [] }
+        var out = Set<String>()
+        for c in g.conditions where c.isEnabled {
+            if c.kind == .formula {
+                out.formUnion(headers.filter { $0.count > 1 && containsWhole($0, in: c.formula) })
+            } else {
+                if !c.column.isEmpty { out.insert(c.column) }
+                if c.target == .column, c.op.needsValue, c.op.allowsColumnTarget, !c.otherColumn.isEmpty { out.insert(c.otherColumn) }
+            }
+        }
+        for sub in g.groups { out.formUnion(columns(of: sub, headers: headers)) }
+        return out
+    }
+
+    private static func containsWhole(_ name: String, in text: String) -> Bool {
+        func word(_ ch: Character?) -> Bool { guard let ch else { return false }; return ch.isLetter || ch.isNumber || ch == "_" }
+        var from = text.startIndex
+        while let r = text.range(of: name, range: from..<text.endIndex) {
+            let before = r.lowerBound > text.startIndex ? text[text.index(before: r.lowerBound)] : nil
+            let after = r.upperBound < text.endIndex ? text[r.upperBound] : nil
+            if !word(before) && !word(after) { return true }
+            from = text.index(after: r.lowerBound)
+        }
+        return false
+    }
+
+    private var bookWait: Task<Void, Never>?
+    private func waitForBook(_ vm: ScreenerViewModel, lastDays: Int) {
+        guard bookWait == nil else { return }
+        bookWait = Task { @MainActor [weak self] in
+            for _ in 0..<120 {                                   // up to ~2 minutes
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if !DeliveryCenter.shared.book.days.isEmpty { break }
+            }
+            self?.bookWait = nil
+            if !DeliveryCenter.shared.book.days.isEmpty { self?.run(vm, lastDays: lastDays) }
+        }
     }
 
     /// What "just became true" means (set in Formula counts / the Formula marks menu):
@@ -335,7 +401,7 @@ struct FormulaDaysView: View {
                 Spacer()
                 Picker("Sort", selection: $sortBy) { Text("As listed").tag(0); Text("Avg %").tag(1); Text("Win %").tag(2); Text("Signals").tag(3) }.fixedSize()
             }
-            Text("Formulas come from your F notes (the recognised chips), F alerts and saved F combinations. Each cell = how many stocks met the formula on that stored day; the last column is today's live data. — = a column the formula uses wasn't stored that day. Click a number for the stocks.")
+            Text("Formulas come from your F notes (the recognised chips), F alerts and saved F combinations. Each cell = how many stocks met the formula that day (formulas using only NSE delivery columns go back as far as the delivery data; others only to stored sheet days); the last column is today's live data. — = a column the formula uses wasn't stored that day. Click a number for the stocks.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Image(systemName: "line.3.horizontal.decrease.circle").foregroundStyle(alsoActive ? Color.orange : Color.secondary)
@@ -348,6 +414,10 @@ struct FormulaDaysView: View {
             }
             .help("Every formula below is counted only for stocks that also meet these — counts, success and the stock lists all change")
             if let alsoError { Text(alsoError).font(.caption).foregroundStyle(.red) }
+            if let b = c.alsoSkippedBefore {
+                Text("Before \(b.suffix(5)) there's no stored sheet: NSE-only formulas are counted there without the sheet columns of \u{201C}Also require\u{201D}.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             if !c.hidden.isEmpty {
                 Button(showHidden ? "Hide hidden rows" : "Show \(c.hidden.count) hidden row\(c.hidden.count == 1 ? "" : "s")") { showHidden.toggle() }
                     .buttonStyle(.link).font(.caption)
@@ -435,6 +505,18 @@ struct FormulaDaysView: View {
 
     private func recount() { c.run(vm, lastDays: max(1, lastDays)) }
 
+    /// Under each formula: whether it can count NSE-only days, or which sheet columns hold it to stored sheet days.
+    @ViewBuilder private func daysTag(_ f: FFormula) -> some View {
+        let sheet = c.sheetColumns(f, headers: vm.table.headers)
+        if sheet.isEmpty {
+            Text("all NSE days").font(.caption2).foregroundStyle(.green)
+        } else {
+            Text("sheet days only · " + sheet.prefix(3).joined(separator: ", ") + (sheet.count > 3 ? " …" : ""))
+                .font(.caption2).foregroundStyle(.orange).lineLimit(1)
+                .help("These columns come from your Google Sheet, so days without a stored sheet can't be judged")
+        }
+    }
+
     private var alsoActive: Bool { !alsoText.trimmingCharacters(in: .whitespaces).isEmpty || alsoFilter }
 
     private func applyAlso() {
@@ -490,6 +572,7 @@ struct FormulaDaysView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(f.titled).font(.caption.monospaced()).lineLimit(1)
                                 Text(f.source).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                daysTag(f)
                             }
                             .frame(width: 320, alignment: .leading).padding(4)
                             .background(selected == f.key ? Color.accentColor.opacity(0.12) : Color.clear)
