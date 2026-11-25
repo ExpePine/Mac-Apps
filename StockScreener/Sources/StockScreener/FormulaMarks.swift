@@ -60,7 +60,7 @@ import AppKit
     /// Days Formula counts should count: its Days setting, or every stored day in Full mode.
     static var countDays: Int {
         let n = UserDefaults.standard.object(forKey: "fdays.last") as? Int ?? 60
-        return full ? max(n, HistoryStore.days().count) : n
+        return full ? max(n, HistoryStore.days().count, DeliveryCenter.shared.book.days.count) : n
     }
 
     /// Picks the formulas to show; asks Formula counts to count if it hasn't counted them yet.
@@ -75,7 +75,7 @@ import AppKit
         }
         let missing = wanted.contains { fc.counts[$0.key] == nil }
         // Full mode: every stored day must be counted (Formula counts' window is widened to all of them)
-        let short = fc.days.count < min(Self.countDays, HistoryStore.days().count) + 1 && Self.full
+        let short = fc.days.count < min(Self.countDays, max(HistoryStore.days().count, DeliveryCenter.shared.book.days.count)) && Self.full
         if (force || missing || short || fc.days.isEmpty) && !fc.running && !wanted.isEmpty {
             let n = FormulaMarks.countDays
             fc.run(vm, lastDays: max(1, n))

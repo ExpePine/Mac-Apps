@@ -117,13 +117,19 @@ extension ScreenerViewModel {
     }
 
     /// The delivery columns as they were on `day` (C/DL2C = that day's close ÷ that day's DEL2C).
-    func withDeliveryValues(_ t: SheetTable, asOf day: String, monthCols: Bool = true) -> SheetTable {
+    /// `only`: just these columns (a formula's) are recalculated — the rest keep whatever the table had.
+    func withDeliveryValues(_ t: SheetTable, asOf day: String, monthCols: Bool = true, only: Set<String>? = nil) -> SheetTable {
         let dc = DeliveryCenter.shared
         guard !dc.storedDays.isEmpty, let label = labelIndex else { return t }
-        let idx = t.headers.enumerated().filter { Self.isDeliveryColumn($0.element) }.map { (n: $0.element.hasSuffix(" (NSE)") ? String($0.element.dropLast(6)) : $0.element, i: $0.offset) }
+        let idx = t.headers.enumerated().filter { Self.isDeliveryColumn($0.element) && (only?.contains($0.element) ?? true) }
+            .map { (n: $0.element.hasSuffix(" (NSE)") ? String($0.element.dropLast(6)) : $0.element, i: $0.offset) }
         guard !idx.isEmpty else { return t }
+        // the per-stock delivery columns (the costly part) only when one of them is wanted
+        let basic: Set<String> = ["DLVR", "Safety", "DQ_PRANK", "JUMP", "DELSMA", "STREAK", "t3Color", "HI/T3", "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C"]
+        let needCols = idx.contains { basic.contains($0.n) }
         // only the stocks in this table (a one-row table — the trace-back — then costs one stock, not all of them)
         let cols: [String: DeliveryColumns] = {
+            if !needCols { return [:] }
             if t.rows.count > 50 { return DeliveryColumns.all(dc.book, asOf: day) }
             var o: [String: DeliveryColumns] = [:]
             let d = dc.book.days.last(where: { $0 <= day }) ?? dc.book.days.last ?? ""
@@ -197,7 +203,8 @@ extension ScreenerViewModel {
             return SheetRow(id: r.id, cells: cells, numbers: nums)
         }
         let out = SheetTable(headers: t.headers, rows: rows, originalHeaders: t.originalHeaders)
-        return monthCols ? fillMonthColumns(out, day: day) : out
+        let wantM = only.map { o in o.contains { $0.hasPrefix("M_") } } ?? true
+        return monthCols && wantM ? fillMonthColumns(out, day: day) : out
     }
 
     /// Close on (or the last trading day before) `day`: Yahoo, else NSE.

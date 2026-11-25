@@ -161,11 +161,20 @@ struct FFormula: Identifiable, Hashable {
         guard let label = vm.labelIndex else { return }
         let liveKey = HistoryStore.dayKey(vm.dataDay(of: vm.table))
         let storedAll = HistoryStore.days().filter { $0 < liveKey }
-        let stored = Array(storedAll.suffix(max(1, lastDays)))
-        days = stored + [liveKey]
+        let storedSet = Set(storedAll)
+        // Formulas built only on NSE delivery columns (DELSMA, Z_PRANK, M_…, Pine) don't need a stored sheet: they
+        // run on every NSE trading day, as far back as the delivery data goes (up to Days).
+        let headers = vm.table.headers
+        let delOnly = Set(fs.filter { Self.deliveryOnly($0.eff, headers: headers) }.map(\.eff.key))
+        let nseAll = delOnly.isEmpty ? [] : DeliveryCenter.shared.book.days.filter { $0 < liveKey }
+        let axisAll = Array(Set(storedAll).union(nseAll)).sorted()
+        let shown = Array(axisAll.suffix(max(1, lastDays)))
+        days = shown + [liveKey]
         // "just became true" formulas also need the day before the first one shown
         let before: [String] = (fs.contains { $0.orig.fresh } || UserDefaults.standard.bool(forKey: "fmarks.fresh"))
-            ? Array(storedAll.dropLast(stored.count).suffix(Self.freshLookback)) : []
+            ? Array(axisAll.dropLast(shown.count).suffix(Self.freshLookback)) : []
+        let usedCols: [String: Set<String>] = Dictionary(fs.map { p in (p.eff.key, Set(headers.filter { p.eff.key.contains($0) && $0.count > 1 })) },
+                                                         uniquingKeysWith: { a, _ in a })
         let evalDays = before + days
         running = true; progress = 0
         task = Task { @MainActor in
@@ -175,17 +184,23 @@ struct FFormula: Identifiable, Hashable {
             for (k, d) in evalDays.enumerated() {
                 if Task.isCancelled { break }
                 let isLive = d == liveKey && k == evalDays.count - 1
+                let hasSheet = isLive || storedSet.contains(d)
                 let todo = fs.filter { p in
                     if !isLive, let c = cache[d + "|" + p.eff.key] { result[p.orig.key, default: [:]][d] = .some(c); return false }
+                    if !hasSheet && !delOnly.contains(p.eff.key) { result[p.orig.key, default: [:]][d] = .some(nil); return false }   // needs a stored sheet
                     return true
                 }
                 if !todo.isEmpty {
-                    var table: SheetTable? = isLive ? current : await Task.detached(priority: .userInitiated) {
-                        HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) }
-                    }.value
+                    var table: SheetTable?
+                    if isLive { table = current }
+                    else if hasSheet {
+                        table = await Task.detached(priority: .userInitiated) {
+                            HistoryStore.load(d).flatMap { ScreenerViewModel.align($0, to: current) }
+                        }.value
+                    } else { table = current }       // NSE-only day: today's list of stocks, delivery columns as of that day
                     if !isLive, let tt = table {
-                        let del = tt.headers.filter { ScreenerViewModel.isDeliveryColumn($0) }
-                        if todo.contains(where: { p in del.contains { p.eff.key.contains($0) } }) { table = vm.withDeliveryValues(tt, asOf: d) }
+                        let need = todo.reduce(into: Set<String>()) { acc, p in acc.formUnion((usedCols[p.eff.key] ?? []).filter { ScreenerViewModel.isDeliveryColumn($0) }) }
+                        if !need.isEmpty { table = vm.withDeliveryValues(tt, asOf: d, only: need) }
                     }
                     for p in todo {
                         guard let t = table else { result[p.orig.key, default: [:]][d] = .some(nil); continue }
@@ -206,6 +221,12 @@ struct FFormula: Identifiable, Hashable {
             saveCache()
             MemoryRelief.giveBack()
         }
+    }
+
+    /// A formula that reads only columns the app computes from NSE delivery data (and Pine columns).
+    static func deliveryOnly(_ f: FFormula, headers: [String]) -> Bool {
+        let used = headers.filter { f.key.contains($0) && $0.count > 1 }
+        return !used.isEmpty && used.allSatisfy { ScreenerViewModel.isDeliveryColumn($0) }
     }
 
     /// What "just became true" means (set in Formula counts / the Formula marks menu):
@@ -297,7 +318,7 @@ struct FormulaDaysView: View {
                 Spacer()
                 Text("Look back")
                 TextField("", value: $lastDays, format: .number).frame(width: 44).textFieldStyle(.roundedBorder)
-                Stepper("", value: $lastDays, in: 1...1000, step: 10).labelsHidden()
+                Stepper("", value: $lastDays, in: 1...1500, step: 10).labelsHidden()
                 Text("days")
                 if c.running { ProgressView(value: c.progress).frame(width: 100) }
                 Button { newFormula = true } label: { Label("New formula", systemImage: "plus") }
