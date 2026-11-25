@@ -474,14 +474,21 @@ struct FreshModePicker: View {
     @EnvironmentObject var vm: ScreenerViewModel
     @AppStorage("fresh.mode") private var mode = 0
     @AppStorage("fresh.gap") private var gap = 5
+    @AppStorage("fdir.forward") private var forward = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("Direction")
+                LookDirectionPicker { recount() }
+                if forward { Text("from \(FormulaMarks.countDays) days ago").foregroundStyle(.secondary) }
+            }
             Picker("\"Just became true\" =", selection: $mode) {
                 Text("true that day, not the day before").tag(0)
                 Text("the original first day of the run").tag(1)
             }
             .help("The first: a stock that drops out for a day and comes back is marked again (often late in a rise). The second walks back while the condition kept being true and marks the day it originally became true.")
+            .disabled(forward)
             if mode == 1 {
                 Stepper("A run survives gaps of up to \(gap) day\(gap == 1 ? "" : "s")", value: $gap, in: 0...30)
                     .help("Days the condition may be false in between and still count as the same run")

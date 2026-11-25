@@ -189,7 +189,7 @@ struct FFormula: Identifiable, Hashable {
         days = shown + [liveKey]
         alsoSkippedBefore = skipsAlso && shown.contains(where: { !storedSet.contains($0) }) ? storedAll.first : nil
         // "just became true" formulas also need the day before the first one shown
-        let before: [String] = (fs.contains { $0.orig.fresh } || UserDefaults.standard.bool(forKey: "fmarks.fresh"))
+        let before: [String] = !Self.forward && (fs.contains { $0.orig.fresh } || UserDefaults.standard.bool(forKey: "fmarks.fresh"))
             ? Array(axisAll.dropLast(shown.count).suffix(Self.freshLookback)) : []
         let usedCols: [String: Set<String>] = Dictionary(fs.map { p in (p.eff.key, Self.columns(of: p.eff.group, headers: headers)) },
                                                          uniquingKeysWith: { a, _ in a })
@@ -232,9 +232,9 @@ struct FFormula: Identifiable, Hashable {
                     }
                 }
                 progress = Double(k + 1) / Double(evalDays.count)
-                if k % 3 == 0 { counts = Self.freshOnly(result, fs.map(\.orig), evalDays); await Task.yield() }
+                if k % 3 == 0 { counts = Self.shape(result, fs.map(\.orig), evalDays, shownFrom: before.count); await Task.yield() }
             }
-            counts = Self.freshOnly(result, fs.map(\.orig), evalDays)
+            counts = Self.shape(result, fs.map(\.orig), evalDays, shownFrom: before.count)
             running = false
             saveCache()
             MemoryRelief.giveBack()
@@ -304,6 +304,30 @@ struct FFormula: Identifiable, Hashable {
     static var freshLookback: Int { freshMode == 1 ? freshGap + 30 : 1 }
 
     /// For "just became true" formulas: keep a stock only on the day its run began.
+    /// Back (default): each day shows the stocks meeting the formula that day ("just became true" formulas: run starts).
+    /// Forward: from the first day shown (the start, "Look back" days ago) walking forward, each stock is counted only
+    /// on the FIRST day it meets the formula — stocks already meeting it on the start day land on that first bar.
+    static var forward: Bool { UserDefaults.standard.bool(forKey: "fdir.forward") }
+
+    static func shape(_ r: [String: [String: [String]?]], _ fs: [FFormula], _ days: [String], shownFrom: Int) -> [String: [String: [String]?]] {
+        guard forward else { return freshOnly(r, fs, days) }
+        var out: [String: [String: [String]?]] = [:]
+        let span = Array(days.dropFirst(shownFrom))
+        for f in fs {
+            guard let m = r[f.key] else { continue }
+            var seen = Set<String>(), n: [String: [String]?] = [:]
+            for d in span {
+                guard let e = m[d] else { continue }
+                guard let syms = e else { n[d] = .some(nil); continue }
+                let first = syms.filter { !seen.contains($0) }
+                seen.formUnion(first)
+                n[d] = .some(first)
+            }
+            out[f.key] = n
+        }
+        return out
+    }
+
     static func freshOnly(_ r: [String: [String: [String]?]], _ fs: [FFormula], _ days: [String]) -> [String: [String: [String]?]] {
         var out = r
         for f in fs where f.fresh {
@@ -360,6 +384,7 @@ struct FormulaDaysView: View {
     @AppStorage("fdays.mode") private var mode = 0                 // 0 = stocks count, 1 = change %
     @AppStorage("fdays.sort") private var sortBy = 0
     @AppStorage("fdays.split") private var splitOn = false
+    @AppStorage("fdir.forward") private var forward = false
     @AppStorage("fdays.splitDays") private var splitDays = 10
     @AppStorage("fdays.splitPct") private var splitPct = 5.0               // 0 = as listed, 1 = avg %, 2 = win %
     @State private var success: [String: FSuccess] = [:]
@@ -385,10 +410,11 @@ struct FormulaDaysView: View {
             HStack {
                 Text("F formulas & Filter conditions — stocks meeting each one, and how they did").font(.title3.bold())
                 Spacer()
-                Text("Look back")
+                LookDirectionPicker { recount() }
+                Text(forward ? "Start" : "Look back")
                 TextField("", value: $lastDays, format: .number).frame(width: 44).textFieldStyle(.roundedBorder)
                 Stepper("", value: $lastDays, in: 1...1500, step: 10).labelsHidden()
-                Text("days")
+                Text(forward ? "days ago →" : "days")
                 if c.running { ProgressView(value: c.progress).frame(width: 100) }
                 Button { newFormula = true } label: { Label("New formula", systemImage: "plus") }
                     .popover(isPresented: $newFormula) { FormulaEditor(start: nil) { recount() }.environmentObject(vm) }
@@ -1039,5 +1065,22 @@ struct BarTap: ViewModifier {
                     .help("Click a bar for that day's stocks and how they did")
             }
         }
+    }
+}
+
+
+/// Back ↔ Forward for Formula counts and the F marks on charts (one setting for both).
+struct LookDirectionPicker: View {
+    var changed: () -> Void = {}
+    @AppStorage("fdir.forward") private var forward = false
+
+    var body: some View {
+        Picker("", selection: $forward) {
+            Text("◀ Back").tag(false)
+            Text("Forward ▶").tag(true)
+        }
+        .pickerStyle(.segmented).labelsHidden().fixedSize()
+        .help("Back: each day shows the stocks meeting the formula that day. Forward: start N days ago and walk forward — each stock is counted only on the first day it meets the formula (stocks already meeting it on the start day are on the first bar).")
+        .onChange(of: forward) { _ in changed() }
     }
 }
