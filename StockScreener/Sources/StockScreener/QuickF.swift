@@ -6,6 +6,7 @@ import AppKit
 /// Short syntax for typing a combination fast:
 ///   `count>5 + compact + D_TRIGGER`
 /// • `+` (or `,`) = AND, `|` = OR inside one part
+/// • arithmetic goes in round brackets: `(A+B)>100`, `(DELSMA-M_DELSMA)>5`
 /// • `column > 5`, `column = 1`, `column != 0` … any comparison (also ≥ ≤ ≠)
 /// • a bare column name = "has a value and isn't 0"
 /// • `NOT column` / `!column` = empty or 0
@@ -17,7 +18,14 @@ enum QuickF {
     static func parts(_ s: String) -> [String] {
         var t = s.replacingOccurrences(of: "&&", with: "+").replacingOccurrences(of: "&", with: "+").replacingOccurrences(of: ";", with: "+")
         t = t.replacingOccurrences(of: #"\s+(?i:and)\s+"#, with: " + ", options: .regularExpression)
-        return t.split(whereSeparator: { $0 == "+" || $0 == "," }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // split on + and , — but not inside brackets, so (A+B)>100 stays one part (sum of two columns)
+        var out: [String] = [], cur = "", depth = 0
+        for ch in t {
+            if ch == "(" || ch == "[" { depth += 1 } else if (ch == ")" || ch == "]") && depth > 0 { depth -= 1 }
+            if depth == 0 && (ch == "+" || ch == ",") { out.append(cur); cur = "" } else { cur.append(ch) }
+        }
+        out.append(cur)
+        return out.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     /// Normalised text used to compare combinations (order of parts kept, spaces / case ignored).
@@ -63,9 +71,10 @@ enum QuickF {
                 guard i + oc.count <= chars.count, Array(chars[i..<(i + oc.count)]) == oc, i > 0 else { continue }
                 let left = String(chars[..<i]), right = String(chars[(i + oc.count)...]).trimmingCharacters(in: .whitespaces)
                 guard !right.isEmpty else { throw FormulaError(message: "“\(t)” needs a value after \(o)") }
-                let col = try column(left, headers: headers)
+                let col = isMath(left) ? try math(left, headers: headers) : try column(left, headers: headers)
                 let r: String
                 if Double(right.replacingOccurrences(of: ",", with: "")) != nil { r = right.replacingOccurrences(of: ",", with: "") }
+                else if isMath(right) { r = try math(right, headers: headers) }
                 else if right.hasPrefix("'") || right.hasPrefix("\"") || right.hasPrefix("[") { r = right }
                 else if let c = try? column(right, headers: headers) { r = c }
                 else { r = "'\(right)'" }
@@ -76,6 +85,40 @@ enum QuickF {
         let col = try column(t, headers: headers)
         let has = "(NOT EMPTY(\(col)) AND NOT (\(col) = 0))"
         return negate ? "NOT \(has)" : has
+    }
+
+    /// Arithmetic inside round brackets: `(A+B)>100`, `(DELSMA-M_DELSMA)/M_DELSMA>0.2`.
+    private static func isMath(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespaces).hasPrefix("(") }
+
+    /// Turns `(A + B) * 2` into the Filter formula language: column names (longest match first, so C/DL2C stays one
+    /// column) become column tokens; numbers, + − × ÷ and brackets pass through.
+    private static func math(_ s: String, headers: [String]) throws -> String {
+        let names = headers.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty && $0.first != " " && $0.last != " " }
+            .sorted { $0.count > $1.count }
+        let chars = Array(s)
+        var i = 0, out = ""
+        func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" }
+        while i < chars.count {
+            let ch = chars[i]
+            if ch == " " || "+-*/()".contains(ch) { out.append(ch); i += 1; continue }
+            if ch.isNumber || ch == "." {
+                var j = i; while j < chars.count, chars[j].isNumber || chars[j] == "." { j += 1 }
+                if j >= chars.count || !isWordChar(chars[j]) { out += String(chars[i..<j]); i = j; continue }
+            }
+            if ch == "[", let close = chars[i...].firstIndex(of: "]") { out += String(chars[i...close]); i = close + 1; continue }
+            let rest = String(chars[i...]).lowercased()
+            guard let h = names.first(where: { n in
+                guard rest.hasPrefix(n.lowercased()) else { return false }
+                let end = i + n.count
+                return end >= chars.count || !isWordChar(chars[end]) || !isWordChar(chars[end - 1])
+            }) else {
+                let word = String(chars[i...].prefix { isWordChar($0) || $0 == "%" })
+                throw FormulaError(message: "No Filter column “\(word.isEmpty ? String(ch) : word)” in \(s)")
+            }
+            out += FormulaField.token(for: h)
+            i += h.count
+        }
+        return out
     }
 }
 
