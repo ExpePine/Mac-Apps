@@ -120,18 +120,30 @@ enum TVPopupBlocker {
           var el = all[i];
           if (el.shadowRoot) scanRoot(el.shadowRoot);
           if (el.childElementCount > 8) continue;                  // text-level elements only
-          var t = (el.innerText || el.textContent || '').toLowerCase();
+          var t = (el.textContent || '').toLowerCase();            // textContent: no layout work (innerText forces it)
           if (t.length < 4 || t.length > 200 || !hit(t)) continue;
           var box = card(el);
           if (box) closeOrHide(box, t);
         }
       }
-      function scan(){ if (document.body) scanRoot(document.body); }
+      function scan(){ if (document.body && !document.hidden) scanRoot(document.body); }
+      // Only what was just added is looked at, and only if its text has a promo word — the chart's own updates
+      // (prices, legend, crosshair) change text, not elements, and are ignored. A full sweep runs every 8 s.
+      function scanAdded(el){
+        if (!el || el.nodeType !== 1 || el.__ssDone) return;
+        var t = (el.textContent || '').toLowerCase();
+        if (t.length < 4 || !hit(t)) return;
+        if (el.childElementCount <= 8 && t.length <= 200) { var b = card(el); if (b) { closeOrHide(b, t); return; } }
+        scanRoot(el);
+      }
       applyLearned();
-      var timer = null;
-      new MutationObserver(function(){ if (timer) return; timer = setTimeout(function(){ timer = null; scan(); }, 200); })
-        .observe(document.documentElement, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class','style']});
-      setInterval(scan, 2000);
+      var timer = null, pending = [];
+      new MutationObserver(function(ms){
+        for (var i = 0; i < ms.length; i++) { var a = ms[i].addedNodes; for (var j = 0; j < a.length; j++) if (a[j].nodeType === 1) pending.push(a[j]); }
+        if (!pending.length || timer) return;
+        timer = setTimeout(function(){ timer = null; var p = pending; pending = []; for (var k = 0; k < p.length; k++) scanAdded(p[k]); }, 400);
+      }).observe(document.documentElement, {childList: true, subtree: true});
+      setInterval(scan, 8000);
       scan();
     })();
     """#

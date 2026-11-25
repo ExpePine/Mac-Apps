@@ -17,7 +17,7 @@ struct ChartReelView: View {
     @State private var syncFails = 0
     @State private var pushedToTVAt = Date.distantPast
     @State private var pendingGoTo: String?
-    private let syncTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    private let syncTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()   // 1 s: each tick asks TradingView for its dates
 
     @AppStorage("reel.source") private var source = ReelSource.gainers.rawValue
     @AppStorage("reel.column") private var column = ""

@@ -23,7 +23,7 @@ struct ChartViewer: View {
     @State private var syncNote: String?
     @State private var lastSyncReport = ""
     @State private var pendingGoTo: String?
-    private let syncTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+    private let syncTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
 
     private var symbol: String { vm.chartSymbol ?? "" }
     @State private var lastStep = 1
