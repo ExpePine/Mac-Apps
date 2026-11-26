@@ -12,6 +12,8 @@ on:
       - ".github/workflows/tabcop-dmg.yml"
       - "SamsaraExpenses/**"
       - ".github/workflows/samsara-expenses-dmg.yml"
+      - "Pomodoro/**"
+      - ".github/workflows/pomodoro-dmg.yml"
   workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
 
 permissions:
