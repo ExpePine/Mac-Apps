@@ -52,7 +52,7 @@ extension ScreenerViewModel {
     }
 
     /// The Monday of `day`'s week (weeks run Monday–Friday), "yyyy-MM-dd".
-    static func weekStart(_ day: String) -> String {
+    nonisolated static func weekStart(_ day: String) -> String {
         // plain arithmetic on the date (no formatter: this runs for every bar of every delivery chart)
         let p = day.prefix(10).split(separator: "-").compactMap { Int($0) }
         guard p.count == 3 else { return day }
