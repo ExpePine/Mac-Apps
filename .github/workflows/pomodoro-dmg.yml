@@ -46,6 +46,15 @@ jobs:
           dist/Pomodoro.app/Contents/MacOS/Pomodoro --selftest | tee selftest.log
           while read -r l; do echo "::notice title=selftest::$l"; done < selftest.log
 
+      - name: Render Touch Bar preview
+        run: dist/Pomodoro.app/Contents/MacOS/Pomodoro --render-preview dist/touchbar-preview.png
+
+      - name: Upload Touch Bar preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pomodoro-touchbar-preview
+          path: Pomodoro/dist/touchbar-preview.png
+
       - name: Launch smoke test (app stays up for 10 s)
         run: |
           dist/Pomodoro.app/Contents/MacOS/Pomodoro > run.log 2>&1 &

@@ -522,6 +522,33 @@ if CommandLine.arguments.contains("--selftest") {
     exit(0)
 }
 
+// `Pomodoro --render-preview out.png` draws a sample Touch Bar strip to a PNG and exits (used by CI).
+if let i = CommandLine.arguments.firstIndex(of: "--render-preview"), i + 1 < CommandLine.arguments.count {
+    _ = NSApplication.shared
+    let samples: [(String, Double, String, NSColor, Bool)] = [
+        ("🍅 Write the quarterly report", 0.42, "14:30", .systemRed, false),
+        ("🍅 Write the quarterly report", 0.42, "14:30", .systemRed, true),
+        ("☕️ Short break · next: Write the quarterly report", 0.7, "01:30", .systemGreen, false),
+    ]
+    let row: CGFloat = 30, gap: CGFloat = 10, width: CGFloat = 480
+    let canvas = NSView(frame: NSRect(x: 0, y: 0, width: width + 2 * gap,
+                                      height: CGFloat(samples.count) * (row + gap) + gap))
+    canvas.wantsLayer = true
+    canvas.layer?.backgroundColor = NSColor.black.cgColor
+    for (n, s) in samples.enumerated() {
+        let v = ProgressBarView(fontSize: 14)
+        v.translatesAutoresizingMaskIntoConstraints = true
+        v.frame = NSRect(x: gap, y: canvas.bounds.height - CGFloat(n + 1) * (row + gap), width: width, height: row)
+        v.title = s.0; v.progress = s.1; v.timeText = s.2; v.fillColor = s.3; v.paused = s.4
+        canvas.addSubview(v)
+    }
+    let rep = canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds)!
+    rep.size = canvas.bounds.size
+    canvas.cacheDisplay(in: canvas.bounds, to: rep)
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
