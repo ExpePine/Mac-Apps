@@ -84,7 +84,8 @@ final class Pomodoro {
         guard let end = endDate else { return }
         let left = Int(ceil(end.timeIntervalSinceNow))
         if left <= 0 { advance(finished: true); return }
-        if left != remaining { remaining = left; onChange?() }
+        remaining = left
+        onChange?()   // every tick (4x a second) so the progress bar moves smoothly
     }
 
     private func advance(finished: Bool) {
@@ -102,6 +103,16 @@ final class Pomodoro {
         if defaults.bool(forKey: "autoStartNext") { start() }
         onChange?()
     }
+
+    /// 0 at the start of a phase, 1 when it's over. Smooth (sub-second) while running.
+    var progress: Double {
+        let total = Double(phase.seconds)
+        guard total > 0 else { return 0 }
+        let left = endDate.map { max(0, $0.timeIntervalSinceNow) } ?? Double(remaining)
+        return min(1, max(0, 1 - left / total))
+    }
+
+    var timeText: String { String(format: "%02d:%02d", remaining / 60, remaining % 60) }
 
     var display: String {
         String(format: "%@ %02d:%02d", phase.emoji, remaining / 60, remaining % 60)
@@ -177,24 +188,99 @@ enum PrivateTouchBar {
     }
 }
 
+// MARK: - Task (what you're working on)
+
+enum CurrentTask {
+    static var text: String {
+        get { defaults.string(forKey: "task")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        set { defaults.set(newValue, forKey: "task") }
+    }
+}
+
+// MARK: - Progress bar view (used on the Touch Bar and in the window)
+//
+// A rounded bar that fills left to right as the phase runs, with the task
+// written on the left and the time left on the right. Tapping it starts/pauses.
+
+final class ProgressBarView: NSView {
+    var progress: Double = 0 { didSet { if progress != oldValue { needsDisplay = true } } }
+    var title = ""           { didSet { if title != oldValue { needsDisplay = true } } }
+    var timeText = ""        { didSet { if timeText != oldValue { needsDisplay = true } } }
+    var fillColor: NSColor = .systemRed { didSet { needsDisplay = true } }
+    var paused = true        { didSet { if paused != oldValue { needsDisplay = true } } }
+    var fontSize: CGFloat
+    var onTap: (() -> Void)?
+
+    init(fontSize: CGFloat) {
+        self.fontSize = fontSize
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let tap = NSClickGestureRecognizer(target: self, action: #selector(tapped))
+        tap.allowedTouchTypes = [.direct]   // finger taps on the Touch Bar; mouse clicks work as usual
+        addGestureRecognizer(tap)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func tapped() { onTap?() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.insetBy(dx: 1, dy: 1)
+        let radius = min(7, r.height / 2)
+        let shape = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+
+        NSColor(white: 0.18, alpha: 1).setFill()
+        shape.fill()
+
+        let w = r.width * CGFloat(progress)
+        if w > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            shape.addClip()
+            fillColor.withAlphaComponent(paused ? 0.45 : 0.9).setFill()
+            NSRect(x: r.minX, y: r.minY, width: w, height: r.height).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        let pad: CGFloat = 10
+        let time = NSAttributedString(string: (paused ? "▶︎ " : "") + timeText, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+        let ts = time.size()
+        time.draw(at: NSPoint(x: r.maxX - pad - ts.width, y: r.midY - ts.height / 2))
+
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byTruncatingTail
+        let label = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: para,
+        ])
+        let lh = label.size().height
+        label.draw(in: NSRect(x: r.minX + pad, y: r.midY - lh / 2,
+                              width: max(0, r.width - 3 * pad - ts.width), height: lh))
+    }
+}
+
 // MARK: - App
 
 extension NSTouchBarItem.Identifier {
-    static let timer = NSTouchBarItem.Identifier("local.pomodoro.timer")
+    static let bar   = NSTouchBarItem.Identifier("local.pomodoro.bar")
+    static let task  = NSTouchBarItem.Identifier("local.pomodoro.task")
     static let reset = NSTouchBarItem.Identifier("local.pomodoro.reset")
     static let skip  = NSTouchBarItem.Identifier("local.pomodoro.skip")
     static let tray  = NSTouchBarItem.Identifier("local.pomodoro.tray")
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSTextFieldDelegate {
     let pomodoro = Pomodoro()
     var window: NSWindow!
-    var bigLabel: NSTextField!
+    var taskField: NSTextField!
     var windowButton: NSButton!
     var statusItem: NSStatusItem!
     var stripMenuItem: NSMenuItem!
 
-    var timerButtons: [NSButton] = []      // one per Touch Bar that shows the timer
+    var bars: [ProgressBarView] = []       // every progress bar on screen (Touch Bars + window)
     var modalBar: NSTouchBar?
     var trayItem: NSCustomTouchBarItem?
     var trayButton: NSButton?
@@ -210,41 +296,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         if defaults.bool(forKey: "controlStrip") { setControlStrip(true) }
         refresh()
         NSApp.activate(ignoringOtherApps: true)
+        if CurrentTask.text.isEmpty { window.makeFirstResponder(taskField) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        window.makeKeyAndOrderFront(nil); return true
+        showWindow(); return true
     }
 
     func applicationWillTerminate(_ note: Notification) {
         if let item = trayItem { PrivateTouchBar.removeFromControlStrip(item) }
     }
 
-    // MARK: Touch Bar
+    // MARK: Touch Bar: [ ✎ ] [ ███████ task ........ 12:34 ] [ ↺ ] [ ⏭ ]
 
     func makeTimerTouchBar() -> NSTouchBar {
         let bar = NSTouchBar()
         bar.delegate = self
-        bar.defaultItemIdentifiers = [.timer, .fixedSpaceSmall, .reset, .skip]
+        bar.defaultItemIdentifiers = [.task, .bar, .reset, .skip]
         return bar
     }
 
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier id: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         let item = NSCustomTouchBarItem(identifier: id)
         switch id {
-        case .timer:
-            let b = NSButton(title: pomodoro.display, target: self, action: #selector(toggle))
-            b.font = NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .medium)
-            b.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
-            timerButtons.append(b)
-            item.view = b
+        case .bar:
+            let v = ProgressBarView(fontSize: 14)
+            v.onTap = { [weak self] in self?.pomodoro.toggle() }
+            v.widthAnchor.constraint(equalToConstant: 480).isActive = true
+            v.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            bars.append(v)
+            item.view = v
             refresh()
+        case .task:
+            item.view = NSButton(title: "✎", target: self, action: #selector(editTask))
         case .reset:
-            item.view = NSButton(title: "↺ Reset", target: self, action: #selector(reset))
+            item.view = NSButton(title: "↺", target: self, action: #selector(reset))
         case .skip:
-            item.view = NSButton(title: "⏭ Skip", target: self, action: #selector(skip))
+            item.view = NSButton(title: "⏭", target: self, action: #selector(skip))
         default:
             return nil
         }
@@ -293,24 +383,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
     @objc func reset()  { pomodoro.reset() }
     @objc func skip()   { pomodoro.skip() }
 
+    /// The Touch Bar has no keyboard, so editing the task brings up the window with the field focused.
+    @objc func editTask() {
+        showWindow()
+        window.makeFirstResponder(taskField)
+        taskField.currentEditor()?.selectAll(nil)
+    }
+
+    func controlTextDidChange(_ note: Notification) {
+        CurrentTask.text = taskField.stringValue
+        refresh()
+    }
+
+    func controlTextDidEndEditing(_ note: Notification) {
+        CurrentTask.text = taskField.stringValue
+        refresh()
+    }
+
     func phaseEnded(_ ended: Phase) {
         NSSound(named: NSSound.Name("Glass"))?.play()
         NSApp.requestUserAttention(.informationalRequest)
         if trayItem != nil && defaults.bool(forKey: "controlStrip") { showModalBar() }
     }
 
-    func refresh() {
-        let text = pomodoro.display
-        let color: NSColor? = pomodoro.running
-            ? (pomodoro.phase == .work ? .systemRed : .systemGreen)
-            : nil
-        for b in timerButtons {
-            b.title = pomodoro.running ? text : "▶︎ " + text
-            b.bezelColor = color
+    var barTitle: String {
+        let task = CurrentTask.text
+        switch pomodoro.phase {
+        case .work:
+            return task.isEmpty ? "🍅 No task yet. Tap ✎ to write one" : "🍅 " + task
+        case .shortBreak, .longBreak:
+            return "☕️ \(pomodoro.phase.name)" + (task.isEmpty ? "" : " · next: \(task)")
         }
-        trayButton?.title = pomodoro.running ? text : "🍅"
-        statusItem?.button?.title = text
-        bigLabel?.stringValue = text
+    }
+
+    func refresh() {
+        let color: NSColor = pomodoro.phase == .work ? .systemRed : .systemGreen
+        for v in bars {
+            v.progress = pomodoro.progress
+            v.title = barTitle
+            v.timeText = pomodoro.timeText
+            v.fillColor = color
+            v.paused = !pomodoro.running
+        }
+        trayButton?.title = pomodoro.running ? "🍅 " + pomodoro.timeText : "🍅"
+
+        var short = CurrentTask.text
+        if short.count > 20 { short = String(short.prefix(19)) + "…" }
+        statusItem?.button?.title = pomodoro.display + (short.isEmpty ? "" : " · " + short)
+
         windowButton?.title = pomodoro.running ? "Pause" : "Start"
         window?.title = "Pomodoro · \(pomodoro.phase.name) · \(pomodoro.completedWork) done"
     }
@@ -318,26 +438,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
     // MARK: UI scaffolding
 
     func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 150),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 170),
                           styleMask: [.titled, .closable, .miniaturizable],
                           backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.center()
-        window.delegate = self
 
-        bigLabel = NSTextField(labelWithString: pomodoro.display)
-        bigLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 40, weight: .semibold)
-        bigLabel.alignment = .center
+        taskField = NSTextField(string: CurrentTask.text)
+        taskField.placeholderString = "What are you working on?"
+        taskField.font = NSFont.systemFont(ofSize: 15)
+        taskField.delegate = self
+
+        let bar = ProgressBarView(fontSize: 16)
+        bar.onTap = { [weak self] in self?.pomodoro.toggle() }
+        bar.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        bars.append(bar)
 
         windowButton = NSButton(title: "Start", target: self, action: #selector(toggle))
-        windowButton.keyEquivalent = " "
+        windowButton.keyEquivalent = "\r"
         let resetButton = NSButton(title: "Reset", target: self, action: #selector(reset))
         let skipButton = NSButton(title: "Skip", target: self, action: #selector(skip))
-
         let buttons = NSStackView(views: [windowButton, resetButton, skipButton])
-        let stack = NSStackView(views: [bigLabel, buttons])
+
+        let stack = NSStackView(views: [taskField, bar, buttons])
         stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        taskField.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true
+        bar.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true
         window.contentView = stack
 
         window.touchBar = makeTimerTouchBar()   // public API: shown while this app is frontmost
@@ -349,6 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         let menu = NSMenu()
         menu.addItem(withTitle: "Start / Pause", action: #selector(toggle), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Set Task…", action: #selector(editTask), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Reset", action: #selector(reset), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Skip", action: #selector(skip), keyEquivalent: "").target = self
         menu.addItem(.separator())
@@ -373,6 +503,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Quit Pomodoro", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
+        // Edit menu so ⌘C / ⌘V / ⌘A work in the task field
+        let editItem = NSMenuItem()
+        main.addItem(editItem)
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
         NSApp.mainMenu = main
     }
 }

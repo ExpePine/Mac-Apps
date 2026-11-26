@@ -4,8 +4,9 @@ A small native macOS app (Swift + AppKit, one source file). GitHub Actions build
 
 ## What it does
 
-- **Touch Bar:** a big `▶︎ 🍅 25:00` button (tap to start/pause; red while focusing, green on a break), plus **Reset** and **Skip**.
-- **Menu bar:** the countdown is always visible there, with Start/Pause, Reset, Skip and Quit in its menu.
+- **Touch Bar:** `[ ✎ ] [ ██████ 🍅 Write the report ........ 12:34 ] [ ↺ ] [ ⏭ ]`. The bar fills left to right as the session runs (red for focus, green for a break), with your task written on it and the time left on the right. Tap the bar to start or pause; it's dimmed with a ▶︎ while paused. ✎ opens the window to type your task, ↺ resets, ⏭ skips.
+- **Task:** type it in the box at the top of the window (or menu bar → *Set Task…*). It's remembered between launches. During a break the bar shows `☕️ Short break · next: <task>`.
+- **Menu bar:** `🍅 12:34 · Write the report`, always visible, with Start/Pause, Set Task, Reset, Skip and Quit.
 - **Cycle:** 25 min focus, 5 min break, a 15 min break after every 4th focus. Plays the "Glass" sound and bounces the Dock icon when a phase ends.
 
 ## The catch: Touch Bar visibility
