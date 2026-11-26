@@ -63,7 +63,7 @@ final class ScreenerViewModel: ObservableObject {
     @Published var isTimelineLoading = false
     @Published var isTimelinePlaying = false
     var timelineCache: [String: SheetTable] = [:]
-    /// M_ columns: the table's delivery columns on a month-end day, by stock (see fillMonthColumns).
+    /// M_ / W_ columns: the table's delivery columns on a month- / week-end day, by stock (see fillMonthColumns).
     var monthMemo: [String: [String: [String: (String, Double?)]]] = [:]
     var timelineCacheOrder: [String] = []
     var timelinePlayTask: Task<Void, Never>?
@@ -557,11 +557,11 @@ final class ScreenerViewModel: ObservableObject {
             return SheetRow(id: row.id, cells: cells, numbers: nums)
         }
         let extra = [dName, sName, pName, jName, mName, kName, tName, hName, yName, cName] + d2Names + [serName, dpName, szName, zpName, zdName]
-        // monthly versions: M_ + each column = its value at the end of the last completed month
-        let mExtra = extra.map { e -> String in
+        // monthly / weekly versions: M_ / W_ + each column = its value at the end of the last completed month / week
+        let mExtra = ["M_", "W_"].flatMap { p in extra.map { e -> String in
             let b = e.hasSuffix(" (NSE)") ? String(e.dropLast(6)) : e
-            return t.index(of: "M_" + b) == nil ? "M_" + b : "M_" + b + " (NSE)"
-        }
+            return t.index(of: p + b) == nil ? p + b : p + b + " (NSE)"
+        } }
         let rows2 = rows.map { r in SheetRow(id: r.id, cells: r.cells + mExtra.map { _ in "" }, numbers: r.numbers + mExtra.map { _ in nil }) }
         let withM = SheetTable(headers: t.headers + extra + mExtra, rows: rows2, originalHeaders: t.originalHeaders + extra + mExtra)
         return fillMonthColumns(withM, day: asOf)

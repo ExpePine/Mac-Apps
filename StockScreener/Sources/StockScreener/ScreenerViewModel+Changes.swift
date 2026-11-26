@@ -41,7 +41,7 @@ extension ScreenerViewModel {
                                       "DAYS_DELSMA", "DELSMAC", "DEL2", "DEL2C", "C/DL2C", "NSE_SERIES", "DEAL_PRANK", "STEEP_Z", "Z_PRANK", "Z_PRANK_DAYS"]
     static func isDeliveryColumn(_ h: String) -> Bool {
         var base = h.hasSuffix(" (NSE)") ? String(h.dropLast(6)) : h
-        if base.hasPrefix("M_") { base = String(base.dropFirst(2)) }        // monthly versions (M_DELSMA …)
+        if base.hasPrefix("M_") || base.hasPrefix("W_") { base = String(base.dropFirst(2)) }   // monthly / weekly versions (M_DELSMA, W_DELSMA …)
         return deliveryColumnNames.contains(base) || PineColumns.shared.has(h)
     }
 
@@ -51,13 +51,64 @@ extension ScreenerViewModel {
         return DeliveryCenter.shared.book.days.last { $0 < first }
     }
 
+    /// The Monday of `day`'s week (weeks run Monday–Friday), "yyyy-MM-dd".
+    static func weekStart(_ day: String) -> String {
+        // plain arithmetic on the date (no formatter: this runs for every bar of every delivery chart)
+        let p = day.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard p.count == 3 else { return day }
+        func days(_ y: Int, _ m: Int, _ d: Int) -> Int {          // days since 1970-01-01 (civil calendar)
+            let y2 = m <= 2 ? y - 1 : y
+            let era = (y2 >= 0 ? y2 : y2 - 399) / 400
+            let yoe = y2 - era * 400
+            let doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1
+            let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+            return era * 146097 + doe - 719468
+        }
+        func civil(_ z0: Int) -> (Int, Int, Int) {
+            let z = z0 + 719468
+            let era = (z >= 0 ? z : z - 146096) / 146097
+            let doe = z - era * 146097
+            let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+            let mp = (5 * doy + 2) / 153
+            let d = doy - (153 * mp + 2) / 5 + 1
+            let m = mp < 10 ? mp + 3 : mp - 9
+            return (yoe + era * 400 + (m <= 2 ? 1 : 0), m, d)
+        }
+        let z = days(p[0], p[1], p[2])
+        let back = ((z + 3) % 7 + 7) % 7                          // 1970-01-01 was a Thursday → Monday = 0
+        let (y, m, d) = civil(z - back)
+        return String(format: "%04d-%02d-%02d", y, m, d)
+    }
+
+    /// The last NSE trading day of the week before `day`'s week (W_ columns hold the values on that day).
+    static func weekEnd(before day: String) -> String? {
+        let first = weekStart(day)
+        return DeliveryCenter.shared.book.days.last { $0 < first }
+    }
+
+    static func periodEnd(_ prefix: String, before day: String) -> String? {
+        prefix == "W_" ? weekEnd(before: day) : monthEnd(before: day)
+    }
+
+    static let periodPrefixes = ["M_", "W_"]
+
     /// Fills the M_ columns (M_DELSMA, M_Z_PRANK …) with each delivery column's value at the end of the last
     /// completed month before `day` — a month's figure stays fixed through the next month, like a monthly chart's
     /// closed bar.
-    func fillMonthColumns(_ t: SheetTable, day: String) -> SheetTable {
-        let mIdx = t.headers.enumerated().filter { $0.element.hasPrefix("M_") && Self.isDeliveryColumn($0.element) }
+    /// …and the W_ columns the same way from the last completed week.
+    func fillMonthColumns(_ t: SheetTable, day: String, only: Set<String>? = nil) -> SheetTable {
+        var out = t
+        for p in Self.periodPrefixes where only.map({ o in o.contains { $0.hasPrefix(p) } }) ?? true {
+            out = fillPeriodColumns(out, day: day, prefix: p)
+        }
+        return out
+    }
+
+    private func fillPeriodColumns(_ t: SheetTable, day: String, prefix: String) -> SheetTable {
+        let mIdx = t.headers.enumerated().filter { $0.element.hasPrefix(prefix) && Self.isDeliveryColumn($0.element) }
         guard !mIdx.isEmpty, let label = labelIndex ?? (t.headers.isEmpty ? nil : 0) else { return t }
-        guard let me = Self.monthEnd(before: day) else { return t }
+        guard let me = Self.periodEnd(prefix, before: day) else { return t }
         // the same table on the month-end day (memoised: every day of a month uses the same month-end)
         let key = me + "|" + mIdx.map(\.element).joined(separator: ",")
         var bySym: [String: [String: (String, Double?)]]
@@ -67,12 +118,12 @@ extension ScreenerViewModel {
             for r in base.rows {
                 let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
                 var m: [String: (String, Double?)] = [:]
-                for (i, h) in base.headers.enumerated() where Self.isDeliveryColumn(h) && !h.hasPrefix("M_") && i < r.cells.count {
+                for (i, h) in base.headers.enumerated() where Self.isDeliveryColumn(h) && !h.hasPrefix("M_") && !h.hasPrefix("W_") && i < r.cells.count {
                     m[h] = (r.cells[i], i < r.numbers.count ? r.numbers[i] : nil)
                 }
                 bySym[sym] = m
             }
-            if monthMemo.count > 24 { monthMemo = [:] }
+            if monthMemo.count > 60 { monthMemo = [:] }
             monthMemo[key] = bySym
         }
         let rows = t.rows.map { r -> SheetRow in
@@ -144,7 +195,7 @@ extension ScreenerViewModel {
             let sym = r.text(label).trimmingCharacters(in: .whitespaces).uppercased()
             let c = cols[sym]
             for (n, i) in idx where i < cells.count {
-                if n.hasPrefix("M_") { continue }              // filled below from the month-end day
+                if n.hasPrefix("M_") || n.hasPrefix("W_") { continue }   // filled below from the month- / week-end day
                 if PineColumns.shared.has(n) {
                     let v = PineColumns.shared.value(n, sym, day)
                     cells[i] = v.map { String(format: abs($0) >= 1000 ? "%.0f" : "%.3f", $0) } ?? ""; nums[i] = v
@@ -203,8 +254,7 @@ extension ScreenerViewModel {
             return SheetRow(id: r.id, cells: cells, numbers: nums)
         }
         let out = SheetTable(headers: t.headers, rows: rows, originalHeaders: t.originalHeaders)
-        let wantM = only.map { o in o.contains { $0.hasPrefix("M_") } } ?? true
-        return monthCols && wantM ? fillMonthColumns(out, day: day) : out
+        return monthCols ? fillMonthColumns(out, day: day, only: only) : out
     }
 
     /// Close on (or the last trading day before) `day`: Yahoo, else NSE.

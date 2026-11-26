@@ -151,8 +151,9 @@ struct LWChartData: Encodable {
     var pine: [PineJS] = []
     var fpills: [Marker] = []         // formula pills (1F11 …): drawn as badges in their own lane above the delivery pane
     var prank: [Point] = []           // ta.percentrank(metric, length), 0–100
-    var mLegend: [String: String] = [:]   // day → "M_DELSMA … · M_DELSMAC … · M_Z_PRANK …" (last completed month-end)
+    var mLegend: [String: [String: String]] = [:]   // day → legend key ("m:DELSMA", "w:Z_PRANK" …) → text (last completed month- / week-end)
     var mDelsma: [Point] = []         // M_DELSMA step line (dashed, on the %rank scale)
+    var wDelsma: [Point] = []         // W_DELSMA step line
     var dayLegend = ""                // monthly chart: today's daily values
     var delsmaToday: Double? = nil
     var dealBuy: [Point] = []         // bulk + block deal buys per day, ₹ Cr (green bars, top strip)
@@ -297,7 +298,9 @@ struct LWChartData: Encodable {
             }
             let ds = DeliveryColumns.delSmaCSeries(s, metric: DeliveryMetric(rawValue: UserDefaults.standard.string(forKey: "deliv.metric") ?? "") ?? .value)
             for i in s.days.indices where i < ds.count { if let v = ds[i] { d.dsmac.append(Point(time: s.days[i], value: v)) } }
-            if UserDefaults.standard.object(forKey: "deliv.showM") as? Bool ?? true { addMonthEnd(&d, s, dsmac: ds) }
+            let showM = UserDefaults.standard.object(forKey: "deliv.showM") as? Bool ?? true
+            let showW = UserDefaults.standard.bool(forKey: "deliv.showW")
+            if showM || showW { addMonthEnd(&d, s, dsmac: ds, month: showM, week: showW) }
             // Trading days with no NSE row for this stock: keep their place on the date axis (empty bar)
             if let first = s.days.first, let last = s.days.last {
                 let have = Set(s.days)
@@ -579,7 +582,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
             onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
     </head><body><div id="c"></div><div id="legend"></div><div id="tip"></div><div id="fl"></div><div id="err">Chart library couldn't load (needs internet once).</div>
     <script>
-    var mdel=null, chart=null, sband, sen, dpr, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
+    var mdel=null, wdel=null, chart=null, sband, sen, dpr, dbuy, dsell, dshade, fband, candle, hist, high, bands, prank, sma22, sma66, per, t3s, d2c, ht3, ht3Line=null, last=null, dark=null;
     function fmt(v){ if(v==null) return ''; var a=Math.abs(v);
       if(a>=1e7) return (v/1e7).toFixed(2)+' Cr'; if(a>=1e5) return (v/1e5).toFixed(2)+' L';
       if(a>=1e3) return (v/1e3).toFixed(1)+' K'; return v.toFixed(2); }
@@ -609,6 +612,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       chart.priceScale('fband').applyOptions({scaleMargins:{top:0,bottom:0},visible:false});
       dpr=chart.addLineSeries({priceScaleId:'prank',color:'#4DD0E1',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:'DEAL_PRANK'});
       mdel=chart.addLineSeries({priceScaleId:'prank',color:'#FFB74D',lineWidth:1,lineStyle:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
+      wdel=chart.addLineSeries({priceScaleId:'prank',color:'#CE93D8',lineWidth:1,lineStyle:2,lineType:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false});
       prank=chart.addLineSeries({priceScaleId:'prank',color:'#90CAF9',lineWidth:1,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,
         title:'%rank',autoscaleInfoProvider:function(){ return {priceRange:{minValue:0,maxValue:100}}; }});
       per=chart.addLineSeries({priceScaleId:'per',color:'#8BC34A',lineWidth:1,lastValueVisible:false,priceLineVisible:false,crosshairMarkerVisible:false,
@@ -745,7 +749,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       if(tk&&window._fb&&window._fb[tk]) P.filled='<span style="color:#9E9E9E">· delivery filled (BE/BZ = traded qty)</span>';
       if(pc&&pc.value!=null) P.deliv=sp('deliv','#8BC34A','deliv '+pc.value.toFixed(0)+'%');
       var mk=tk||((last.dsmac&&last.dsmac.length)?last.dsmac[last.dsmac.length-1].time:null);
-      if(last.mLegend&&mk&&last.mLegend[mk]) P.mvals=sp('mvals','#FFB74D',last.mLegend[mk]);
+      if(last.mLegend&&mk&&last.mLegend[mk]){ var ml=last.mLegend[mk]; Object.keys(ml).forEach(function(k){ P[k]=sp(k,(k.indexOf('w:')===0?'#CE93D8':'#FFB74D'),ml[k]); }); }
       if(last.dayLegend) P.dayvals=sp('dayvals','#80CBC4',last.dayLegend);
       if(d2v&&d2v.value!=null) P.del2c=sp('del2c',(S.d2c||'#FFC400'),'DEL2C '+d2v.value.toFixed(2)+(c&&c.close?' · C/DL2C '+(c.close/d2v.value).toFixed(3):''));
       if(hv&&hv.value!=null) P.hit3=sp('hit3','#FF8A65','HI/T3 '+hv.value.toFixed(2));
@@ -757,8 +761,9 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
         if(v==null && !t && p.points.length){ for(var i=p.points.length-1;i>=0;i--){ if(p.points[i].value!=null){ v=p.points[i].value; break; } } }
         if(v!=null) P['pine:'+p.key]=sp('pine:'+p.key,p.color,p.title+' '+(Math.abs(v)>=1000?v.toFixed(0):(Math.abs(v)>=10?v.toFixed(2):v.toFixed(3))));
       });
-      var order=(S.legendOrder&&S.legendOrder.length)?S.legendOrder.slice():[];
-      ['metric','highest','sma22','sma66','percentrank','delsmac','series','dealprank','z','mvals','dayvals','dealsize','deals','filled','deliv','del2c','hit3','t3'].forEach(function(k){ if(order.indexOf(k)<0) order.push(k); });
+      var PV=['DELSMA','DELSMAC','Z','Z_PRANK','DEAL_PRANK'], MW=PV.map(function(x){return 'm:'+x;}).concat(PV.map(function(x){return 'w:'+x;}));
+      var order=[]; ((S.legendOrder&&S.legendOrder.length)?S.legendOrder:[]).forEach(function(k){ if(k==='mvals') MW.forEach(function(x){ if(order.indexOf(x)<0) order.push(x); }); else if(order.indexOf(k)<0) order.push(k); });
+      ['metric','highest','sma22','sma66','percentrank','delsmac','series','dealprank','z'].concat(MW).concat(['dayvals','dealsize','deals','filled','deliv','del2c','hit3','t3']).forEach(function(k){ if(order.indexOf(k)<0) order.push(k); });
       Object.keys(P).forEach(function(k){ if(k.indexOf('pine:')===0 && order.indexOf(k)<0) order.push(k); });
       var hidden={}; (S.legendHidden||[]).forEach(function(k){ hidden[k]=1; });
       var lines=S.legendLines||1, shown=order.filter(function(k){ return P[k] && !hidden[k]; }).map(function(k){ return P[k]; });
@@ -846,7 +851,7 @@ final class LWChartHolder: NSObject, ObservableObject, WKNavigationDelegate, WKS
       window._fb={}; (d.filledBand||[]).forEach(function(x){ window._fb[x.time]=1; });
       window._sc=d.seriesCodes||{};
       window._ds={}; (d.dsmac||[]).forEach(function(x){ window._ds[x.time]=x.value; });
-      candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]); if(mdel) mdel.setData(d.mDelsma||[]);
+      candle.setData(d.candles); hist.setData(d.deliv); high.setData(d.high); bands.setData(d.bands); prank.setData(d.prank||[]); if(mdel) mdel.setData(d.mDelsma||[]); if(wdel) wdel.setData(d.wDelsma||[]);
       dpr.setData(d.dealsOn?(d.dprank||[]):[]);
       window._dp={}; (d.dprank||[]).forEach(function(x){ window._dp[x.time]=x.value; });
       sma22.setData(d.sma22||[]); sma66.setData(d.sma66||[]); per.setData(d.per||[]);
@@ -1150,7 +1155,11 @@ struct ChartStyle: Codable, Equatable {
 
     /// Legend items: key, name, default colour.
     static let legendItems: [(key: String, name: String, color: String)] = [
-        ("mvals", "M_ values (last month-end)", "#FFB74D"), ("dayvals", "today's daily values (monthly chart)", "#80CBC4"),
+        ("m:DELSMA", "M_DELSMA (last month-end)", "#FFB74D"), ("m:DELSMAC", "M_DELSMAC", "#FFB74D"), ("m:Z", "M_Z", "#FFB74D"),
+        ("m:Z_PRANK", "M_Z_PRANK", "#FFB74D"), ("m:DEAL_PRANK", "M_DEAL_PRANK", "#FFB74D"),
+        ("w:DELSMA", "W_DELSMA (last week-end)", "#CE93D8"), ("w:DELSMAC", "W_DELSMAC", "#CE93D8"), ("w:Z", "W_Z", "#CE93D8"),
+        ("w:Z_PRANK", "W_Z_PRANK", "#CE93D8"), ("w:DEAL_PRANK", "W_DEAL_PRANK", "#CE93D8"),
+        ("dayvals", "today's daily values (monthly chart)", "#80CBC4"),
         ("metric", "Delivery (smooth QTY)", "#FF9800"), ("highest", "highest", "#2962FF"), ("sma22", "sma22", "#00BCD4"),
         ("sma66", "sma66", "#E91E63"), ("percentrank", "percentrank", "#90CAF9"), ("delsmac", "DELSMAC", "#00E676"),
         ("series", "NSE series (EQ / BE …)", "#9E9E9E"), ("dealprank", "DEAL_PRANK", "#4DD0E1"), ("z", "z · Z_PRANK", "#B2FF59"),
@@ -1158,7 +1167,11 @@ struct ChartStyle: Codable, Equatable {
         ("deliv", "deliv %", "#8BC34A"), ("del2c", "DEL2C · C/DL2C", "#FFC400"), ("hit3", "HI/T3", "#FF8A65"), ("t3", "T3", "#26a69a"),
     ]
     var orderedLegend: [String] {
-        var o = legendOrder ?? []
+        var o: [String] = []
+        for k in legendOrder ?? [] {          // the old single "M_ values" item → its separate M_ / W_ items, in its place
+            if k == "mvals" { for i in Self.legendItems where (i.key.hasPrefix("m:") || i.key.hasPrefix("w:")) && !o.contains(i.key) { o.append(i.key) } }
+            else if !o.contains(k) { o.append(k) }
+        }
         for i in Self.legendItems where !o.contains(i.key) { o.append(i.key) }
         return o.filter { k in Self.legendItems.contains { $0.key == k } }
     }
@@ -1407,7 +1420,7 @@ extension LWChartData {
         if let k = steepZPR.keys.max(), let z = steepZPR[k] { parts.append(String(format: "Z_PRANK %.1f", z)) }
         if let v = dprank.last?.value { parts.append(String(format: "DEAL_PRANK %.1f", v)) }
         if let day = dsmac.last?.time, !parts.isEmpty { d.dayLegend = "Day \(day): " + parts.joined(separator: " · ") }
-        d.mLegend = lastDict(mLegend); d.mDelsma = lastOf(mDelsma)
+        d.mLegend = lastDict(mLegend); d.mDelsma = lastOf(mDelsma); d.wDelsma = lastOf(wDelsma)
         d.period = "D"
         return d
     }
@@ -1430,9 +1443,10 @@ extension DeliverySeries {
 
 
 extension LWChartData {
-    /// M_ values for the daily chart: on every day, DELSMA / DELSMAC / Z / Z_PRANK / DEAL_PRANK as they were on the
-    /// last trading day of the previous month (the same as the M_ Filter columns) — legend + a dashed M_DELSMA step.
-    static func addMonthEnd(_ d: inout LWChartData, _ s: DeliverySeries, dsmac ds: [Double?]) {
+    /// M_ / W_ values for the daily chart: on every day, DELSMA / DELSMAC / Z / Z_PRANK / DEAL_PRANK as they were on
+    /// the last trading day of the previous month / week (the same as the M_ / W_ Filter columns) — one legend item
+    /// each (order them in Chart style) + dashed M_DELSMA / W_DELSMA steps.
+    static func addMonthEnd(_ d: inout LWChartData, _ s: DeliverySeries, dsmac ds: [Double?], month: Bool = true, week: Bool = false) {
         let n = s.days.count
         guard n > 0 else { return }
         // DELSMA per day = ta.percentrank(ta.sma(DELIV_QTY × CLOSE, 22 | 66), 300)
@@ -1451,20 +1465,32 @@ extension LWChartData {
         let zpr = Steep.zPRank(st.z)
         var dp: [String: Double] = [:]
         for p in d.dprank { if let v = p.value { dp[p.time] = v } }
-        var prevEnd = -1, month = ""
+        func values(_ j: Int, _ pre: String) -> [String: String] {
+            let tag = pre == "w" ? "W_" : "M_"
+            var out: [String: String] = [:]
+            if let v = delsma[j] { out[pre + ":DELSMA"] = String(format: "\(tag)DELSMA %.1f", v) }
+            if j < ds.count, let v = ds[j] { out[pre + ":DELSMAC"] = String(format: "\(tag)DELSMAC %.1f", v) }
+            if j < st.z.count, let z = st.z[j] { out[pre + ":Z"] = String(format: "\(tag)Z %.2f", z) }
+            if j < zpr.count, let v = zpr[j] { out[pre + ":Z_PRANK"] = String(format: "\(tag)Z_PRANK %.1f", v) }
+            if let v = dp[s.days[j]] { out[pre + ":DEAL_PRANK"] = String(format: "\(tag)DEAL_PRANK %.1f", v) }
+            return out
+        }
+        var prevM = -1, mo = "", prevW = -1, wk = ""
         for i in 0..<n {
-            let mo = String(s.days[i].prefix(7))
-            if mo != month { if !month.isEmpty { prevEnd = i - 1 }; month = mo }
-            guard prevEnd >= 0 else { continue }
-            let j = prevEnd
-            var parts: [String] = []
-            if let v = delsma[j] { parts.append(String(format: "M_DELSMA %.1f", v)) }
-            if j < ds.count, let v = ds[j] { parts.append(String(format: "M_DELSMAC %.1f", v)) }
-            if j < st.z.count, let z = st.z[j] { parts.append(String(format: "M_Z %.2f", z)) }
-            if j < zpr.count, let v = zpr[j] { parts.append(String(format: "M_Z_PRANK %.1f", v)) }
-            if let v = dp[s.days[j]] { parts.append(String(format: "M_DEAL_PRANK %.1f", v)) }
-            if !parts.isEmpty { d.mLegend[s.days[i]] = parts.joined(separator: " · ") }
-            if let v = delsma[j] { d.mDelsma.append(Point(time: s.days[i], value: v)) }
+            let thisM = String(s.days[i].prefix(7))
+            if thisM != mo { if !mo.isEmpty { prevM = i - 1 }; mo = thisM }
+            let thisW = ScreenerViewModel.weekStart(s.days[i])
+            if thisW != wk { if !wk.isEmpty { prevW = i - 1 }; wk = thisW }
+            var parts: [String: String] = [:]
+            if month, prevM >= 0 {
+                parts.merge(values(prevM, "m")) { a, _ in a }
+                if let v = delsma[prevM] { d.mDelsma.append(Point(time: s.days[i], value: v)) }
+            }
+            if week, prevW >= 0 {
+                parts.merge(values(prevW, "w")) { a, _ in a }
+                if let v = delsma[prevW] { d.wDelsma.append(Point(time: s.days[i], value: v)) }
+            }
+            if !parts.isEmpty { d.mLegend[s.days[i]] = parts }
         }
     }
 }

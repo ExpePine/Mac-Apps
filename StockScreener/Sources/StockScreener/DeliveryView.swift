@@ -465,6 +465,7 @@ struct DeliveryMiniChart: View {
     @State private var periodTick = 0
     @AppStorage("deliv.addDeals") private var addDeals = false
     @AppStorage("deliv.showM") private var showM = true
+    @AppStorage("deliv.showW") private var showW = false
     let symbol: String
     @ObservedObject var lw: LWChartHolder
     var syncNote: String? = nil
@@ -541,6 +542,8 @@ struct DeliveryMiniChart: View {
                     layerToggle(.steep, L)
                     if L.contains(.steep) { steepMenu }
                 }
+                Toggle("W_", isOn: $showW).toggleStyle(.button).controlSize(.mini).fixedSize()
+                    .help("W_ values (last week-end) in the legend + dashed W_DELSMA line")
                 Toggle("M_", isOn: $showM).toggleStyle(.button).controlSize(.mini).fixedSize()
                     .help("M_ values: DELSMA, DELSMAC, Z, Z_PRANK, DEAL_PRANK as they were at the end of the last completed month — in the legend, plus M_DELSMA as a dashed orange step on the %rank scale (same as the M_ Filter columns)")
                 Divider().frame(height: 14)
@@ -696,6 +699,7 @@ struct DeliveryMiniChart: View {
         .onChange(of: vm.settings.chartLinkColumn) { _ in push() }
         .onChange(of: addDeals) { _ in push() }
         .onChange(of: showM) { _ in push() }
+        .onChange(of: showW) { _ in push() }
         .onChange(of: range) { _ in push() }
         .onChange(of: metricRaw) { _ in push() }
         .onChange(of: basis) { _ in push() }
