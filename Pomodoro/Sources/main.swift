@@ -265,9 +265,10 @@ final class ProgressBarView: NSView {
 // MARK: - Memory pressure
 //
 // Level: kern.memorystatus_vm_pressure_level (1 normal, 2 warning, 4 critical), the same
-// value the earlier mempressure.sh script read. Used %: 100 - kern.memorystatus_level,
-// which I believe is the "System-wide memory free percentage" that /usr/bin/memory_pressure
-// prints; if that sysctl can't be read, falls back to (active + wired + compressed) / RAM.
+// value the earlier mempressure.sh script read. Used %: (active + wired + compressed) / RAM,
+// roughly what Activity Monitor calls "Memory Used". On a CI runner this read 30% while
+// 100 - kern.memorystatus_level read only 9% (that one counts reclaimable cache as free),
+// so the latter is only a fallback.
 
 enum MemoryPressure {
     enum Level { case normal, warning, critical }
@@ -288,8 +289,9 @@ enum MemoryPressure {
 
     /// 0...100, or nil if neither source could be read.
     static var usedPercent: Int? {
+        if let v = vmStatsUsedPercent { return v }
         if let free = sysctlInt("kern.memorystatus_level"), (0...100).contains(free) { return 100 - free }
-        return vmStatsUsedPercent
+        return nil
     }
 
     static var vmStatsUsedPercent: Int? {
