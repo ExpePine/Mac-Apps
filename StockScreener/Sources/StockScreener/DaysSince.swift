@@ -53,8 +53,8 @@ struct DaysSinceRule: Codable, Equatable {
 
     /// The tag for a cell, or nil.
     func tag(column: String, symbol: String) -> (String, NSColor)? {
-        guard enabled, let n = result[column]?[symbol.uppercased()] else { return nil }
-        return n >= 0 ? ("\(n)d", .systemTeal) : ("\(-n)d ago", .tertiaryLabelColor)
+        guard enabled, let n = result[column]?[symbol.uppercased()], n >= 0 else { return nil }
+        return ("\(n)", NSColor(srgbRed: 1.0, green: 0.55, blue: 0.2, alpha: 1))     // amber-orange
     }
 
     /// Recount when the data day, the rules or the toggle changed (cheap no-op otherwise).
@@ -154,7 +154,7 @@ struct DaysSinceEditor: View {
                 Spacer()
                 if c.running { ProgressView().controlSize(.mini) }
             }
-            .help("A small tag in front of each value: how many trading days the condition has held (12d), or how long ago it last held (5d ago)")
+            .help("A small amber number after each value: how many trading days the condition has held (gaps allowed)")
             if rule.wrappedValue.on {
                 HStack(spacing: 6) {
                     Text(column).font(.caption.monospaced()).lineLimit(1)

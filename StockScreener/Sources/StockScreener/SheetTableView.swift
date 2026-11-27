@@ -663,12 +663,12 @@ final class SheetCellView: NSTableCellView {
         label.font = font
         if suffix != nil || prefix != nil {
             let a = NSMutableAttributedString()
-            if let prefix {
-                a.append(NSAttributedString(string: prefix.0 + "  ", attributes: [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 3.5, weight: .medium),
-                    .foregroundColor: prefix.1, .baselineOffset: 1]))
-            }
             a.append(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
+            if let prefix {        // small raised tag right after the value, e.g. 97.3¹²
+                a.append(NSAttributedString(string: " " + prefix.0, attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 3.5, weight: .semibold),
+                    .foregroundColor: prefix.1, .baselineOffset: 3]))
+            }
             if let suffix {
                 a.append(NSAttributedString(string: " (\(suffix.0))", attributes: [
                     .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 2, weight: .medium),
