@@ -1,0 +1,80 @@
+name: Pomodoro DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Pomodoro/**"
+      - ".github/workflows/pomodoro-dmg.yml"
+  pull_request:        # builds the DMG for review; no Release is published from a PR
+    paths:
+      - "Pomodoro/**"
+      - ".github/workflows/pomodoro-dmg.yml"
+  workflow_dispatch:   # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write      # needed to publish the Release with the DMG
+
+jobs:
+  build:
+    runs-on: macos-15-intel        # Intel, like a 2019 MacBook Pro
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: Pomodoro
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Build app and DMG
+        run: |
+          chmod +x scripts/build-dmg.sh
+          set -o pipefail
+          if ! ./scripts/build-dmg.sh "1.0.${{ github.run_number }}" "${{ github.run_number }}" 2>&1 | tee build.log; then
+            grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do echo "::error title=build::${line}"; done
+            exit 1
+          fi
+
+      # Reports whether the private Touch Bar calls used by the experimental
+      # Control Strip button exist on this macOS version (no Touch Bar needed).
+      - name: Self-test (private Touch Bar APIs present?)
+        run: |
+          dist/Pomodoro.app/Contents/MacOS/Pomodoro --selftest | tee selftest.log
+          while read -r l; do echo "::notice title=selftest::$l"; done < selftest.log
+
+      - name: Render Touch Bar preview
+        run: dist/Pomodoro.app/Contents/MacOS/Pomodoro --render-preview dist/touchbar-preview.png
+
+      - name: Upload Touch Bar preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pomodoro-touchbar-preview
+          path: Pomodoro/dist/touchbar-preview.png
+
+      - name: Launch smoke test (app stays up for 10 s)
+        run: |
+          dist/Pomodoro.app/Contents/MacOS/Pomodoro > run.log 2>&1 &
+          PID=$!
+          sleep 10
+          if kill -0 $PID 2>/dev/null; then echo "App still running after 10 s"; kill $PID; else cat run.log; echo "::error title=smoke::App exited early"; exit 1; fi
+
+      - name: Upload DMG (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pomodoro-dmg
+          path: Pomodoro/dist/Pomodoro.dmg
+
+      - name: Publish Release with DMG
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete pomodoro-latest --yes --cleanup-tag || true
+          gh release create pomodoro-latest dist/Pomodoro.dmg \
+            --title "Pomodoro (latest, build ${{ github.run_number }})" \
+            --notes "Touch Bar Pomodoro timer. Universal (Apple Silicon + Intel), macOS 10.15 or later. Drag Pomodoro to Applications, then System Settings > Privacy & Security > Open Anyway on first launch." \
+            --latest=false
