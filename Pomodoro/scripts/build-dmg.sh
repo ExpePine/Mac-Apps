@@ -17,8 +17,8 @@ APP="$DIST/Pomodoro.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 echo "==> Compiling (release, universal)"
-swiftc -O -target arm64-apple-macos11.0   Sources/main.swift -o "$DIST/obj/Pomodoro-arm64"
-swiftc -O -target x86_64-apple-macos10.15 Sources/main.swift -o "$DIST/obj/Pomodoro-x86_64"
+swiftc -O -target arm64-apple-macos11.0   Sources/*.swift -o "$DIST/obj/Pomodoro-arm64"
+swiftc -O -target x86_64-apple-macos10.15 Sources/*.swift -o "$DIST/obj/Pomodoro-x86_64"
 lipo -create "$DIST/obj/Pomodoro-arm64" "$DIST/obj/Pomodoro-x86_64" -output "$APP/Contents/MacOS/Pomodoro"
 rm -rf "$DIST/obj"
 

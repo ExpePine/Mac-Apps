@@ -434,6 +434,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         // Don't start with the cursor in the task box: while a text field is being edited,
         // macOS shows typing suggestions on the Touch Bar instead of the app's own items.
         if CurrentTask.text.isEmpty { window.makeFirstResponder(taskField) } else { window.makeFirstResponder(nil) }
+
+        startFocusTracker()   // Focus.swift: daily goals, hourly focus split, website tracking (macOS 13+)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
@@ -444,6 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
 
     func applicationWillTerminate(_ note: Notification) {
         if let item = trayItem { PrivateTouchBar.removeFromControlStrip(item) }
+        stopFocusTracker()
     }
 
     // MARK: Touch Bar: [ ✎ ] [ ███████ task ........ 12:34 ] [ ↺ ] [ ⏭ ]
@@ -657,6 +660,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
                                      action: #selector(toggleControlStrip), keyEquivalent: "")
         stripMenuItem.target = self
         menu.addItem(withTitle: "Show Window", action: #selector(showWindow), keyEquivalent: "").target = self
+        addFocusMenuItems(to: menu)   // Focus.swift
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Pomodoro", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -724,6 +728,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--render-preview"), i + 1 < Com
     rep.size = canvas.bounds.size
     canvas.cacheDisplay(in: canvas.bounds, to: rep)
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+    exit(0)
+}
+
+// `Pomodoro --render-focus-preview out.png` draws the focus tracker windows with sample data (CI).
+if let i = CommandLine.arguments.firstIndex(of: "--render-focus-preview"), i + 1 < CommandLine.arguments.count {
+    _ = NSApplication.shared
+    renderFocusPreview(to: CommandLine.arguments[i + 1])
     exit(0)
 }
 

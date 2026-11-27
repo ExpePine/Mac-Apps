@@ -12,5 +12,6 @@
     <key>LSMinimumSystemVersion</key>  <string>10.15</string>
     <key>NSPrincipalClass</key>        <string>NSApplication</string>
     <key>NSHighResolutionCapable</key> <true/>
+    <key>NSAppleEventsUsageDescription</key> <string>Pomodoro reads the website in your browser's front tab to track which sites you visit and for how long. Only domain names are stored, on this Mac.</string>
 </dict>
 </plist>
