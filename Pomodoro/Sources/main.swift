@@ -293,10 +293,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         pomodoro.onChange = { [weak self] in self?.refresh() }
         pomodoro.onPhaseEnd = { [weak self] ended in self?.phaseEnded(ended) }
 
-        if defaults.bool(forKey: "controlStrip") { setControlStrip(true) }
+        // On by default: the 🍅 Control Strip button is the only way to see the bar while
+        // another app is in front. Turn off from the menu bar if it misbehaves.
+        defaults.register(defaults: ["controlStrip": true])
+        if defaults.bool(forKey: "controlStrip") { setControlStrip(true, quiet: true) }
         refresh()
         NSApp.activate(ignoringOtherApps: true)
-        if CurrentTask.text.isEmpty { window.makeFirstResponder(taskField) }
+        // Don't start with the cursor in the task box: while a text field is being edited,
+        // macOS shows typing suggestions on the Touch Bar instead of the app's own items.
+        if CurrentTask.text.isEmpty { window.makeFirstResponder(taskField) } else { window.makeFirstResponder(nil) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
@@ -343,15 +348,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
 
     // MARK: Control Strip (experimental)
 
-    func setControlStrip(_ on: Bool) {
+    func setControlStrip(_ on: Bool, quiet: Bool = false) {
         if on {
             guard PrivateTouchBar.isAvailable else {
+                defaults.set(false, forKey: "controlStrip")
+                stripMenuItem.state = .off
+                if quiet { return }
                 let a = NSAlert()
                 a.messageText = "Control Strip button isn't available"
                 a.informativeText = "This macOS version doesn't expose the private Touch Bar calls this feature relies on. The timer still works in the app and the menu bar."
                 a.runModal()
-                defaults.set(false, forKey: "controlStrip")
-                stripMenuItem.state = .off
                 return
             }
             if trayItem == nil {
@@ -370,7 +376,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         refresh()
     }
 
+    /// Shows the timer on the Touch Bar over whatever app is in front (private API).
     @objc func showModalBar() {
+        guard PrivateTouchBar.isAvailable else { showWindow(); return }
+        if trayItem == nil || !defaults.bool(forKey: "controlStrip") { setControlStrip(true, quiet: true) }
         if modalBar == nil { modalBar = makeTimerTouchBar() }
         PrivateTouchBar.presentModal(modalBar!, trayIdentifier: .tray)
     }
@@ -379,7 +388,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
 
     // MARK: Actions
 
-    @objc func toggle() { pomodoro.toggle() }
+    @objc func toggle() {
+        window.makeFirstResponder(nil)   // Return in the task box starts the timer and leaves the box
+        pomodoro.toggle()
+        // Starting from the menu bar: put the bar on the Touch Bar even if another app is in front.
+        if pomodoro.running && !NSApp.isActive && defaults.bool(forKey: "controlStrip") { showModalBar() }
+    }
     @objc func reset()  { pomodoro.reset() }
     @objc func skip()   { pomodoro.skip() }
 
@@ -398,6 +412,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
     func controlTextDidEndEditing(_ note: Notification) {
         CurrentTask.text = taskField.stringValue
         refresh()
+        // Leave the text box so the Touch Bar switches back from typing suggestions to the timer.
+        DispatchQueue.main.async { self.window.makeFirstResponder(nil) }
     }
 
     func phaseEnded(_ ended: Phase) {
@@ -478,11 +494,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         let menu = NSMenu()
         menu.addItem(withTitle: "Start / Pause", action: #selector(toggle), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Show on Touch Bar", action: #selector(showModalBar), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Set Task…", action: #selector(editTask), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Reset", action: #selector(reset), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Skip", action: #selector(skip), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        stripMenuItem = menu.addItem(withTitle: "Button in Control Strip (experimental)",
+        stripMenuItem = menu.addItem(withTitle: "🍅 Button in Control Strip",
                                      action: #selector(toggleControlStrip), keyEquivalent: "")
         stripMenuItem.target = self
         menu.addItem(withTitle: "Show Window", action: #selector(showWindow), keyEquivalent: "").target = self

@@ -9,19 +9,20 @@ A small native macOS app (Swift + AppKit, one source file). GitHub Actions build
 - **Menu bar:** `🍅 12:34 · Write the report`, always visible, with Start/Pause, Set Task, Reset, Skip and Quit.
 - **Cycle:** 25 min focus, 5 min break, a 15 min break after every 4th focus. Plays the "Glass" sound and bounces the Dock icon when a phase ends.
 
-## The catch: Touch Bar visibility
+## Seeing it on the Touch Bar
 
-With Apple's public API (`NSTouchBar`), an app's Touch Bar controls only appear **while that app is frontmost**. Switch to Safari and the Touch Bar shows Safari's controls. The menu bar countdown covers you the rest of the time.
+1. **Touch Bar setting:** System Settings → Keyboard → Touch Bar Settings (older macOS: System Preferences → Keyboard) → *Touch Bar shows* must be **App Controls** (with or without the Control Strip). If it's set to F-keys, Expanded Control Strip or Quick Actions, no app can show anything there.
+2. **Pomodoro in front:** with Apple's public API, the bar shows only while the Pomodoro window is the active window. Click the window once.
+3. **Not while typing:** while the cursor is in the task box, macOS shows typing suggestions instead. Press Return (this also starts the timer) and the bar comes back.
+4. **From any other app:** a 🍅 button is added to the Control Strip (right end of the Touch Bar). Tap it, or choose *Show on Touch Bar* in the menu bar, and the timer bar appears over whatever app you're using. Starting the timer from the menu bar also shows it. This uses **private, undocumented Apple APIs** (`+[NSTouchBarItem addSystemTrayItem:]`, `+[NSTouchBar presentSystemModalTouchBar:systemTrayItemIdentifier:]`, `DFRElementSetControlStripPresenceForIdentifier`), the same ones tools like MTMR and Pock use. CI confirmed they exist on macOS 15.7, but not that they behave the same on every version. Turn the button off in the menu bar if it misbehaves.
 
-**Experimental option:** menu bar icon → *Button in Control Strip (experimental)*. This puts a 🍅 button in the Control Strip (right side of the Touch Bar) that works from any app; tapping it opens the timer controls. It relies on **private, undocumented Apple APIs** (`+[NSTouchBarItem addSystemTrayItem:]`, `+[NSTouchBar presentSystemModalTouchBar:systemTrayItemIdentifier:]`, `DFRElementSetControlStripPresenceForIdentifier` in DFRFoundation). I know of them from how open-source tools such as MTMR and Pock work, but I could not confirm the exact signatures still hold on your macOS version. The app checks they exist before calling them, and shows a message if they don't. If they exist but behave differently, the worst case I'd expect is the button not appearing, or the app crashing when you turn it on. Turn it off again or run `defaults write local.pomodoro controlStrip -bool false`.
+`Pomodoro.app/Contents/MacOS/Pomodoro --selftest` (in Terminal) prints whether those private calls exist on your Mac.
 
 ## Get the .dmg
 
 Download `Pomodoro.dmg` from the **pomodoro-latest** release, open it and drag **Pomodoro** into **Applications**.
 
 To build it yourself on a Mac with the Xcode Command Line Tools: `Pomodoro/scripts/build-dmg.sh`, which writes `Pomodoro/dist/Pomodoro.dmg`.
-
-`Pomodoro --selftest` prints whether the private Touch Bar calls used by the Control Strip option exist on that Mac.
 
 ## Gatekeeper ("can't be opened" / "unidentified developer")
 
