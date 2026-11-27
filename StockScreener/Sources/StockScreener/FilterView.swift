@@ -341,7 +341,8 @@ struct FilterView: View {
             }
             Text("\(vm.filterColumnIndices.count) columns")
             Text("\(vm.settings.filterGroup.activeCount) conditions")
-            Spacer()
+            Divider().frame(height: 12)
+            ActivityStrip().frame(maxWidth: .infinity, alignment: .leading).layoutPriority(-1)
             Text("Sorted by \(vm.settings.filterSortColumn) \(vm.settings.filterSortDescending ? "▼" : "▲") · click a header to change")
         }
         .font(.caption)
