@@ -262,6 +262,118 @@ final class ProgressBarView: NSView {
     }
 }
 
+// MARK: - Memory pressure
+//
+// Level: kern.memorystatus_vm_pressure_level (1 normal, 2 warning, 4 critical), the same
+// value the earlier mempressure.sh script read. Used %: 100 - kern.memorystatus_level,
+// which I believe is the "System-wide memory free percentage" that /usr/bin/memory_pressure
+// prints; if that sysctl can't be read, falls back to (active + wired + compressed) / RAM.
+
+enum MemoryPressure {
+    enum Level { case normal, warning, critical }
+
+    static func sysctlInt(_ name: String) -> Int? {
+        var v: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname(name, &v, &size, nil, 0) == 0 ? Int(v) : nil
+    }
+
+    static var level: Level {
+        switch sysctlInt("kern.memorystatus_vm_pressure_level") ?? 1 {
+        case 4: return .critical
+        case 2: return .warning
+        default: return .normal
+        }
+    }
+
+    /// 0...100, or nil if neither source could be read.
+    static var usedPercent: Int? {
+        if let free = sysctlInt("kern.memorystatus_level"), (0...100).contains(free) { return 100 - free }
+        return vmStatsUsedPercent
+    }
+
+    static var vmStatsUsedPercent: Int? {
+        var stats = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS, let page = sysctlInt("hw.pagesize") else { return nil }
+        let used = (UInt64(stats.active_count) + UInt64(stats.wire_count) + UInt64(stats.compressor_page_count)) * UInt64(page)
+        let total = ProcessInfo.processInfo.physicalMemory
+        guard total > 0 else { return nil }
+        return Int(min(100, used * 100 / total))
+    }
+
+    static func report() -> String {
+        "SELFTEST memory: pressure level sysctl=\(sysctlInt("kern.memorystatus_vm_pressure_level").map(String.init) ?? "unreadable")"
+            + ", memorystatus_level (free %)=\(sysctlInt("kern.memorystatus_level").map(String.init) ?? "unreadable")"
+            + ", vm_stats used %=\(vmStatsUsedPercent.map(String.init) ?? "unreadable")"
+    }
+}
+
+/// A small ring: the arc fills with memory used, colored by macOS's pressure level.
+final class MemoryRingView: NSView {
+    var used: Int? { didSet { if used != oldValue { needsDisplay = true } } }
+    var level: MemoryPressure.Level = .normal { didSet { if level != oldValue { needsDisplay = true } } }
+    var onTap: (() -> Void)?
+
+    init(size: CGFloat) {
+        super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: size).isActive = true
+        heightAnchor.constraint(equalToConstant: size).isActive = true
+        let tap = NSClickGestureRecognizer(target: self, action: #selector(tapped))
+        tap.allowedTouchTypes = [.direct]
+        addGestureRecognizer(tap)
+        toolTip = "Memory pressure"
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func tapped() { onTap?() }
+
+    var color: NSColor {
+        switch level {
+        case .normal: return .systemGreen
+        case .warning: return .systemYellow
+        case .critical: return .systemRed
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let line: CGFloat = 3.5
+        let r = bounds.insetBy(dx: line / 2 + 1, dy: line / 2 + 1)
+        let c = NSPoint(x: r.midX, y: r.midY), radius = min(r.width, r.height) / 2
+
+        let track = NSBezierPath()
+        track.appendArc(withCenter: c, radius: radius, startAngle: 0, endAngle: 360)
+        track.lineWidth = line
+        NSColor(white: 0.3, alpha: 1).setStroke()
+        track.stroke()
+
+        if let used = used, used > 0 {
+            let arc = NSBezierPath()
+            // clockwise from 12 o'clock
+            arc.appendArc(withCenter: c, radius: radius, startAngle: 90,
+                          endAngle: 90 - 360 * CGFloat(used) / 100, clockwise: true)
+            arc.lineWidth = line
+            arc.lineCapStyle = .round
+            color.setStroke()
+            arc.stroke()
+        }
+
+        let text = NSAttributedString(string: used.map { "\($0)" } ?? "?", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: bounds.height * 0.34, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+        let ts = text.size()
+        text.draw(at: NSPoint(x: c.x - ts.width / 2, y: c.y - ts.height / 2))
+    }
+}
+
 // MARK: - App
 
 extension NSTouchBarItem.Identifier {
@@ -270,6 +382,7 @@ extension NSTouchBarItem.Identifier {
     static let reset = NSTouchBarItem.Identifier("local.pomodoro.reset")
     static let skip  = NSTouchBarItem.Identifier("local.pomodoro.skip")
     static let tray  = NSTouchBarItem.Identifier("local.pomodoro.tray")
+    static let memory = NSTouchBarItem.Identifier("local.pomodoro.memory")
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSTextFieldDelegate {
@@ -280,7 +393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
     var statusItem: NSStatusItem!
     var stripMenuItem: NSMenuItem!
 
-    var bars: [ProgressBarView] = []       // every progress bar on screen (Touch Bars + window)
+    var bars: [ProgressBarView] = []
+    var rings: [MemoryRingView] = []
+    var memoryTimer: Timer?       // every progress bar on screen (Touch Bars + window)
     var modalBar: NSTouchBar?
     var trayItem: NSCustomTouchBarItem?
     var trayButton: NSButton?
@@ -298,6 +413,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         defaults.register(defaults: ["controlStrip": true])
         if defaults.bool(forKey: "controlStrip") { setControlStrip(true, quiet: true) }
         refresh()
+
+        let mt = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.refreshMemory() }
+        RunLoop.main.add(mt, forMode: .common)
+        memoryTimer = mt
+
+        // Whenever the window stops being the one in front (minimized, hidden, or you switch
+        // apps), put the timer on the Touch Bar system-wide so it stays visible.
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.keepOnTouchBar()
+        }
+        nc.addObserver(forName: NSWindow.didMiniaturizeNotification, object: window, queue: .main) { [weak self] _ in
+            self?.keepOnTouchBar()
+        }
+
         NSApp.activate(ignoringOtherApps: true)
         // Don't start with the cursor in the task box: while a text field is being edited,
         // macOS shows typing suggestions on the Touch Bar instead of the app's own items.
@@ -319,7 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
     func makeTimerTouchBar() -> NSTouchBar {
         let bar = NSTouchBar()
         bar.delegate = self
-        bar.defaultItemIdentifiers = [.task, .bar, .reset, .skip]
+        bar.defaultItemIdentifiers = [.task, .bar, .memory, .reset, .skip]
         return bar
     }
 
@@ -329,7 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         case .bar:
             let v = ProgressBarView(fontSize: 14)
             v.onTap = { [weak self] in self?.pomodoro.toggle() }
-            v.widthAnchor.constraint(equalToConstant: 480).isActive = true
+            v.widthAnchor.constraint(equalToConstant: 430).isActive = true
             v.heightAnchor.constraint(equalToConstant: 30).isActive = true
             bars.append(v)
             item.view = v
@@ -338,6 +468,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
             item.view = NSButton(title: "✎", target: self, action: #selector(editTask))
         case .reset:
             item.view = NSButton(title: "↺", target: self, action: #selector(reset))
+        case .memory:
+            let ring = MemoryRingView(size: 30)
+            ring.onTap = { Self.openActivityMonitor() }
+            rings.append(ring)
+            item.view = ring
+            refreshMemory()
         case .skip:
             item.view = NSButton(title: "⏭", target: self, action: #selector(skip))
         default:
@@ -382,6 +518,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
         if trayItem == nil || !defaults.bool(forKey: "controlStrip") { setControlStrip(true, quiet: true) }
         if modalBar == nil { modalBar = makeTimerTouchBar() }
         PrivateTouchBar.presentModal(modalBar!, trayIdentifier: .tray)
+    }
+
+    func keepOnTouchBar() {
+        guard defaults.bool(forKey: "controlStrip"), defaults.object(forKey: "keepOnTouchBar") == nil || defaults.bool(forKey: "keepOnTouchBar") else { return }
+        showModalBar()
+    }
+
+    static func openActivityMonitor() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ActivityMonitor") {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
+        }
+    }
+
+    func refreshMemory() {
+        let used = MemoryPressure.usedPercent, level = MemoryPressure.level
+        for r in rings { r.used = used; r.level = level }
     }
 
     @objc func toggleControlStrip() { setControlStrip(stripMenuItem.state != .on) }
@@ -536,6 +688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NS
 // `Pomodoro --selftest` prints which private Touch Bar calls exist on this Mac and exits.
 if CommandLine.arguments.contains("--selftest") {
     print(PrivateTouchBar.report())
+    print(MemoryPressure.report())
     exit(0)
 }
 
@@ -547,8 +700,8 @@ if let i = CommandLine.arguments.firstIndex(of: "--render-preview"), i + 1 < Com
         ("🍅 Write the quarterly report", 0.42, "14:30", .systemRed, true),
         ("☕️ Short break · next: Write the quarterly report", 0.7, "01:30", .systemGreen, false),
     ]
-    let row: CGFloat = 30, gap: CGFloat = 10, width: CGFloat = 480
-    let canvas = NSView(frame: NSRect(x: 0, y: 0, width: width + 2 * gap,
+    let row: CGFloat = 30, gap: CGFloat = 10, width: CGFloat = 430
+    let canvas = NSView(frame: NSRect(x: 0, y: 0, width: width + row + 3 * gap,
                                       height: CGFloat(samples.count) * (row + gap) + gap))
     canvas.wantsLayer = true
     canvas.layer?.backgroundColor = NSColor.black.cgColor
@@ -558,6 +711,12 @@ if let i = CommandLine.arguments.firstIndex(of: "--render-preview"), i + 1 < Com
         v.frame = NSRect(x: gap, y: canvas.bounds.height - CGFloat(n + 1) * (row + gap), width: width, height: row)
         v.title = s.0; v.progress = s.1; v.timeText = s.2; v.fillColor = s.3; v.paused = s.4
         canvas.addSubview(v)
+        let ring = MemoryRingView(size: row)
+        ring.translatesAutoresizingMaskIntoConstraints = true
+        ring.frame = NSRect(x: gap * 2 + width, y: v.frame.minY, width: row, height: row)
+        ring.used = [41, 68, 92][n]
+        ring.level = [.normal, .warning, .critical][n]
+        canvas.addSubview(ring)
     }
     let rep = canvas.bitmapImageRepForCachingDisplay(in: canvas.bounds)!
     rep.size = canvas.bounds.size
