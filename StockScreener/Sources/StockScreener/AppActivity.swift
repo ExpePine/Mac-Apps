@@ -106,6 +106,7 @@ import Combine
         let tl = TimingLabCenter.shared
         watch("Timing lab", tl.$busy.combineLatest(tl.$progress).map { on, p -> String? in on ? count(p) : nil })
         notes("Timing lab", tl.$status)
+        watch("Days since", DaysSinceCenter.shared.$running.map { on -> String? in on ? "counting…" : nil })
         let ap = AutoPredictCenter.shared
         watch("Auto predict", ap.$running.map { on -> String? in on ? "working…" : nil })
         notes("Auto predict", ap.$status)

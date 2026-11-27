@@ -19,6 +19,7 @@ struct GainersView: View {
     @State private var chooserDefault: [String] = []
     @State private var version = 0
     @ObservedObject private var live = LiveQuotes.shared
+    @ObservedObject private var daysSince = DaysSinceCenter.shared
     @AppStorage("live.enabled") private var liveOn = true
     @AppStorage("live.interval") private var liveInterval = 60.0
     @AppStorage(GainerPeriod.key) private var periodRaw = GainerPeriod.daily.rawValue
@@ -246,6 +247,7 @@ struct GainersView: View {
         }
         HStack(spacing: 10) {
             Toggle("Filter columns & colours", isOn: $vm.settings.gainersShowFilterColumns).toggleStyle(.switch).controlSize(.small).fixedSize()
+            DaysSinceToggle().toggleStyle(.switch).controlSize(.small).fixedSize()
                 .help("Show the Filter screen's columns next to each gainer, painted with your cell colours")
             Toggle("Only my Filter list", isOn: $vm.settings.gainersOnlyFilterList).toggleStyle(.switch).controlSize(.small).fixedSize()
                 .help("Only gainers that also pass the Filter screen's conditions")
@@ -411,6 +413,10 @@ struct GainersView: View {
                            onDoubleClickRow: { row in vm.openChart(vm.rowKey(row), queue: rows.map { vm.rowKey($0) }, goTo: vm.currentGainerDay, context: .gainers, openWindow: openWindow) },
                            onHoverChart: ChartPeek.enabled ? { row, chart in ChartPeek.shared.show(vm.rowKey(row), chart: chart, vm: vm) } : nil,
                            chartDotsAfter: vm.labelIndex,
+                           cellTag: daysSince.enabled ? { row, i in
+                               daysSince.tag(column: derived.headers[i], symbol: vm.rowKey(row))
+                           } : nil,
+                           tagVersion: daysSince.version &+ (daysSince.enabled ? 1 : 0),
                            columnMenu: { i in
                                AnyView(GainerColumnMenu(name: derived.headers[i], sample: derived.rows.map { $0.number(i) },
                                                         sortColumn: $sortColumn, sortDescending: $sortDescending, column: i)
@@ -583,6 +589,7 @@ struct GainerColumnMenu: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(name).font(.headline)
+            if isNumeric { DaysSinceEditor(column: name); Divider() }
             HStack {
                 Button { sortColumn = column; sortDescending = false } label: { Label("Sort ascending", systemImage: "arrow.up") }
                 Button { sortColumn = column; sortDescending = true } label: { Label("Sort descending", systemImage: "arrow.down") }

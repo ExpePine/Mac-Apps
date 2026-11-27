@@ -12,6 +12,7 @@ struct FilterView: View {
     @State private var flashedDay: String?
     @StateObject private var finder = TableFinder()
     @AppStorage("filter.dayChange") private var showDayChange = true
+    @ObservedObject private var daysSince = DaysSinceCenter.shared
     @ObservedObject private var live = LiveQuotes.shared
     @State private var dayChange: [Int: (Double, Bool)] = [:]       // row id → (% change today, from Yahoo?)
     @State private var dayChangeDay = ""
@@ -95,6 +96,10 @@ struct FilterView: View {
                                        return (String(format: "%+.1f%%", c) + (yahoo ? "" : "ˢ"), color)
                                    } : nil,
                                    suffixVersion: dayChangeVersion &+ (showDayChange ? 1 : 0),
+                                   cellTag: daysSince.enabled ? { row, i in
+                                       daysSince.tag(column: vm.headers[i], symbol: vm.rowKey(row))
+                                   } : nil,
+                                   tagVersion: daysSince.version &+ (daysSince.enabled ? 1 : 0),
                                    columnMenu: { index in
                                        AnyView(ColumnMenuView(column: index).environmentObject(vm))
                                    },
@@ -229,6 +234,7 @@ struct FilterView: View {
                 if let first = vm.filterSelection.first { EarningsSummaryButton(symbol: vm.rowKey(first), compact: false) }
                 Button { openWindow(id: "fdays") } label: { Label("F counts", systemImage: "chart.bar.doc.horizontal") }
                     .help("How many stocks meet each F formula (notes, F alerts, F combinations), day by day")
+                DaysSinceToggle()
                 Toggle(isOn: $showCondCounts) { Label("✓ counts", systemImage: "number") }
                     .help("Show in each column header how many of all stocks meet that column's Filter condition(s) alone (✓123)")
                 ScraperHealthBadge()

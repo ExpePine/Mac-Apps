@@ -30,6 +30,9 @@ struct SheetTableView: NSViewRepresentable {
     /// Small coloured text after the symbol, e.g. "(+3.2%)" — shown in the `chartDotsAfter` (symbol) column.
     var labelSuffix: ((SheetRow) -> (String, NSColor)?)? = nil
     var suffixVersion = 0
+    /// Small coloured tag in front of a cell's value (e.g. Days since "12d"), by row and column.
+    var cellTag: ((SheetRow, Int) -> (String, NSColor)?)? = nil
+    var tagVersion = 0
     /// Previous day's text when this cell's value changed since then (cell gets a shaded border), else nil.
     var changedCell: ((SheetRow, Int) -> String?)? = nil
     var changedVersion = 0
@@ -183,9 +186,9 @@ struct SheetTableView: NSViewRepresentable {
 
         let flashToken = flash?.token ?? 0
         let findKey = findQuery + "|\(findCurrent?.row ?? -1),\(findCurrent?.column ?? -1)"
-        if version &+ changedVersion &* 7919 &+ suffixVersion &* 104729 != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
+        if version &+ changedVersion &* 7919 &+ suffixVersion &* 104729 &+ tagVersion &* 15485863 != c.renderedVersion || rows.count != right.numberOfRows || flashToken != c.flashToken || findKey != c.findKey {
             c.flashToken = flashToken
-            c.renderedVersion = version &+ changedVersion &* 7919 &+ suffixVersion &* 104729
+            c.renderedVersion = version &+ changedVersion &* 7919 &+ suffixVersion &* 104729 &+ tagVersion &* 15485863
             c.findKey = findKey
             left.reloadData()
             right.reloadData()
@@ -507,7 +510,8 @@ struct SheetTableView: NSViewRepresentable {
                            alignRight: isNumber,
                            bold: index == parent.emphasizedColumn || tableView === leftTable,
                            background: parent.painter?.color(for: data, column: index),
-                           suffix: index == (parent.chartDotsAfter ?? 0) ? parent.labelSuffix?(data) : nil)
+                           suffix: index == (parent.chartDotsAfter ?? 0) ? parent.labelSuffix?(data) : nil,
+                           prefix: parent.cellTag?(data, index))
             cell.setChanged(parent.changedCell?(data, index))
             let q = parent.findQuery
             if !q.isEmpty, text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
@@ -652,15 +656,24 @@ final class SheetCellView: NSTableCellView {
         changeLayer?.frame = bounds.insetBy(dx: 1, dy: 1)
     }
 
-    func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?, suffix: (String, NSColor)? = nil) {
+    func configure(text: String, alignRight: Bool, bold: Bool, background: NSColor?, suffix: (String, NSColor)? = nil,
+                   prefix: (String, NSColor)? = nil) {
         let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: bold ? .semibold : .regular)
         label.alignment = alignRight ? .right : .left
         label.font = font
-        if let suffix {
-            let a = NSMutableAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.labelColor])
-            a.append(NSAttributedString(string: " (\(suffix.0))", attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 2, weight: .medium),
-                .foregroundColor: suffix.1]))
+        if suffix != nil || prefix != nil {
+            let a = NSMutableAttributedString()
+            if let prefix {
+                a.append(NSAttributedString(string: prefix.0 + "  ", attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 3.5, weight: .medium),
+                    .foregroundColor: prefix.1, .baselineOffset: 1]))
+            }
+            a.append(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
+            if let suffix {
+                a.append(NSAttributedString(string: " (\(suffix.0))", attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 2, weight: .medium),
+                    .foregroundColor: suffix.1]))
+            }
             label.attributedStringValue = a
         } else {
             label.stringValue = text

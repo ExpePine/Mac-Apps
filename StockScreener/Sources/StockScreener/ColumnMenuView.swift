@@ -49,6 +49,8 @@ struct ColumnMenuView: View {
             }
             .controlSize(.small)
 
+            DaysSinceEditor(column: name)
+
             if ["REV_YOY", "PAT_YOY", "REV_QOQ", "PAT_QOQ", "EARNINGS"].contains(where: { name.hasPrefix($0) }) {
                 GrowthDaysPicker(compact: true)
             }
