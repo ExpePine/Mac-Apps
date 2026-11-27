@@ -39,6 +39,7 @@ struct DaysSinceRule: Codable, Equatable {
     @Published private(set) var result: [String: [String: Int]] = [:]
     @Published private(set) var version = 0
     @Published private(set) var running = false
+    @Published private(set) var progress = ""
 
     static let lookBack = 250
     private var task: Task<Void, Never>?
@@ -77,7 +78,7 @@ struct DaysSinceRule: Codable, Equatable {
                 result[col] = out[col]; version &+= 1
             }
             if !Task.isCancelled { result = out; version &+= 1 }
-            running = false
+            running = false; progress = ""
         }
     }
 
@@ -116,11 +117,20 @@ struct DaysSinceRule: Codable, Equatable {
                 if !s.done { open += 1 }
             }
             if k > 0 && open == 0 { break }
-            if k % 5 == 0 { await Task.yield() }
+            progress = "\(col) \(k)/\(days.count - 1)"
+            // show what's known so far (runs still growing show their length up to here) — the walk can take a while
+            if k % 5 == 0 {
+                result[col] = Self.answers(st.mapValues { ($0.trueNow, $0.lastTrue) }); version &+= 1
+                await Task.yield()
+            }
         }
+        return Self.answers(st.mapValues { ($0.trueNow, $0.lastTrue) })
+    }
+
+    private static func answers(_ st: [String: (Bool, Int)]) -> [String: Int] {
         var out: [String: Int] = [:]
         for (sym, s) in st {
-            if s.trueNow { out[sym] = s.lastTrue } else if s.lastTrue > 0 { out[sym] = -s.lastTrue }
+            if s.0 { out[sym] = s.1 } else if s.1 > 0 { out[sym] = -s.1 }
         }
         return out
     }
@@ -175,7 +185,7 @@ struct DaysSinceToggle: View {
 
     var body: some View {
         Toggle(isOn: Binding(get: { c.enabled }, set: { c.enabled = $0; if $0 { c.refresh(vm, force: true) } })) {
-            Label("Days since", systemImage: "calendar.badge.clock")
+            Label(c.running && !c.progress.isEmpty ? "Days since · \(c.progress)" : "Days since", systemImage: "calendar.badge.clock")
         }
         .help(c.activeRules.isEmpty
               ? "Days since: set a condition on a column first (its header ▼ → Days since)"
