@@ -881,13 +881,16 @@ var focusCenterRef: AnyObject?
 extension AppDelegate {
     func startFocusTracker() {
         guard #available(macOS 13.0, *) else { return }
-        let center = FocusCenter()
-        focusCenterRef = center
-        center.start()
+        // AppKit calls these on the main thread; main.swift's AppDelegate isn't marked @MainActor.
+        MainActor.assumeIsolated {
+            let center = FocusCenter()
+            focusCenterRef = center
+            center.start()
+        }
     }
 
     func stopFocusTracker() {
-        if #available(macOS 13.0, *) { (focusCenterRef as? FocusCenter)?.stop() }
+        if #available(macOS 13.0, *) { MainActor.assumeIsolated { (focusCenterRef as? FocusCenter)?.stop() } }
     }
 
     func addFocusMenuItems(to menu: NSMenu) {
@@ -899,14 +902,14 @@ extension AppDelegate {
     }
 
     @objc func focusCheckIn() {
-        if #available(macOS 13.0, *) { (focusCenterRef as? FocusCenter)?.checkInNow() }
+        if #available(macOS 13.0, *) { MainActor.assumeIsolated { (focusCenterRef as? FocusCenter)?.checkInNow() } }
     }
 
     @objc func focusGoals() {
-        if #available(macOS 13.0, *) { (focusCenterRef as? FocusCenter)?.showGoals() }
+        if #available(macOS 13.0, *) { MainActor.assumeIsolated { (focusCenterRef as? FocusCenter)?.showGoals() } }
     }
 
     @objc func focusDashboard() {
-        if #available(macOS 13.0, *) { (focusCenterRef as? FocusCenter)?.showDashboard() }
+        if #available(macOS 13.0, *) { MainActor.assumeIsolated { (focusCenterRef as? FocusCenter)?.showDashboard() } }
     }
 }
