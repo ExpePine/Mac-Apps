@@ -55,6 +55,18 @@ jobs:
           name: Pomodoro-touchbar-preview
           path: Pomodoro/dist/touchbar-preview.png
 
+      - name: Render focus tracker preview
+        run: |
+          dist/Pomodoro.app/Contents/MacOS/Pomodoro --render-focus-preview dist/focus
+          # Also print the PNGs as base64 so they can be read from the log without downloading artifacts.
+          for f in dist/focus-*.png; do echo "BEGIN-PNG $f"; base64 -i "$f" | fold -w 4000; echo "END-PNG $f"; done
+
+      - name: Upload focus tracker preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pomodoro-focus-preview
+          path: Pomodoro/dist/focus-*.png
+
       - name: Launch smoke test (app stays up for 10 s)
         run: |
           dist/Pomodoro.app/Contents/MacOS/Pomodoro > run.log 2>&1 &
