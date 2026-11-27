@@ -10,6 +10,16 @@ A small native macOS app (Swift + AppKit, one source file). GitHub Actions build
 - **Menu bar:** `🍅 12:34 · Write the report`, always visible, with Start/Pause, Set Task, Reset, Skip and Quit.
 - **Cycle:** 25 min focus, 5 min break, a 15 min break after every 4th focus. Plays the "Glass" sound and bounces the Dock icon when a phase ends.
 
+## Focus & goal tracker (macOS 13+)
+
+- **Start of day:** asks for today's goal(s) and this month's goal(s). Menu bar → *Today's Goals…* to change them.
+- **Every hour:** "Where was my focus?" for the hour that just ended: five words, plus sliders that split the hour across your goals, daily responsibilities, *Time waste* and *Break / other* (must add up to 100%). Skipped automatically if you were away most of the hour. Menu bar → *Where was my focus?…* to answer now.
+- **Daily responsibilities** (e.g. LinkedIn post): add them in *Focus Dashboard…*; each gets its own row in the hourly split.
+- **Websites:** reads the front tab of Safari, Chrome, Brave, Edge, Arc, Vivaldi or Opera. The first visit to a site asks why and whether it's work; after that it's only counted. A not-work site visited 2+ times in a day (a "visit" = coming back after 3+ minutes away) shows a notification: "You've visited youtube.com 3 times today".
+- **Focus Dashboard:** goals vs actual time today, what you reported as time waste vs not-work browser time, hour by hour, responsibilities, websites (re-mark as work / not work), and on/off switches.
+- **Permissions:** Notifications, and Automation for each browser (System Settings → Privacy & Security → Automation → Pomodoro).
+- **Data:** only on this Mac, in `~/Library/Application Support/Pomodoro/` (`focus.json`, `Usage/`).
+
 ## Seeing it on the Touch Bar
 
 1. **Touch Bar setting:** System Settings → Keyboard → Touch Bar Settings (older macOS: System Preferences → Keyboard) → *Touch Bar shows* must be **App Controls** (with or without the Control Strip). If it's set to F-keys, Expanded Control Strip or Quick Actions, no app can show anything there.
@@ -48,6 +58,7 @@ Quit and reopen the app after changing them.
 
 ## Files
 
-- `Sources/main.swift`: the whole app.
+- `Sources/main.swift`: the timer and Touch Bar.
+- `Sources/Focus.swift`, `Sources/FocusViews.swift`: the focus & goal tracker.
 - `Info.plist`: the app bundle's metadata.
 - `scripts/build-dmg.sh`: compile (universal), ad-hoc sign, package into `dist/Pomodoro.dmg`.
